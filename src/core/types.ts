@@ -251,6 +251,8 @@ export const NO_RELATED: Related = {
   awsReleased: null,
   awsAccounts: null,
   githubPages: null,
+  githubOrgs: null,
+  githubRepos: null,
   unknown: [],
 };
 

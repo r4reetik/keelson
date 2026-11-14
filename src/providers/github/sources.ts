@@ -44,6 +44,8 @@ const DEFS = {
   deployKeys: { label: "Deploy keys", permission: REPO_ADMIN },
   repoHooks: { label: "Repository webhooks", permission: "Repository permissions → Webhooks: Read-only" },
   pages: { label: "GitHub Pages sites", permission: "Repository permissions → Pages: Read-only" },
+  dependabotSetup: { label: "Whether Dependabot alerts are on", permission: REPO_ADMIN },
+  codeScanningSetup: { label: "Whether code scanning has run", permission: "Repository permissions → Code scanning alerts: Read-only" },
   dependabot: {
     label: "Dependabot alerts",
     permission: "Repository permissions → Dependabot alerts: Read-only",

@@ -357,3 +357,41 @@ test("address ranges and start-up scripts", () => {
   assert.equal(secretInUserData(b64("#!/bin/bash\naws s3 cp s3://bucket/app . && TOKEN=$(aws ssm get-parameter --name t)\n")), null);
   assert.equal(secretInUserData(null), null);
 });
+
+test("roles GitHub Actions can assume are judged by the subjects their trust policy allows", () => {
+  const provider = "arn:aws:iam::111122223333:oidc-provider/token.actions.githubusercontent.com";
+  // Only the sub condition is kept, lowercase; the audience and negated operators don't narrow who gets in.
+  assert.deepEqual(
+    trustOf([
+      {
+        Effect: "Allow",
+        Principal: { Federated: provider },
+        Condition: {
+          StringEquals: { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com" },
+          StringLike: { "token.actions.githubusercontent.com:sub": ["repo:Example/App:ref:refs/heads/main", "repo:example/site:*"] },
+          StringNotLike: { "token.actions.githubusercontent.com:sub": "repo:example/legacy:*" },
+        },
+      },
+    ]),
+    [{ principal: provider, kind: "federated", conditional: true, github: ["repo:example/app:ref:refs/heads/main", "repo:example/site:*"] }],
+  );
+  assert.deepEqual(trustOf([{ Effect: "Allow", Principal: { Federated: provider } }])[0].github, [], "no condition: any repository");
+
+  const roleWith = (github: string[], admin = false) =>
+    awsInventory({ roles: [role({ name: "deploy", admin, trust: [{ principal: provider, kind: "federated", conditional: true, github }], profiles: [] })] });
+  const entity = (reviewed: boolean) => ({
+    related: { githubOrgs: ["example"], githubRepos: [{ repo: "example/app", defaultBranch: "main", reviewed }] },
+  });
+  const verdict = (github: string[], o: object, id: string) => by(run(roleWith(github), o), id).map((r) => r.pass);
+
+  assert.deepEqual(verdict(["repo:*"], {}, "AID-012"), [false], "any owner");
+  assert.deepEqual(verdict(["repo:example/app:*"], {}, "AID-012"), [true]);
+  assert.deepEqual(verdict(["repo:example/app:ref:refs/heads/main"], entity(true), "XP-011"), [true], "only the reviewed default branch");
+  assert.deepEqual(verdict(["repo:example/app:ref:refs/heads/main"], entity(false), "XP-011"), [false], "a default branch anyone with write can push to");
+  assert.deepEqual(verdict(["repo:example/*"], entity(true), "XP-011"), [false], "any branch, however the default one is protected");
+  assert.deepEqual(verdict(["repo:example/app:pull_request"], entity(true), "XP-011"), [false]);
+  assert.deepEqual(verdict(["repo:example/app:environment:production"], entity(false), "XP-011"), [], "an environment isn't judged without its rules");
+  assert.deepEqual(verdict(["repo:example/app:*"], {}, "XP-011"), [], "skipped without a GitHub organization in the entity");
+  assert.deepEqual(verdict(["repo:example/app:*", "repo:vendor/tool:*"], entity(true), "XP-010"), [false]);
+  assert.equal(by(run(roleWith(["repo:example/*"], true), entity(true)), "XP-011")[0].severity, "critical", "an administrator role");
+});

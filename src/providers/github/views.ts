@@ -35,10 +35,23 @@ export function repoRows(inv: GithubInventory, failures: Result[]): RepoRow[] {
   }));
 }
 
-/** The custom domains this organization's Pages sites serve, for Cloudflare's checks in the same entity. */
+/**
+ * What this organization shares with the entity's other accounts: its login, its Pages custom domains (for
+ * Cloudflare's checks), and its repositories with whether their default branch needs a reviewed pull request
+ * (for AWS roles that GitHub Actions can assume).
+ */
 export function githubLinks(inv: GithubInventory): ProviderLinks {
-  // A site that couldn't be read, or repositories the App can't see, would make a hostname look unclaimed.
-  if (inv.selectedRepos || inv.unreadable.includes("pages") || inv.unreadable.includes("repos")) return {};
-  const githubPages = inv.repos.flatMap((r) => (r.pages?.cname ? [{ host: r.pages.cname, repo: r.name }] : []));
-  return { githubPages };
+  const out: ProviderLinks = { githubOrgs: [inv.login.toLowerCase()] };
+  // Repositories the App can't see, or a site or branch that couldn't be read, would make a list look complete when it isn't.
+  const everyRepo = !inv.selectedRepos && !inv.unreadable.includes("repos");
+  if (everyRepo && !inv.unreadable.includes("pages"))
+    out.githubPages = inv.repos.flatMap((r) => (r.pages?.cname ? [{ host: r.pages.cname, repo: r.name }] : []));
+  if (everyRepo && !inv.unreadable.includes("protection") && !inv.unreadable.includes("rules"))
+    out.githubRepos = inv.repos.map((r) => ({
+      repo: `${inv.login}/${r.name}`.toLowerCase(),
+      defaultBranch: r.defaultBranch,
+      // An archived repository can't be pushed to; an empty one has no branch yet, so nothing protects it.
+      reviewed: r.archived || (r.protection !== undefined && !!r.rules && branchGuard(r).pullRequests),
+    }));
+  return out;
 }

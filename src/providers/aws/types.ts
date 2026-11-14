@@ -41,6 +41,11 @@ export interface AwsTrust {
   kind: "anyone" | "account" | "service" | "federated";
   /** The statement has a Condition (an external ID, an organization, MFA…). */
   conditional: boolean;
+  /**
+   * For GitHub Actions (the token.actions.githubusercontent.com provider): the subjects the condition allows, lowercase,
+   * such as "repo:org/app:ref:refs/heads/main" or "repo:org/*". An empty list means no subject condition: any repository.
+   */
+  github?: string[];
 }
 
 export interface AwsRole {

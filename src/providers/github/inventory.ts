@@ -7,7 +7,7 @@
 // hide_secret and their value field is dropped regardless, only the scheme and
 // host of webhook URLs are kept, and deploy keys keep their title and access only.
 
-import type { GithubClient, Json } from "./client.ts";
+import type { GithubClient, GithubError, Json } from "./client.ts";
 import type {
   BranchProtection,
   BranchRule,
@@ -94,13 +94,15 @@ async function readRepo(client: GithubClient, listed: Json): Promise<GithubRepo>
   const base = toRepo(listed);
   if (base.archived) return base;
   const branch = encodeURIComponent(base.defaultBranch);
-  const [detail, protection, rules, keys, hooks, pages] = await Promise.all([
+  const [detail, protection, rules, keys, hooks, pages, dependabotAlerts, codeScanning] = await Promise.all([
     client.raw(path).catch(() => null),
     base.empty ? Promise.resolve(null) : client.getOptional("protection", `${path}/branches/${branch}/protection`),
     base.empty ? Promise.resolve([]) : client.get<Json[]>("rules", `${path}/rules/branches/${branch}`),
     client.list<Json>("deployKeys", `${path}/keys`),
     client.list<Json>("repoHooks", `${path}/hooks`),
     base.hasPages ? client.getOptional("pages", `${path}/pages`) : Promise.resolve(null),
+    dependabotEnabled(client, path),
+    base.empty ? Promise.resolve(null) : codeScanningRan(client, path),
   ]);
   const sa = detail?.security_and_analysis;
   // GitHub leaves the security settings out when the App can't administer the repository.
@@ -119,8 +121,46 @@ async function readRepo(client: GithubClient, listed: Json): Promise<GithubRepo>
     rules: rules ? (Array.isArray(rules) ? rules : []).map(toRule) : null,
     deployKeys: keys ? keys.map((k) => ({ title: String(k.title ?? ""), readOnly: k.read_only !== false, createdAt: time(k.created_at) })) : null,
     hooks: hooks ? hooks.map(toHook) : null,
+    dependabotAlerts,
+    codeScanning,
     pages: pages === undefined ? undefined : pages ? { cname: str(pages.cname)?.toLowerCase() ?? null, httpsEnforced: bool(pages.https_enforced) } : null,
   };
+}
+
+/** GitHub answers 204 when Dependabot alerts are on and 404 when they're off. */
+async function dependabotEnabled(client: GithubClient, path: string): Promise<boolean | null> {
+  try {
+    await client.raw(`${path}/vulnerability-alerts`);
+    client.note("dependabotSetup", true);
+    return true;
+  } catch (e) {
+    if ((e as GithubError).status === 404) {
+      client.note("dependabotSetup", true);
+      return false;
+    }
+    client.note("dependabotSetup", false, e);
+    return null;
+  }
+}
+
+/**
+ * Whether code scanning has analysed the repository. No analysis is a 404, or an empty list; a private
+ * repository without GitHub Code Security answers 403 saying so, which means "not set up", not a missing permission.
+ */
+async function codeScanningRan(client: GithubClient, path: string): Promise<boolean | null> {
+  try {
+    const body = await client.raw(`${path}/code-scanning/analyses?per_page=1`);
+    client.note("codeScanningSetup", true);
+    return Array.isArray(body) && body.length > 0;
+  } catch (e) {
+    const err = e as GithubError;
+    if (err.status === 404 || (err.status === 403 && /advanced security|code security|not enabled/i.test(err.message))) {
+      client.note("codeScanningSetup", true);
+      return false;
+    }
+    client.note("codeScanningSetup", false, e);
+    return null;
+  }
 }
 
 const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
@@ -160,6 +200,8 @@ function toRepo(r: Json): GithubRepo {
     rules: null,
     deployKeys: null,
     hooks: null,
+    dependabotAlerts: null,
+    codeScanning: null,
     pages: null,
   };
 }

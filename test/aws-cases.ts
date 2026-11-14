@@ -197,6 +197,9 @@ export const AWS_CASES: Record<AwsCheckId, () => AwsInventory> = {
   "XP-005": () => withRecord("docs.example.com", "CNAME", "cname.vercel-dns.com"),
   // The fixture's load balancer uses a group that lets everyone reach 443; a Cloudflare-proxied hostname points at it.
   "XP-006": () => awsInventory(),
+  "AID-012": () => withGithubRole([]),
+  "XP-010": () => withGithubRole(["repo:other-org/app:ref:refs/heads/main"]),
+  "XP-011": () => withGithubRole(["repo:example/app:*"]),
 
   "AMO-001": () => withRegion({ guardDuty: false }),
   "AMO-002": () => withRegion({ vpcs: [{ id: VPC, isDefault: false, flowLogs: false }] }),
@@ -204,7 +207,20 @@ export const AWS_CASES: Record<AwsCheckId, () => AwsInventory> = {
 };
 
 /** Engine options a case needs beyond the defaults: checks that span providers read the entity's other accounts. */
+/** A role GitHub Actions can assume, with these subjects on its trust policy. */
+function withGithubRole(github: string[]) {
+  const principal = "arn:aws:iam::111122223333:oidc-provider/token.actions.githubusercontent.com";
+  return awsInventory({ roles: [role({ name: "deploy", trust: [{ principal, kind: "federated", conditional: true, github }], profiles: [] })] });
+}
+
+const GITHUB_ENTITY = {
+  githubOrgs: ["example"],
+  githubRepos: [{ repo: "example/app", defaultBranch: "main", reviewed: true }],
+};
+
 export const AWS_CASE_OPTS: Partial<Record<AwsCheckId, Partial<EngineOptions>>> = {
+  "XP-010": { related: GITHUB_ENTITY },
+  "XP-011": { related: GITHUB_ENTITY },
   "XP-005": { related: { vercelDomains: [{ host: "app.example.com", project: "web", projectId: "prj_1", protectsDeploymentUrls: true }] } },
   "XP-006": { related: { toAws: [{ host: "shop.example.com", zone: "example.com", target: LB_DNS, kind: "elb", name: LB_DNS, proxied: true }] } },
 };

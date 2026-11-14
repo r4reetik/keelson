@@ -104,3 +104,19 @@ test("an inactive leaked secret is still reported, lower; Keelson's own App isn'
   const own = githubInventory({ apps: [{ slug: "keelson", appId: 42, selection: "all", writes: ["contents"] }] });
   assert.ok(!evaluateGithub(own, opts()).findings.some((f) => f.checkId === "GHK-004" && !f.pass));
 });
+
+test("an alert check only passes where its scanner runs, and an idle repository's open branch is rated lower", () => {
+  const off = githubInventory({
+    repos: [repo({ security: { secretScanning: false, pushProtection: false, dependabotUpdates: false }, dependabotAlerts: false, codeScanning: false })],
+    dependabot: [],
+    codeScanning: [],
+    secretScanning: [],
+  });
+  const evaluated = new Set(evaluateGithub(off, opts()).results.map((r) => r.checkId));
+  for (const id of ["GSC-003", "GSC-004", "GSC-005", "GSC-006"]) assert.ok(!evaluated.has(id), `${id} isn't passed where nothing scans`);
+
+  const idle = githubInventory({ repos: [repo({ rules: [], pushedAt: Date.parse("2024-01-01T00:00:00Z") })] });
+  const open = evaluateGithub(idle, opts()).findings.find((f) => f.checkId === "GBR-001" && !f.pass);
+  assert.equal(open?.severity, "low");
+  assert.match(open?.detail ?? "", /last push 2024-01-01/);
+});

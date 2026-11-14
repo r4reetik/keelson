@@ -30,6 +30,8 @@ export function repo(extra: Partial<GithubRepo> = {}): GithubRepo {
     ],
     deployKeys: [{ title: "mirror", readOnly: true, createdAt: days(-100) }],
     hooks: [{ id: 1, endpoint: "https://ci.example.com", insecureSsl: false, active: true }],
+    dependabotAlerts: true,
+    codeScanning: true,
     pages: { cname: "docs.example.com", httpsEnforced: true },
     ...extra,
   };
@@ -92,7 +94,9 @@ export const GITHUB_CASES: Record<GithubCheckId, () => GithubInventory> = {
   "GSC-004": () =>
     githubInventory({ dependabot: [{ repo: "web", severity: "critical", pkg: "parser", advisory: "GHSA-1111-1111-1111", createdAt: days(-9) }] }),
   "GSC-005": () => githubInventory({ codeScanning: [{ repo: "web", severity: "high", rule: "SQL injection", tool: "CodeQL", createdAt: days(-3) }] }),
-  "GSC-006": () => withRepo({ security: { secretScanning: true, pushProtection: true, dependabotUpdates: false } }),
+  "GSC-006": () => ({ ...withRepo({ security: { secretScanning: true, pushProtection: true, dependabotUpdates: false } }), dependabot: base.dependabot }),
+  "GSC-007": () => withRepo({ dependabotAlerts: false }),
+  "GSC-008": () => withRepo({ codeScanning: false }),
 
   "GAC-001": () => githubInventory({ actions: { ...base.actions!, defaultWorkflowPermissions: "write" } }),
   "GAC-002": () => githubInventory({ actions: { ...base.actions!, canApprovePullRequests: true } }),

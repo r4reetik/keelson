@@ -123,6 +123,51 @@ const iam: Record<string, (q: URLSearchParams) => string | null> = {
           x("AttachedManagedPolicies", x("member", policy("ReadOnlyAccess"))),
           x("RoleLastUsed", x("LastUsedDate", ago(200))),
         ),
+        // GitHub Actions deploys from any branch of any repository in the mock GitHub organization (dev/mock/github.ts).
+        x(
+          "member",
+          x("RoleName", "github-deploy"),
+          x("Path", "/"),
+          x(
+            "AssumeRolePolicyDocument",
+            doc({
+              Statement: [
+                {
+                  Effect: "Allow",
+                  Principal: { Federated: `arn:aws:iam::${MOCK_AWS_ACCOUNT}:oidc-provider/token.actions.githubusercontent.com` },
+                  Action: "sts:AssumeRoleWithWebIdentity",
+                  Condition: {
+                    StringEquals: { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com" },
+                    StringLike: { "token.actions.githubusercontent.com:sub": "repo:mock-org/*" },
+                  },
+                },
+              ],
+            }),
+          ),
+          x("AttachedManagedPolicies", x("member", policy("PowerUserAccess"))),
+          x("RoleLastUsed", x("LastUsedDate", ago(1))),
+        ),
+        // An older role for GitHub Actions that names no repository at all.
+        x(
+          "member",
+          x("RoleName", "github-legacy"),
+          x("Path", "/"),
+          x(
+            "AssumeRolePolicyDocument",
+            doc({
+              Statement: [
+                {
+                  Effect: "Allow",
+                  Principal: { Federated: `arn:aws:iam::${MOCK_AWS_ACCOUNT}:oidc-provider/token.actions.githubusercontent.com` },
+                  Action: "sts:AssumeRoleWithWebIdentity",
+                  Condition: { StringEquals: { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com" } },
+                },
+              ],
+            }),
+          ),
+          x("AttachedManagedPolicies", x("member", policy("ReadOnlyAccess"))),
+          x("RoleLastUsed", x("LastUsedDate", ago(300))),
+        ),
         x(
           "member",
           x("RoleName", "AWSServiceRoleForSupport"),
