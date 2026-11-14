@@ -138,6 +138,7 @@ for example) is skipped and shown as not readable on the Regions page: nothing t
 | S3 bucket access settings | `s3:GetBucketPublicAccessBlock`, `s3:GetBucketPolicyStatus`, `s3:GetBucketAcl` | AS3-002, AS3-003 |
 | Enabled regions | `ec2:DescribeRegions` | Supporting data for other checks |
 | Security groups (every enabled region) | `ec2:DescribeSecurityGroups` | ANW-001, ANW-002, ANW-003, AEC-007, ADB-001, XP-006 |
+| Managed prefix lists that security groups admit web traffic from (every enabled region) | `ec2:GetManagedPrefixListEntries` | Supporting data for other checks |
 | Network interfaces and Elastic IPs (every enabled region) | `ec2:DescribeNetworkInterfaces`, `ec2:DescribeAddresses` | ANW-001, ANW-002, ANW-003, ADN-002, ADN-003, XP-006 |
 | EC2 instances (every enabled region) | `ec2:DescribeInstances` | AEC-001, AEC-002, AEC-007, AEC-008, AMO-001, AMO-002 |
 | EBS encryption, public snapshots and public images (every enabled region) | `ec2:GetEbsEncryptionByDefault`, `ec2:DescribeSnapshots`, `ec2:DescribeImages` | AEC-002, AEC-003, AEC-004 |

@@ -677,6 +677,12 @@ export interface ProviderLinks {
   awsEndpoints?: { kind: AwsEndpointKind; name: string }[];
   /** Public IPv4 addresses an AWS account holds: Elastic IPs and the addresses of its network interfaces. */
   awsAddresses?: string[];
+  /**
+   * Who can reach each of an AWS account's web origins on ports 80 and 443, from their security groups: a load
+   * balancer by its DNS name, or a network interface by its public address. Origins Keelson can't judge (no groups
+   * of their own, a managed prefix list it couldn't read, no web rule at all) aren't listed.
+   */
+  awsOrigins?: AwsOrigin[];
   /** Addresses Keelson saw leave an AWS account between scans, with when. A DNS record that still points at one is dangling. */
   awsReleased?: { ip: string; at: string }[];
   /** The AWS account's own ID, so its siblings can tell a role trusted inside the entity from one trusted outside it. */
@@ -691,6 +697,22 @@ export interface AddressHistory {
   released: { ip: string; at: string }[];
 }
 
+/**
+ * An AWS web origin and who its security groups let in on ports 80 and 443: "open" when one admits 0.0.0.0/0 or ::/0,
+ * "cloudflare" when only Cloudflare's ranges (and private ones) are admitted, "other" when public ranges outside
+ * Cloudflare's are. `groups` are the open ones for "open", and every attached one otherwise.
+ */
+export interface AwsOrigin {
+  kind: "elb" | "ip";
+  /** The load balancer's DNS name, or the public address. */
+  name: string;
+  region: string;
+  /** What it is, as AWS's XP-006 names it: "load balancer web-alb", "instance web-1 (i-…)". */
+  resource: string;
+  web: "open" | "cloudflare" | "other";
+  groups: { id: string; name: string }[];
+}
+
 /** The kinds of AWS endpoint a DNS record can point at by name. */
 export type AwsEndpointKind = "cloudfront" | "elb" | "s3";
 
@@ -702,6 +724,7 @@ export const LINK_KEYS = [
   "dnsAddresses",
   "awsEndpoints",
   "awsAddresses",
+  "awsOrigins",
   "awsReleased",
   "awsAccounts",
   "githubPages",
@@ -716,6 +739,7 @@ export const LINK_PROVIDER: Record<LinkKey, ProviderId> = {
   vercelDomains: "vercel",
   awsEndpoints: "aws",
   awsAddresses: "aws",
+  awsOrigins: "aws",
   awsReleased: "aws",
   awsAccounts: "aws",
   githubPages: "github",

@@ -98,13 +98,17 @@ DNS record that points at Vercel when no Vercel project in the company serves th
 distribution none of its AWS accounts has. Each scan stores a few `links` in its snapshot (`ProviderLinks` in
 `src/shared/api.ts`): Cloudflare, its DNS records that point at Vercel and at AWS, and the address of every A
 record; Vercel, the domains its projects serve; AWS, its CloudFront domain names, load balancer names, buckets,
-public addresses and account ID; GitHub, the custom domains of its Pages sites. A list is left out when its scan couldn't read all of it. When an account is
+public addresses, account ID, and who its web origins' security groups let in on ports 80 and 443 (`awsOrigins`:
+anyone, only Cloudflare's ranges, or other public ranges; never the ranges themselves); GitHub, the custom domains of
+its Pages sites. A list is left out when its scan couldn't read all of it. When an account is
 scanned, the scanner merges every list from the latest scans of the other accounts in the same entity and passes
 them to the checks as `related`. A list is only used when every account of the provider that publishes it
 (`LINK_PROVIDER`) supplied it: if one hasn't been scanned yet, or left it out, the merged list is incomplete, it is
 set aside (`related.unknown` names it), and the checks that need it are skipped. An incomplete list is never
 taken for "nothing there". These checks (IDs `XP-…`) never look outside the
-entity, and are skipped when the entity has no scanned account on the other provider.
+entity, and are skipped when the entity has no scanned account on the other provider. One Cloudflare check that
+isn't an `XP-` check also reads them: ATS-001 (an exposed origin address) rates an origin that is one of the
+entity's AWS endpoints by its security groups, and rates every other origin as it would without AWS.
 
 ## Scoring
 

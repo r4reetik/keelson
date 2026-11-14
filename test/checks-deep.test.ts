@@ -4,7 +4,9 @@ import { hostsIn, cidrsIn, broadNetwork, spoofableOnly, ipInCidr } from "../src/
 import { parseDkim } from "../src/core/deep-dns.ts";
 import { probeTakeovers, takeoverCandidates } from "../src/core/probe.ts";
 import { Scanner } from "../src/scanner.ts";
-import { inventory, zone, record } from "./fixtures/inventory.ts";
+import { inventory, zone, record, opts } from "./fixtures/inventory.ts";
+import { inCloudflare, isInternal } from "../src/core/cloudflare-ranges.ts";
+import type { AwsOrigin } from "../src/shared/api.ts";
 import { installMockCloudflare, MOCK_ACCOUNT } from "../dev/mock/cloudflare.ts";
 import { seedAccount, testRepo } from "../dev/mock/accounts.ts";
 
@@ -48,6 +50,54 @@ describe("attack surface", () => {
     assert.equal(f.severity, "critical");
     const chain = (f.evidence!.chain as { label: string; value: string }[]).map((s) => s.label);
     assert.ok(chain.includes("Published by a DNS-only record") && chain.includes("Listed in SPF"));
+  });
+
+  test("ATS-001: an origin in the entity's AWS accounts is rated by who its security groups let in", () => {
+    const LB = "web-alb-1234567890.eu-west-1.elb.amazonaws.com";
+    const z = zone("example.com", { aop: { enabled: false } });
+    z.dns.push(
+      record("app.example.com", "A", "198.51.100.7", { proxied: true }),
+      record("direct.example.com", "A", "198.51.100.7"),
+      record("shop.example.com", "CNAME", `dualstack.${LB}`, { proxied: true }),
+      record("shop-origin.example.com", "CNAME", `dualstack.${LB}`),
+    );
+    const inv = inventory({ zones: [z] });
+    const origin = (kind: AwsOrigin["kind"], name: string, web: AwsOrigin["web"]): AwsOrigin => ({
+      kind,
+      name,
+      region: "eu-west-1",
+      resource: kind === "elb" ? "load balancer web-alb" : "instance web-1 (i-1)",
+      web,
+      groups: [{ id: "sg-web", name: "web" }],
+    });
+    const run = (web: AwsOrigin["web"] | null, list: boolean = true) =>
+      of(inv, "ATS-001", opts(list ? { related: { awsOrigins: web ? [origin("ip", "198.51.100.7", web), origin("elb", LB, web)] : [] } } : {}));
+    const sev = (fs: ReturnType<typeof run>) => Object.fromEntries(fs.map((f) => [f.resource, f.severity]));
+
+    // Open to everyone: still critical, and the evidence names the group and the AWS finding.
+    const open = run("open");
+    assert.deepEqual(sev(open), { "app.example.com": "critical", "shop.example.com": "critical" });
+    const chain = open.find((f) => f.resource === "shop.example.com")!.evidence!.chain!;
+    assert.ok(chain.some((s) => s.label === "Security group" && s.value.includes("web (sg-web)")));
+    assert.ok(chain.some((s) => s.label === "Also reported" && s.value.includes("XP-006")));
+    assert.match(open[0].detail, /security group web lets anyone connect/);
+
+    // Only Cloudflare's ranges: low. Other public ranges: medium.
+    assert.deepEqual(sev(run("cloudflare")), { "app.example.com": "low", "shop.example.com": "low" });
+    assert.match(run("cloudflare")[0].detail, /only Cloudflare's address ranges/);
+    assert.deepEqual(sev(run("other")), { "app.example.com": "medium", "shop.example.com": "medium" });
+
+    // Origins Keelson knows nothing about, and an entity whose AWS list is missing or incomplete, keep today's rating.
+    for (const fs of [run(null), run(null, false)]) {
+      assert.deepEqual(sev(fs), { "app.example.com": "critical", "shop.example.com": "critical" });
+      assert.ok(fs.every((f) => !f.evidence!.chain!.some((s) => s.label === "AWS origin")));
+    }
+  });
+
+  test("Cloudflare's ranges and private ranges are told apart from the rest of the internet", () => {
+    assert.ok(inCloudflare("173.245.48.0/20") && inCloudflare("173.245.49.0/24") && inCloudflare("2606:4700:10::/48"));
+    assert.ok(!inCloudflare("173.245.0.0/16") && !inCloudflare("203.0.113.0/24") && !inCloudflare("0.0.0.0/0") && !inCloudflare("::/0"));
+    assert.ok(isInternal("10.1.0.0/16") && isInternal("fd00::/8") && !isInternal("198.51.100.0/24") && !isInternal("not an address"));
   });
 
   test("ATS-001/002 ignore multi-tenant platforms and placeholder records", () => {

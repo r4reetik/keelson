@@ -48,6 +48,7 @@ export default defineChecks(
                   ...hosts.slice(0, 5).map((h) => ({ label: "Proxied through Cloudflare", value: h })),
                   { label: "Origin", value: `${what} ${resource} in ${region.name}` },
                   ...open.map((g) => ({ label: "Security group", value: `${g.name} (${g.id}) allows ports 80 or 443 from 0.0.0.0/0 or ::/0` })),
+                  { label: "Also reported", value: "ATS-001 on the entity's Cloudflare account, when the origin's address is published in DNS, SPF or MX" },
                 ],
               }
             : null,

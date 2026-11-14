@@ -86,6 +86,13 @@ export interface AwsSecurityGroup {
   vpcId: string | null;
   /** Inbound rules that allow the whole internet (0.0.0.0/0 or ::/0). */
   open: { protocol: string; from: number | null; to: number | null; cidr: string }[];
+  /**
+   * Who else its inbound rules let reach ports 80 and 443: Cloudflare's ranges, or other public ranges. Managed prefix
+   * lists count by their entries; `prefixLists` holds the ones whose entries couldn't be read. Private ranges and
+   * other security groups don't count. Only the kinds are kept, never the ranges. Absent when it wasn't worked out,
+   * which is never taken to mean "nobody".
+   */
+  webFrom?: { cloudflare: boolean; other: boolean; prefixLists: string[] };
 }
 
 export interface AwsInstance {

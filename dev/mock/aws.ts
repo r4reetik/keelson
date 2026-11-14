@@ -148,13 +148,20 @@ const iam: Record<string, (q: URLSearchParams) => string | null> = {
 
 const openRule = (protocol: string, from: number | null, to: number | null, cidr = "0.0.0.0/0") =>
   x("item", x("ipProtocol", protocol), from == null ? "" : x("fromPort", from) + x("toPort", to ?? from), x("ipRanges", x("item", x("cidrIp", cidr))));
+const prefixRule = (from: number, prefixList: string) =>
+  x("item", x("ipProtocol", "tcp"), x("fromPort", from), x("toPort", from), x("prefixListIds", x("item", x("prefixListId", prefixList))));
+export const MOCK_AWS_PREFIX_LIST = "pl-0cloudflare000001";
 const group = (id: string, name: string, vpc: string, ...rules: string[]) =>
   x("item", x("groupId", id), x("groupName", name), x("vpcId", vpc), x("ipPermissions", ...rules));
 /** Addresses in the mock's "EC2 range" (TEST-NET-2), which the mock ip-ranges file publishes. */
 export const MOCK_AWS_IP = "198.51.100.50";
 /** An Elastic IP the account gives up when `mockAws.released` is set, as when an old server is deleted between two scans. */
 export const MOCK_AWS_OLD_IP = "198.51.100.99";
-export const mockAws = { released: false };
+/**
+ * `cloudflareOnly`: the web security group admits HTTPS only from a managed prefix list of Cloudflare's ranges instead
+ * of from anywhere, as after following XP-006's fix, so Cloudflare's ATS-001 can tell a locked origin from an open one.
+ */
+export const mockAws = { released: false, cloudflareOnly: false };
 const LB_IP = "198.51.100.60";
 const DB_IP = "198.51.100.70";
 const WEB = "i-0web00000000000001";
@@ -202,7 +209,7 @@ const ec2: Record<string, (region: string) => string> = {
       "securityGroupInfo",
       ...(r === WORK
         ? [
-            group(SG.web, "web", VPC, openRule("tcp", 443, 443)),
+            group(SG.web, "web", VPC, mockAws.cloudflareOnly ? prefixRule(443, MOCK_AWS_PREFIX_LIST) : openRule("tcp", 443, 443)),
             group(SG.admin, "admin-access", VPC, openRule("tcp", 22, 22)),
             group(SG.db, "database", VPC, openRule("tcp", 5432, 5432)),
             group(SG.legacy, "legacy-open", VPC, openRule("-1", null, null)),
@@ -241,6 +248,13 @@ const ec2: Record<string, (region: string) => string> = {
         ? x("item", x("publicIp", MOCK_AWS_IP), x("allocationId", "eipalloc-0mock0001")) +
             (mockAws.released ? "" : x("item", x("publicIp", MOCK_AWS_OLD_IP), x("allocationId", "eipalloc-0mock0002")))
         : "",
+    ),
+  // The customer-managed list the web group uses when `mockAws.cloudflareOnly` is set: two of Cloudflare's ranges.
+  GetManagedPrefixListEntries: () =>
+    x(
+      "entrySet",
+      x("item", x("cidr", "173.245.48.0/20"), x("description", "Cloudflare")),
+      x("item", x("cidr", "2606:4700::/32"), x("description", "Cloudflare")),
     ),
   GetEbsEncryptionByDefault: () => x("ebsEncryptionByDefault", false),
   DescribeSnapshots: (r) => x("snapshotSet", r === WORK ? x("item", x("snapshotId", "snap-0mock0000000001")) : ""),

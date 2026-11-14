@@ -1,13 +1,18 @@
 // Attack surface: findings that come from correlating DNS, SPF, MX, rules,
 // tunnels, Access applications and live probes. No single setting shows these.
+// An exposed origin that is one of the entity's AWS endpoints is also rated by
+// who its security groups let in, from the AWS accounts' latest scans.
 
 import { defineChecks } from "./define.ts";
 import { zoneOf } from "./helpers.ts";
 import { ipInCidr } from "./expr.ts";
 import { hostName as host, isHostRecord, unquote } from "../dns-util.ts";
 import { TUNNEL_CNAME as TUNNEL } from "../cf-constants.ts";
+import { awsEndpointOf } from "../links.ts";
 import type { DnsRecord, IngressRule } from "../cf-types.ts";
-import type { Api, EvidenceStep, Inventory, ZoneInventory } from "../types.ts";
+import type { Api, EvidenceStep, Inventory, Related, ZoneInventory } from "../types.ts";
+import type { AwsOrigin } from "../../shared/api.ts";
+import type { Severity } from "../../shared/severity.ts";
 
 /** Spectrum protocols that are remote-administration or file-sharing services. */
 const ADMIN_PORTS: Record<string, string> = { "22": "SSH", "23": "Telnet", "3389": "RDP", "445": "SMB", "5900": "VNC", "5985": "WinRM", "5986": "WinRM" };
@@ -143,6 +148,50 @@ export function originAuthHeaderHosts(z: ZoneInventory): Set<string> {
   return out;
 }
 
+/** The entity's AWS origins, by load balancer DNS name and by public address. Null when any AWS account's list is missing. */
+function awsOrigins(related: Partial<Related> | undefined): { byElb: Map<string, AwsOrigin>; byIp: Map<string, AwsOrigin> } | null {
+  const list = related?.awsOrigins;
+  if (!list) return null;
+  return {
+    byElb: new Map(list.filter((o) => o.kind === "elb").map((o) => [o.name.toLowerCase(), o])),
+    byIp: new Map(list.filter((o) => o.kind === "ip").map((o) => [o.name, o])),
+  };
+}
+
+const groupList = (o: AwsOrigin) => o.groups.map((g) => `${g.name} (${g.id})`).join(", ");
+
+/** What an AWS origin's security groups change about an exposed address: how bad it is, and what to say. */
+function awsVerdict(o: AwsOrigin, lock: string | null): { severity: Severity; detail: string; steps: EvidenceStep[] } {
+  const where = `${o.resource} in ${o.region}`;
+  if (o.web === "open")
+    return {
+      severity: lock ? "high" : "critical",
+      detail: ` Its AWS security group ${o.groups.map((g) => g.name).join(", ")} lets anyone connect on ports 80 or 443, so the address can be attacked directly.`,
+      steps: [
+        { label: "AWS origin", value: where },
+        { label: "Security group", value: `${groupList(o)} allows ports 80 or 443 from 0.0.0.0/0 or ::/0` },
+        { label: "Also reported", value: "XP-006 on the entity's AWS account, for the same security group" },
+      ],
+    };
+  if (o.web === "cloudflare")
+    return {
+      severity: "low",
+      detail: ` Its AWS security groups (${o.groups.map((g) => g.name).join(", ")}) admit only Cloudflare's address ranges on ports 80 and 443, so the address can't be reached directly. Another Cloudflare account could still send traffic to it${lock ? "" : "; Authenticated Origin Pulls closes that"}.`,
+      steps: [
+        { label: "AWS origin", value: where },
+        { label: "Security group", value: `${groupList(o)} admit ports 80 and 443 only from Cloudflare's ranges` },
+      ],
+    };
+  return {
+    severity: "medium",
+    detail: ` Its AWS security groups (${o.groups.map((g) => g.name).join(", ")}) don't admit everyone on ports 80 and 443, but they do admit public ranges outside Cloudflare's.`,
+    steps: [
+      { label: "AWS origin", value: where },
+      { label: "Security group", value: `${groupList(o)} admit ports 80 and 443 from public ranges that aren't Cloudflare's` },
+    ],
+  };
+}
+
 export default defineChecks(
   {
     "ATS-001": {
@@ -152,8 +201,8 @@ export default defineChecks(
       docs: "https://developers.cloudflare.com/fundamentals/security/protect-your-origin-server/",
       requires: ["dnsRecords", "doh"],
       title: "Origin IP of a proxied host is exposed",
-      why: "Cloudflare only protects traffic that goes through it. Once an attacker knows the origin address, they can attack it directly, around the WAF and DDoS protection.",
-      fix: "Move the exposed record behind the proxy or to another address, change the origin IP, and allow only Cloudflare's IP ranges (or a Tunnel) at the origin.",
+      why: "Cloudflare only protects traffic that goes through it. Once an attacker knows the origin address, they can attack it directly, around the WAF and DDoS protection. When the origin is a load balancer or address in one of the entity's AWS accounts, its security groups decide how bad that is: critical when they let anyone in, low when they admit only Cloudflare's ranges.",
+      fix: "Move the exposed record behind the proxy or to another address, change the origin IP, and allow only Cloudflare's IP ranges (or a Tunnel) at the origin. On AWS, that means replacing 0.0.0.0/0 on ports 80 and 443 in the origin's security group with Cloudflare's ranges.",
     },
     "ATS-002": {
       category: "Attack surface",
@@ -233,9 +282,10 @@ export default defineChecks(
       fix: "Put the service behind Access (Cloudflare Tunnel with an Access application, or Access for Infrastructure) and delete the Spectrum application, or at least turn on its IP Access rules.",
     },
   },
-  ({ inv, d }, report) => {
+  ({ inv, d, opts }, report) => {
     const all = recordsOf(inv);
     const acc = accessHosts(inv);
+    const aws = awsOrigins(opts.related);
 
     // ---- ATS-001 / ATS-002: origin exposure and origin lock
     const dnsOnlyByIp = new Map<string, string[]>(),
@@ -281,13 +331,17 @@ export default defineChecks(
             .map((u) => u.value)
             .slice(0, 3)
             .join("; ") + (unique.length > 3 ? `; and ${unique.length - 3} more` : "");
+        // When the origin is one of the entity's AWS endpoints, its security groups say whether the address can be reached.
+        const endpoint = r.type === "CNAME" ? awsEndpointOf(target) : null;
+        const origin = !aws ? undefined : endpoint ? (endpoint.kind === "elb" ? aws.byElb.get(endpoint.name) : undefined) : aws.byIp.get(r.content);
+        const verdict = origin ? awsVerdict(origin, lock) : null;
         report("ATS-001", {
           zone: z.name,
           resource: name,
           pass: unique.length === 0,
-          severity: lock ? "high" : "critical",
+          severity: verdict?.severity ?? (lock ? "high" : "critical"),
           detail: unique.length
-            ? `${name} is proxied, but its origin ${r.type === "CNAME" ? target : ips.join(", ")} is public: ${where}.${lock ? "" : " The origin isn't locked to Cloudflare, so it can be attacked directly."}`
+            ? `${name} is proxied, but its origin ${r.type === "CNAME" ? target : ips.join(", ")} is public: ${where}.${verdict ? verdict.detail : lock ? "" : " The origin isn't locked to Cloudflare, so it can be attacked directly."}`
             : "",
           evidence: unique.length
             ? {
@@ -295,6 +349,7 @@ export default defineChecks(
                   { label: "Proxied hostname", value: `${name} → ${r.type === "CNAME" ? target : ips.join(", ")}` },
                   ...unique,
                   { label: "Origin lock", value: lock || "None: no Tunnel, Authenticated Origin Pulls or origin-auth header" },
+                  ...(verdict?.steps ?? []),
                 ],
               }
             : null,

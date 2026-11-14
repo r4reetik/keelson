@@ -33,6 +33,7 @@ import type {
 } from "./types.ts";
 import type { ProgressEvent } from "../../core/types.ts";
 import { fetchEc2Prefixes } from "../../core/aws-ranges.ts";
+import { inCloudflare, isInternal } from "../../core/cloudflare-ranges.ts";
 import { secretKindIn } from "../../core/secret-patterns.ts";
 
 const REGION_CONCURRENCY = 4;
@@ -364,13 +365,63 @@ const port = (v: string | null): number | null => (v == null || !Number.isFinite
 
 function toSecurityGroup(g: XmlNode): AwsSecurityGroup {
   const open: AwsSecurityGroup["open"] = [];
+  const webFrom = { cloudflare: false, other: false, prefixLists: [] as string[] };
   for (const p of items(g, "ipPermissions")) {
+    const protocol = text(p, "ipProtocol") ?? "-1";
+    const from = port(text(p, "fromPort")),
+      to = port(text(p, "toPort"));
     const cidrs = [...items(p, "ipRanges").map((r) => text(r, "cidrIp")), ...items(p, "ipv6Ranges").map((r) => text(r, "cidrIpv6"))];
-    for (const cidr of cidrs)
-      if (cidr && OPEN_CIDRS.has(cidr))
-        open.push({ protocol: text(p, "ipProtocol") ?? "-1", from: port(text(p, "fromPort")), to: port(text(p, "toPort")), cidr });
+    for (const cidr of cidrs) if (cidr && OPEN_CIDRS.has(cidr)) open.push({ protocol, from, to, cidr });
+    // Who reaches the web ports, by kind only: whether an origin behind Cloudflare admits anyone but Cloudflare.
+    const web = protocol === "-1" || ((protocol === "tcp" || protocol === "6") && from != null && to != null && [80, 443].some((n) => from <= n && n <= to));
+    if (!web) continue;
+    admit(webFrom, cidrs);
+    for (const pl of items(p, "prefixListIds")) {
+      const id = text(pl, "prefixListId");
+      if (id && !webFrom.prefixLists.includes(id)) webFrom.prefixLists.push(id);
+    }
   }
-  return { id: text(g, "groupId") ?? "", name: text(g, "groupName") ?? "", vpcId: text(g, "vpcId"), open };
+  return { id: text(g, "groupId") ?? "", name: text(g, "groupName") ?? "", vpcId: text(g, "vpcId"), open, webFrom };
+}
+
+/** Counts who some sources on the web ports are: Cloudflare, or another public range. Open and private ones don't count here. */
+function admit(webFrom: NonNullable<AwsSecurityGroup["webFrom"]>, cidrs: (string | null)[]): void {
+  for (const cidr of cidrs) {
+    if (!cidr || OPEN_CIDRS.has(cidr) || isInternal(cidr)) continue;
+    if (inCloudflare(cidr)) webFrom.cloudflare = true;
+    else webFrom.other = true;
+  }
+}
+
+const MAX_PREFIX_LISTS = 100;
+
+/**
+ * Reads the managed prefix lists that web rules use (Cloudflare's ranges are often kept in one) and counts their
+ * entries like any other source. A list that can't be read stays in `prefixLists`, so its groups can't be judged.
+ */
+async function resolvePrefixLists(client: AwsClient, region: string, groups: AwsSecurityGroup[]): Promise<void> {
+  const ids = [...new Set(groups.flatMap((g) => g.webFrom?.prefixLists ?? []))];
+  if (!ids.length || ids.length > MAX_PREFIX_LISTS) return;
+  const entries = new Map<string, string[]>();
+  let failure: unknown = null;
+  await pool(ids, ITEM_CONCURRENCY, async (id) => {
+    try {
+      const list = await queryAll(client, "ec2", region, "GetManagedPrefixListEntries", "entrySet", EC2_PAGE, { PrefixListId: id, MaxResults: "100" });
+      entries.set(
+        id,
+        list.flatMap((e) => text(e, "cidr") ?? []),
+      );
+    } catch (e) {
+      // One list can refuse (shared from another account and since unshared) without hiding the others.
+      failure ??= e;
+    }
+  });
+  client.note("prefixLists", entries.size > 0 || !failure, failure);
+  for (const g of groups) {
+    if (!g.webFrom) continue;
+    for (const id of g.webFrom.prefixLists) admit(g.webFrom, entries.get(id) ?? []);
+    g.webFrom.prefixLists = g.webFrom.prefixLists.filter((id) => !entries.has(id));
+  }
 }
 
 function toInstance(i: XmlNode): AwsInstance {
@@ -505,6 +556,9 @@ async function readRegion(client: AwsClient, region: string): Promise<AwsRegion>
     }),
   ]);
 
+  const securityGroups = groups ? groups.map(toSecurityGroup) : null;
+  if (securityGroups) await resolvePrefixLists(client, region, securityGroups);
+
   const instances = reservations ? reservations.flatMap((r) => items(r, "instancesSet").map(toInstance)).filter((i) => i.id) : null;
   const running = (instances ?? []).filter((i) => i.running);
   if (running.length && running.length <= MAX_USER_DATA)
@@ -518,7 +572,7 @@ async function readRegion(client: AwsClient, region: string): Promise<AwsRegion>
   const logged = flowLogs ? new Set(flowLogs.filter((f) => text(f, "flowLogStatus") === "ACTIVE").flatMap((f) => text(f, "resourceId") ?? [])) : null;
   return {
     name: region,
-    securityGroups: groups ? groups.map(toSecurityGroup) : null,
+    securityGroups,
     instances,
     ebsEncryptionByDefault: ebs?.encryption ?? null,
     publicSnapshots: ebs?.snapshots ?? null,

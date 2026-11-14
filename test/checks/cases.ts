@@ -324,6 +324,14 @@ export const CASES: Record<CheckId, () => Inventory> = {
 
 /** Engine options a case needs beyond the defaults: checks that span providers read the entity's other accounts. */
 export const CASE_OPTS: Partial<Record<CheckId, Partial<EngineOptions>>> = {
+  // The exposed origin is an AWS instance whose security group lets anyone in, so knowing AWS keeps it failing.
+  "ATS-001": {
+    related: {
+      awsOrigins: [
+        { kind: "ip", name: "203.0.113.10", region: "eu-west-1", resource: "instance web-1 (i-1)", web: "open", groups: [{ id: "sg-web", name: "web" }] },
+      ],
+    },
+  },
   "XP-001": { related: { toVercel: null, vercelDomains: [{ host: `app.${Z}`, project: "web", projectId: "prj_1", protectsDeploymentUrls: true }] } },
   "XP-004": { related: { awsEndpoints: [{ kind: "cloudfront", name: "d222222abcdef8.cloudfront.net" }] } },
   "XP-007": { related: { awsAddresses: ["198.51.100.9"], awsReleased: [{ ip: "198.51.100.77", at: "2026-05-20T00:00:00.000Z" }] } },

@@ -62,6 +62,11 @@ const DEFS = {
     probe: ec2("DescribeSecurityGroups", { MaxResults: "5" }),
     regional: true,
   },
+  prefixLists: {
+    label: "Managed prefix lists that security groups admit web traffic from",
+    permission: "ec2:GetManagedPrefixListEntries",
+    regional: true,
+  },
   networkInterfaces: {
     label: "Network interfaces and Elastic IPs",
     permission: "ec2:DescribeNetworkInterfaces, ec2:DescribeAddresses",

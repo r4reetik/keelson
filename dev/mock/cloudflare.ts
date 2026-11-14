@@ -367,6 +367,17 @@ const routes: [RegExp, Handler][] = [
                 created_on: ago(250),
                 modified_on: ago(250),
               },
+              // The same two origins published without the proxy, so their addresses are public (ATS-001).
+              { id: "r17", name: "api-direct.mock.example", type: "A", content: "198.51.100.50", proxied: false, created_on: ago(250), modified_on: ago(250) },
+              {
+                id: "r18",
+                name: "shop-origin.mock.example",
+                type: "CNAME",
+                content: "web-alb-1234567890.eu-west-1.elb.amazonaws.com",
+                proxied: false,
+                created_on: ago(250),
+                modified_on: ago(250),
+              },
               // An Elastic IP the mock AWS account gives up between scans, and an AWS address that was never its own.
               { id: "r13", name: "old-vm.mock.example", type: "A", content: "198.51.100.99", proxied: false, created_on: ago(450), modified_on: ago(450) },
               { id: "r14", name: "vendor.mock.example", type: "A", content: "198.51.100.201", proxied: false, created_on: ago(450), modified_on: ago(450) },

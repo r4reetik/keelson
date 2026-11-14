@@ -162,6 +162,7 @@ describe("AWS scan against the mocked API", () => {
     );
     assert.ok(findingsOf(repo).some((f) => f.checkId === "ANW-001"));
     assert.equal(snap.links.awsEndpoints, undefined, "an incomplete endpoint list isn't shared with other providers");
+    assert.equal(snap.links.awsOrigins, undefined, "nor is an incomplete list of origins");
     restore();
     install();
   });
@@ -223,6 +224,82 @@ describe("AWS scan against the mocked API", () => {
       ["vendor.mock.example"],
     );
     assert.equal(cf.filter((f) => f.checkId === "XP-007").length, 0);
+  });
+
+  test("Cloudflare rates an exposed origin by what the entity's AWS account says about its security groups", async () => {
+    const { repo, scanner } = setup({ cloudflare: true });
+    const ats = () =>
+      Object.fromEntries(
+        findingsOf(repo, MOCK_ACCOUNT)
+          .filter((f) => f.checkId === "ATS-001" && ["origin-api.mock.example", "shop.mock.example"].includes(f.resource))
+          .map((f) => [f.resource, f]),
+      );
+    try {
+      await scanner.start("setup").done;
+      await scanner.start("manual").done;
+      // The AWS scan shares who can reach its origins, by kind only: no ranges.
+      const origins = snapshotOf(repo).links.awsOrigins;
+      assert.deepEqual(
+        origins.map((o: { kind: string; web: string; resource: string }) => `${o.kind} ${o.web} ${o.resource}`).sort(),
+        [
+          "elb open load balancer legacy-elb",
+          "elb open load balancer web-alb",
+          "ip open instance web-1 (i-0web00000000000001)",
+          "ip open load balancer eni-0alb0000000000001",
+        ],
+        "the database's group admits no web traffic, so it isn't an origin Keelson can judge",
+      );
+      // Both origins let anyone in: critical, naming the security group and the AWS finding that reports it.
+      let found = ats();
+      assert.deepEqual(
+        Object.values(found).map((f) => f.severity),
+        ["critical", "critical"],
+      );
+      for (const f of Object.values(found)) {
+        const chain = f.evidence!.chain!;
+        assert.ok(
+          chain.some((s) => s.label === "Security group" && /^web \(sg-/.test(s.value)),
+          f.resource,
+        );
+        assert.ok(chain.some((s) => s.label === "Also reported" && s.value.includes("XP-006")));
+      }
+      assert.ok(
+        findingsOf(repo)
+          .find((f) => f.checkId === "XP-006")!
+          .evidence!.chain!.some((s) => s.label === "Also reported" && s.value.includes("ATS-001")),
+      );
+
+      // The web group is narrowed to Cloudflare's ranges: the exposed addresses are only a note, and XP-006 passes.
+      mockAws.cloudflareOnly = true;
+      await scanner.start("manual").done;
+      await scanner.start("manual").done;
+      found = ats();
+      assert.deepEqual(
+        Object.values(found).map((f) => f.severity),
+        ["low", "low"],
+      );
+      assert.match(found["shop.mock.example"].detail, /only Cloudflare's address ranges/);
+      assert.equal(findingsOf(repo).filter((f) => f.checkId === "XP-006").length, 0);
+
+      // When the prefix list can't be read, the origin can't be judged: a coverage gap, and ATS-001 rates it as before.
+      restore();
+      install({ deny: [/Action=GetManagedPrefixListEntries/] });
+      await scanner.start("manual").done;
+      await scanner.start("manual").done;
+      const gap = snapshotOf(repo).coverage.find((c: { key: string }) => c.key === "prefixLists");
+      assert.equal(gap.ok, false);
+      assert.equal(gap.permission, "ec2:GetManagedPrefixListEntries");
+      found = ats();
+      assert.deepEqual(
+        Object.values(found).map((f) => f.severity),
+        ["critical", "critical"],
+      );
+      assert.ok(Object.values(found).every((f) => !f.evidence!.chain!.some((s) => s.label === "AWS origin")));
+    } finally {
+      mockAws.cloudflareOnly = false;
+      restore();
+      install();
+    }
   });
 
   test("an address that leaves the account between scans makes the records that still point at it dangling", async () => {

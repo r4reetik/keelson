@@ -1,11 +1,12 @@
 // What an AWS scan stores for the dashboard: one row per region (and one for the
-// account's global resources) for the Regions page, the endpoints other providers'
-// checks compare against, and the domains the account owns.
+// account's global resources) for the Regions page, the endpoints, addresses and
+// origins other providers' checks compare against, and the domains the account owns.
 
 import { countBySeverity } from "../../shared/severity.ts";
-import type { AddressHistory, ProviderLinks, RegionRow } from "../../shared/api.ts";
+import type { AddressHistory, AwsOrigin, ProviderLinks, RegionRow } from "../../shared/api.ts";
 import type { Result } from "../../core/types.ts";
-import { GLOBAL, type AwsInventory } from "./types.ts";
+import { opensWeb } from "./checks/define.ts";
+import { GLOBAL, type AwsInventory, type AwsSecurityGroup } from "./types.ts";
 
 const counted = (pairs: [string, unknown[] | null | undefined][]): RegionRow["resources"] =>
   pairs.flatMap(([label, list]) => (list ? [{ label, count: list.length }] : []));
@@ -66,6 +67,43 @@ export function ownAddresses(inv: AwsInventory): string[] | null {
   return [...new Set(inv.regions.flatMap((r) => [...r.addresses!, ...r.interfaces!.flatMap((i) => i.publicIp ?? [])]))];
 }
 
+/** Who a set of security groups lets reach ports 80 and 443, or null when Keelson can't tell (see AwsOrigin). */
+export function webAccess(groups: AwsSecurityGroup[]): Pick<AwsOrigin, "web" | "groups"> | null {
+  const named = (gs: AwsSecurityGroup[]) => gs.map((g) => ({ id: g.id, name: g.name }));
+  const open = groups.filter(opensWeb);
+  if (open.length) return { web: "open", groups: named(open) };
+  if (!groups.length || groups.some((g) => !g.webFrom || g.webFrom.prefixLists.length)) return null;
+  if (groups.some((g) => g.webFrom!.other)) return { web: "other", groups: named(groups) };
+  // No rule for the web ports at all: Cloudflare can't reach it there either, so it's served some other way.
+  if (groups.some((g) => g.webFrom!.cloudflare)) return { web: "cloudflare", groups: named(groups) };
+  return null;
+}
+
+/**
+ * Who can reach the account's web origins: its load balancers by DNS name, and every network interface with a public
+ * address. Null when a region's security groups, load balancers or interfaces couldn't be read.
+ */
+export function ownOrigins(inv: AwsInventory): AwsOrigin[] | null {
+  if (inv.regions.some((r) => !r.securityGroups || !r.loadBalancers || !r.interfaces)) return null;
+  const out: AwsOrigin[] = [];
+  for (const r of inv.regions) {
+    const groupsOf = (ids: string[]) => r.securityGroups!.filter((g) => ids.includes(g.id));
+    // A load balancer without groups of its own (a network load balancer) is judged through its targets' addresses.
+    for (const lb of r.loadBalancers!) {
+      const access = lb.securityGroups.length ? webAccess(groupsOf(lb.securityGroups)) : null;
+      if (access) out.push({ kind: "elb", name: lb.dnsName, region: r.name, resource: `load balancer ${lb.name}`, ...access });
+    }
+    for (const i of r.interfaces!) {
+      const access = i.publicIp ? webAccess(groupsOf(i.securityGroups)) : null;
+      if (!access) continue;
+      const inst = i.kind === "instance" ? r.instances?.find((x) => x.id === i.owner) : undefined;
+      const resource = inst ? `instance ${inst.name ? `${inst.name} (${inst.id})` : inst.id}` : `${i.kind} ${i.id}`;
+      out.push({ kind: "ip", name: i.publicIp!, region: r.name, resource, ...access });
+    }
+  }
+  return out;
+}
+
 const KEEP_RELEASED_DAYS = 180;
 const MAX_RELEASED = 2000;
 
@@ -93,11 +131,13 @@ export function awsLinks(inv: AwsInventory): ProviderLinks {
   const complete = !inv.skippedRegions.length;
   const endpoints = complete ? ownEndpoints(inv) : null;
   const addresses = complete ? ownAddresses(inv) : null;
+  const origins = complete ? ownOrigins(inv) : null;
   return {
     awsAccounts: [inv.accountId],
     awsReleased: inv.released,
     ...(endpoints ? { awsEndpoints: endpoints } : {}),
     ...(addresses ? { awsAddresses: addresses } : {}),
+    ...(origins ? { awsOrigins: origins } : {}),
   };
 }
 

@@ -58,11 +58,11 @@ of those accounts, and are skipped when the entity has no scanned account on the
 
 **Severity:** High · **Attack path** · **Reads:** DNS records, Public DNS lookups · [Cloudflare docs](https://developers.cloudflare.com/fundamentals/security/protect-your-origin-server/)
 
-Cloudflare only protects traffic that goes through it. Once an attacker knows the origin address, they can attack it directly, around the WAF and DDoS protection.
+Cloudflare only protects traffic that goes through it. Once an attacker knows the origin address, they can attack it directly, around the WAF and DDoS protection. When the origin is a load balancer or address in one of the entity's AWS accounts, its security groups decide how bad that is: critical when they let anyone in, low when they admit only Cloudflare's ranges.
 
 **How to fix**
 
-Move the exposed record behind the proxy or to another address, change the origin IP, and allow only Cloudflare's IP ranges (or a Tunnel) at the origin.
+Move the exposed record behind the proxy or to another address, change the origin IP, and allow only Cloudflare's IP ranges (or a Tunnel) at the origin. On AWS, that means replacing 0.0.0.0/0 on ports 80 and 443 in the origin's security group with Cloudflare's ranges.
 
 #### ATS-002: Proxied origins can be reached without Cloudflare
 
