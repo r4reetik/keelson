@@ -1,13 +1,13 @@
 // Every data source a scan reads, in one place. A source has a coverage label
 // (shown when it can't be read), the token permission that grants it, and an
-// optional probe for the setup screen. Checks declare the sources they need
+// optional probe for the Add accounts dialog. Checks declare the sources they need
 // (`requires`), so the UI can say exactly which checks a missing permission skips.
 
 export interface Source {
   label: string;
   /** Token permission as Cloudflare's token form names it. */
   permission: string;
-  /** A cheap request that proves the token can read this source (setup screen). */
+  /** A cheap request that proves the token can read this source (Add accounts). */
   probe?: (account: string, zone: string | null) => string | null;
   /** Reached through GraphQL rather than REST. */
   graphql?: boolean;

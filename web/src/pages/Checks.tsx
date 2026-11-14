@@ -13,7 +13,7 @@ const DESCRIPTION =
   "Every check Keelson runs. Turning a check off or changing its severity applies to every account, from the next scan. The counts show the accounts in view.";
 
 export function ChecksPage() {
-  const { multi, can } = useShell();
+  const { multi, can, limited } = useShell();
   const editable = can("checks");
   const { data, error, loading, reload, setData } = useScopedApi<ChecksResponse>("/api/checks");
   const toasts = useKumoToastManager();
@@ -45,7 +45,14 @@ export function ChecksPage() {
   const providers = new Set(data.checks.map((c) => c.provider));
 
   return (
-    <Page title={TITLE} description={editable ? DESCRIPTION : `${DESCRIPTION} Managers and admins can change them.`}>
+    <Page
+      title={TITLE}
+      description={
+        editable
+          ? DESCRIPTION
+          : `${DESCRIPTION} ${limited ? "Since a change reaches every entity, only managers and admins who see every entity can make one." : "Managers and admins can change them."}`
+      }
+    >
       <ListCard
         toolbar={
           <>

@@ -180,12 +180,15 @@ export function ConnectForm({
   provider = "cloudflare",
   entities,
   defaultEntityId,
+  newEntity = true,
   onConnected,
   submitLabel,
 }: {
   provider?: ProviderId;
   entities: SessionEntity[];
   defaultEntityId?: number;
+  /** Offer "New entity…". Off for someone an admin limited to some entities. */
+  newEntity?: boolean;
   onConnected: (r: Connected) => void;
   submitLabel?: (n: number) => string;
 }) {
@@ -219,7 +222,7 @@ export function ConnectForm({
       if (r.token.valid && !accountIds.length) {
         // A token that reaches an account already added most likely belongs to the same company.
         const sibling = r.accounts.find((a) => a.added && a.entityId != null);
-        if (defaultEntityId == null && sibling) setEntity(String(sibling.entityId));
+        if (defaultEntityId == null && sibling && entities.some((e) => e.id === sibling.entityId)) setEntity(String(sibling.entityId));
         const fresh = r.accounts
           .filter((a) => !a.added)
           .map((a) => a.id)
@@ -353,7 +356,7 @@ export function ConnectForm({
               value={entity}
               onValueChange={(v) => setEntity(String(v))}
               description={`The company or team that owns these ${info.accounts}. An entity can hold accounts from every platform. Ones already added stay where they are.`}
-              items={{ ...Object.fromEntries(entities.map((e) => [String(e.id), e.name])), [NEW]: "New entity…" }}
+              items={{ ...Object.fromEntries(entities.map((e) => [String(e.id), e.name])), ...(newEntity ? { [NEW]: "New entity…" } : {}) }}
             />
           )}
           {entity === NEW && (

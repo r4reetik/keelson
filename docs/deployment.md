@@ -59,6 +59,10 @@ The admin then adds people on the **Users** page, choosing a role for each (view
 shown once, for the admin to hand over; the person chooses their own password when they first sign in. Resetting a
 password works the same way and signs that person out everywhere. Keelson always keeps at least one admin.
 
+To give someone only some entities, for example a client's team when you run Keelson for several companies, untick
+**All entities** when adding them (or choose **Choose entities** in their row later) and tick theirs. They see and
+change only those entities; everything else answers as if it didn't exist. Admins always see every entity.
+
 ## Behind Cloudflare Access
 
 If you already use Cloudflare Zero Trust, put Keelson behind a Cloudflare Tunnel and an Access application,

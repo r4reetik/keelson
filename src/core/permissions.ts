@@ -1,4 +1,4 @@
-// Token verification and a fast permission probe for the setup screen: one cheap
+// Token verification and a fast permission probe for the Add accounts dialog: one cheap
 // request per token permission, built from the source registry (sources.ts), with
 // the checks that permission powers.
 
@@ -125,7 +125,7 @@ export async function probePermissions(token: string, accountId: string): Promis
 /**
  * Link that opens Cloudflare's "create user API token" form pre-filled with the
  * read permissions that have documented template keys. The rest are listed on
- * the setup screen for the user to add, or they can pick the "Read all
+ * the Add accounts dialog for the user to add, or they can pick the "Read all
  * resources" template, which covers everything.
  */
 export function tokenTemplateUrl(accountId?: string | null): string {

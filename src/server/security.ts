@@ -40,9 +40,16 @@ const SESSION_REFRESH_MS = 3600_000;
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
 /** Who everyone is when sign-in is off: the proxy has already decided they may get in. */
-const PROXY_USER: SessionUser = { id: 0, username: "", name: null, role: "admin", mustChangePassword: false };
+const PROXY_USER: SessionUser = { id: 0, username: "", name: null, role: "admin", mustChangePassword: false, entities: null };
 
-export const sessionUser = (u: User): SessionUser => ({ id: u.id, username: u.username, name: u.name, role: u.role, mustChangePassword: u.mustChangePassword });
+export const sessionUser = (u: User): SessionUser => ({
+  id: u.id,
+  username: u.username,
+  name: u.name,
+  role: u.role,
+  mustChangePassword: u.mustChangePassword,
+  entities: u.entities,
+});
 
 export interface NewAdmin {
   username: string;

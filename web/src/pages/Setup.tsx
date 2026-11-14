@@ -1,100 +1,74 @@
-// First run, once the admin exists: pick the platform, create its credential
-// there, then choose the accounts to scan. Someone who uses one platform sees
-// only that one's steps. A role that can't connect accounts is told to wait.
+// Before any account is connected: the Overview says what Keelson does and how to
+// start, and links to adding accounts on the Accounts page, where the platform
+// choice and its steps live. Other pages that need an account say so in one line.
+// A role that can't connect accounts is told who can.
 
-import { useState } from "react";
-import { Button, LayerCard } from "@cloudflare/kumo";
-import { EyeIcon, HardDrivesIcon, LockKeyIcon } from "@phosphor-icons/react";
-import { Wordmark } from "../components/brand.tsx";
-import { ConnectForm, ProviderPicker, TokenHelp } from "../components/connect.tsx";
-import { Card } from "../components/ui.tsx";
-import { api, PROVIDER_INFO, PROVIDERS, providerList, ROLE_INFO, withArticle, type ProviderId, type Session } from "../lib.ts";
+import { Button } from "@cloudflare/kumo";
+import { EyeIcon, HardDrivesIcon, LockKeyIcon, PlusIcon } from "@phosphor-icons/react";
+import { Card, NoRows, Page } from "../components/ui.tsx";
+import { link, navigate, providerList } from "../lib.ts";
+import { useShell } from "../shell.tsx";
 
-export function SetupPage({ onDone }: { onDone: () => void }) {
-  const [provider, setProvider] = useState<ProviderId>(PROVIDERS[0]);
-  const info = PROVIDER_INFO[provider];
+/** Opens the Accounts page with its Add accounts dialog. */
+export const ADD_ACCOUNTS = "/accounts?add=1";
+
+export function GetStarted() {
+  const { can } = useShell();
+  const add = can("accounts");
+  const assurances = [
+    [EyeIcon, "Read-only", "Keelson never changes anything in your accounts."],
+    [HardDrivesIcon, "Stays here", "Results and credentials stay on the machine Keelson runs on."],
+    [LockKeyIcon, "No telemetry", "It talks to your platforms, and checks your own hostnames for takeovers (you can turn that off)."],
+  ] as const;
   return (
-    <div className="min-h-full bg-kumo-canvas">
-      <div className="flex h-14 items-center border-b border-kumo-hairline bg-kumo-base px-6">
-        <Wordmark />
-      </div>
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-6 md:p-8 lg:py-9">
-        <header>
-          <h1 className="m-0 text-3xl font-semibold text-kumo-default">Connect your accounts</h1>
-          <p className="mt-1.5 text-lg leading-normal text-pretty text-kumo-subtle">
-            Keelson scans your configuration on {providerList()} for security problems and best-practice gaps, then tracks them until they're fixed.
-          </p>
-        </header>
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Assurance icon={<EyeIcon />} title="Read-only" text="It never changes anything in your accounts." />
-          <Assurance icon={<HardDrivesIcon />} title="Stays here" text="Results and tokens stay on this machine." />
-          <Assurance
-            icon={<LockKeyIcon />}
-            title="No telemetry"
-            text={`It talks to ${info.label}, and checks your own hostnames for takeovers (you can turn that off).`}
-          />
-        </div>
-
-        <Card title="1. Choose a platform">
-          <ProviderPicker value={provider} onChange={setProvider} />
-        </Card>
-        <Card title={`2. Create ${info.readOnlyCredential ? `a read-only ${info.credential}` : withArticle(info.credential)}`}>
-          <TokenHelp provider={provider} />
-        </Card>
-        <Card title={`3. Paste it and choose ${info.accounts}`}>
-          <ConnectForm key={provider} provider={provider} entities={[]} onConnected={onDone} />
-        </Card>
-
+    <Page title="Overview" description={`Keelson scans your configuration on ${providerList()} for security problems, then tracks each one until it's fixed.`}>
+      <Card
+        title="Connect your first account"
+        footer={
+          add ? (
+            <Button variant="primary" icon={<PlusIcon />} onClick={() => navigate(ADD_ACCOUNTS)}>
+              Add accounts
+            </Button>
+          ) : undefined
+        }
+      >
         <p className="text-sm text-kumo-subtle">
-          You can add more later from <span className="font-medium text-kumo-default">Accounts</span>: other {info.accounts}, the same company's accounts on
-          other platforms, or accounts that belong to a different company. Group them into entities and decide which ones appear together.
+          {add
+            ? "Choose a platform, create a credential there with the steps Keelson shows, and pick the accounts to scan. The first scan starts as soon as you add them, and findings show up here."
+            : "Nothing is connected yet. An admin or a manager connects accounts; once they do, findings show up here."}
         </p>
-      </div>
-    </div>
+        <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-3">
+          {assurances.map(([Icon, title, text]) => (
+            <div key={title} className="flex gap-3">
+              <Icon className="mt-0.5 h-4 w-4 shrink-0 text-kumo-subtle" aria-hidden />
+              <div className="min-w-0">
+                <dt className="text-sm font-medium text-kumo-default">{title}</dt>
+                <dd className="m-0 text-sm text-kumo-subtle">{text}</dd>
+              </div>
+            </div>
+          ))}
+        </dl>
+      </Card>
+    </Page>
   );
 }
 
-function Assurance({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
+/** For pages that need an account, before there is one. */
+export function NoAccountsYet() {
+  const { can } = useShell();
   return (
-    <LayerCard className="flex h-full flex-col gap-1 p-4">
-      <div className="flex items-center gap-2 text-base font-medium text-kumo-default">
-        <span className="text-kumo-brand">{icon}</span>
-        {title}
-      </div>
-      <p className="text-sm text-kumo-subtle">{text}</p>
-    </LayerCard>
-  );
-}
-
-/** Signed in, but no account is connected and this role can't connect one. */
-export function NotConnectedPage({ session, onRefresh }: { session: Session; onRefresh: () => void }) {
-  const signOut = async () => {
-    await api("/api/logout", { method: "POST", body: {} }).catch(() => {});
-    onRefresh();
-  };
-  return (
-    <div className="min-h-full bg-kumo-canvas">
-      <div className="flex h-14 items-center border-b border-kumo-hairline bg-kumo-base px-6">
-        <Wordmark />
-      </div>
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-6 md:p-8 lg:py-9">
-        <header>
-          <h1 className="m-0 text-3xl font-semibold text-kumo-default">No accounts yet</h1>
-          <p className="mt-1.5 text-lg leading-normal text-pretty text-kumo-subtle">
-            Nobody has connected an account to Keelson yet. An admin or a manager connects them; you're signed in as {session.user?.username} (
-            {ROLE_INFO[session.user?.role ?? "viewer"].label}), which can't.
-          </p>
-        </header>
-        <div className="flex gap-2">
-          <Button variant="primary" onClick={onRefresh}>
-            Check again
-          </Button>
-          <Button variant="secondary" onClick={() => void signOut()}>
-            Sign out
-          </Button>
-        </div>
-      </div>
-    </div>
+    <NoRows>
+      {can("accounts") ? (
+        <>
+          No accounts yet.{" "}
+          <a {...link(ADD_ACCOUNTS)} className="text-kumo-link hover:underline">
+            Add accounts
+          </a>{" "}
+          to see this page.
+        </>
+      ) : (
+        "No accounts yet. An admin or a manager connects them."
+      )}
+    </NoRows>
   );
 }

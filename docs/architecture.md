@@ -33,7 +33,7 @@ flowchart LR
 ## Providers
 
 Every account belongs to one provider (Cloudflare, Vercel or AWS), recorded on the account. The scanner, the account
-routes and the setup screen only talk to a provider through the `Provider` interface in `src/providers/types.ts`:
+routes and the Add accounts dialog only talk to a provider through the `Provider` interface in `src/providers/types.ts`:
 verify a credential, list the accounts it reaches, probe what it can read, and scan an account. `src/providers/index.ts`
 lists them. Cloudflare's code predates providers and lives in `src/core`, wrapped by `src/providers/cloudflare.ts`;
 Vercel's lives in `src/providers/vercel/` and AWS's in `src/providers/aws/`, and new providers get their own folder
@@ -123,6 +123,14 @@ and `PERMISSION_ROLE` says which role a permission starts at. `routes()` in `src
 route that isn't GET has no such guard (or `anyone`, for signing in), so no change can be registered open to every
 role. The web reads the same table through `useShell().can` to hide what a role can't do; the server's check is the
 one that counts.
+
+An admin can limit a user to some entities (`user_entities`, with a `limited` flag on the user so losing the last
+entity leaves them seeing nothing rather than everything). `Repo.view(limit)` gives the entities and accounts such a
+user may see, and everything they reach goes through it: `/api/session`, `resolveScope` in `withScope` (so another
+entity's scope key is a 404), the accounts list, permalinks, owners, `every: true` scans and triage. Accounts and
+entities a route changes are looked up with `ownAccount` and `ownEntity` (`src/server/access.ts`). Changes that reach
+every entity (`INSTANCE_WIDE` in `src/shared/roles.ts`: checks, settings, users) and creating, removing or arranging
+entities are refused to a limited user whatever their role. Admins are never limited.
 
 ## Code layout
 

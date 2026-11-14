@@ -1,16 +1,18 @@
 // Connecting accounts from any provider: verify a credential (a token, an access
 // key), add accounts, rename, move, replace the credential, remove. Available before any account is connected. The
-// request names its provider (`provider`, Cloudflare when absent).
+// request names its provider (`provider`, Cloudflare when absent). Someone limited to some entities works only on
+// those entities' accounts (src/server/access.ts) and can't create an entity.
 
 import type { AppContext } from "../env.ts";
 import type { Provider } from "../../providers/types.ts";
 import type { Routes } from "../router.ts";
 import { PROVIDER } from "../../providers/index.ts";
 import { requirePermission } from "../middleware.ts";
+import { ownAccount, reaches, unlimitedOnly, viewOf } from "../access.ts";
 import { publicAccount, publicEntity } from "../present.ts";
 import { ACCOUNT_ID_PATTERN } from "../../shared/providers.ts";
 import { accountIds, bool, cleanName, direction, param, providerId, readJson, requireJson, token } from "../validate.ts";
-import { badRequest, conflict, notFound } from "../errors.ts";
+import { badRequest, conflict } from "../errors.ts";
 import type { AccountRow, AccountsResponse, AddAccountsResponse, TemplateResponse, VerifyResponse } from "../../shared/api.ts";
 
 /** Permissions are probed for the first few accounts a token can read; the rest are assumed alike. */
@@ -18,11 +20,6 @@ const PROBE_LIMIT = 10;
 
 export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
   const manage = r.with(requirePermission("accounts"));
-  const account = (id: string) =>
-    repo.accounts.get(id) ??
-    (() => {
-      throw notFound("Unknown account");
-    })();
   /** Drops tokens that no account references any more. */
   const pruneTokens = () => vault.retain(new Set(repo.accounts.list().map((a) => a.tokenId)));
   const visibleAccounts = (p: Provider, t: string) => p.listAccounts(t).catch(() => [] as { id: string; name: string }[]);
@@ -42,13 +39,18 @@ export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
     const [info, visible] = await Promise.all([p.verify(t, ids), visibleAccounts(p, t)]);
     if (!info.valid) return c.json({ token: info, accounts: [], probes: {}, probeLimit: PROBE_LIMIT } satisfies VerifyResponse);
     const known = new Map(repo.accounts.list().map((a) => [a.id, a]));
+    const user = c.get("user");
     const probes = Object.fromEntries(await Promise.all(ids.slice(0, PROBE_LIMIT).map(async (id) => [id, await p.probe(t, id)] as const)));
     return c.json({
       token: info,
       probes,
       probeLimit: PROBE_LIMIT,
       templateUrl: p.tokenHelp(ids[0] || null).templateUrl ?? undefined,
-      accounts: visible.map((a) => ({ ...a, added: known.has(a.id), entityId: known.get(a.id)?.entityId ?? null })),
+      // An account already connected in an entity this user can't see says so, but not which entity.
+      accounts: visible.map((a) => {
+        const k = known.get(a.id);
+        return { ...a, added: !!k, entityId: k && reaches(user, k.entityId) ? k.entityId : null };
+      }),
     } satisfies VerifyResponse);
   });
 
@@ -65,6 +67,9 @@ export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
     if (unseen) throw badRequest(`This ${p.info.credential} can't read ${p.info.account} ${unseen}.`);
     const other = ids.map((id) => repo.accounts.get(id)).find((a) => a && a.provider !== p.info.id);
     if (other) throw badRequest(`${other.id} is already connected as a ${PROVIDER[other.provider].info.label} account.`);
+    const user = c.get("user");
+    const elsewhere = ids.map((id) => repo.accounts.get(id)).find((a) => a && !reaches(user, a.entityId));
+    if (elsewhere) throw unlimitedOnly(`change ${elsewhere.id}: it is connected in another entity`);
 
     // Accounts already here only get the new token and stay in their entity, so a new entity is
     // created only when at least one account is new; otherwise it would be left empty.
@@ -72,10 +77,16 @@ export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
     let entityId: number;
     if (body.entityId != null) {
       const e = repo.entities.get(Number(body.entityId));
-      if (!e) throw badRequest("That entity no longer exists.");
+      if (!e || !reaches(user, e.id)) throw badRequest("That entity no longer exists.");
       entityId = e.id;
     } else if (!fresh.length) {
       entityId = repo.accounts.get(ids[0])!.entityId;
+    } else if (user.entities) {
+      // Someone limited to one entity adds to it without being asked; with several, they pick one.
+      const own = viewOf(repo, c).entities;
+      if (!own.length) throw unlimitedOnly("create an entity");
+      if (own.length > 1) throw badRequest("Choose which of your entities to add these accounts to.");
+      entityId = own[0].id;
     } else {
       const name = body.entityName != null ? cleanName(body.entityName) : visible.get(ids[0]) || "My organization";
       if (!name) throw badRequest("Give the entity a name.");
@@ -100,9 +111,9 @@ export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
   });
 
   r.get("/api/accounts", (c) => {
-    const accounts = repo.accounts.list();
+    const { accounts, entities } = viewOf(repo, c);
     return c.json({
-      entities: repo.entities.list().map((e) => ({
+      entities: entities.map((e) => ({
         ...publicEntity(e),
         accounts: accounts
           .filter((a) => a.entityId === e.id)
@@ -121,13 +132,13 @@ export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
   });
 
   manage.patch("/api/accounts/:id", async (c) => {
-    const a = account(param(c, "id"));
+    const a = ownAccount(repo, c, param(c, "id"));
     const body = await requireJson(c);
     // Validate everything first, so a rejected request changes nothing.
     const alias = body.alias === undefined ? undefined : body.alias == null ? null : cleanName(body.alias) || null;
     const scheduled = body.scheduled === undefined ? undefined : bool(body.scheduled, "scheduled");
     const entity = body.entityId === undefined ? undefined : repo.entities.get(Number(body.entityId));
-    if (body.entityId !== undefined && !entity) throw badRequest("Unknown entity");
+    if (body.entityId !== undefined && (!entity || !reaches(c.get("user"), entity.id))) throw badRequest("Unknown entity");
     const move = body.move === undefined ? undefined : direction(body.move);
     repo.store.tx(() => {
       if (alias !== undefined) repo.accounts.update(a.id, { alias });
@@ -139,7 +150,7 @@ export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
   });
 
   manage.put("/api/accounts/:id/token", async (c) => {
-    const a = account(param(c, "id"));
+    const a = ownAccount(repo, c, param(c, "id"));
     const p = PROVIDER[a.provider];
     const t = token((await readJson(c))?.token, a.provider);
     const info = await p.verify(t, [a.id]);
@@ -152,7 +163,7 @@ export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
   });
 
   manage.delete("/api/accounts/:id", (c) => {
-    const a = account(param(c, "id"));
+    const a = ownAccount(repo, c, param(c, "id"));
     if (scanner.isBusy(a.id)) throw conflict("Wait for this account's scan to finish.");
     repo.accounts.remove(a.id);
     pruneTokens();

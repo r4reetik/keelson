@@ -207,6 +207,17 @@ export function role(v: unknown): Role {
   return v;
 }
 
+/** The entities to limit a user to: null (or absent) for every entity, otherwise at least one entity of `known`. */
+export function entityLimit(v: unknown, known: { id: number }[]): number[] | null {
+  if (v == null) return null;
+  if (!Array.isArray(v)) throw badRequest("entities must be a list of entity IDs, or null for every entity.");
+  const ids = [...new Set(v.map(Number))];
+  if (!ids.length) throw badRequest("Pick at least one entity, or All entities.");
+  const unknown = ids.find((id) => !known.some((e) => e.id === id));
+  if (unknown !== undefined) throw badRequest("One of those entities no longer exists. Reload and pick again.");
+  return ids.sort((a, b) => a - b);
+}
+
 /** An optional display name for a person; empty clears it. */
 export const personName = (v: unknown): string | null => cleanName(v) || null;
 

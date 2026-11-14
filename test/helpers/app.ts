@@ -1,7 +1,8 @@
 // An app instance over an in-memory store and a temporary data directory, with
 // helpers to call it like the browser does. By default an admin is signed in;
 // `as(role)` gives helpers signed in as a user with another role, and
-// `{ user: null }` starts with nobody, for creating the first admin.
+// `{ user: null }` starts with nobody, for creating the first admin. `limitedAs`
+// signs in a user limited to some entities.
 
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -64,6 +65,11 @@ export function makeApp({ configured = false, trustProxy = false, user = "admin"
     json,
     /** call and json, signed in as a user with this role. */
     as: (role: Role) => helpers(sessionFor(role)),
+    /** call and json, signed in as a new user with this role, limited to these entities. */
+    limitedAs: (role: Role, entities: number[], username = `${role}-limited-${entities.join("-")}`) => {
+      const u = repo.users.create({ username, name: null, role, passwordHash: HASH, mustChangePassword: false, createdBy: null, entities });
+      return { ...helpers(`keelson_session=${auth.startSession(u.id)}`), id: u.id };
+    },
     repo,
     vault,
     scanner,

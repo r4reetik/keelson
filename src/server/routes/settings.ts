@@ -11,6 +11,7 @@ import { notFound } from "../errors.ts";
 import type { CheckRow, ChecksResponse, OwnersResponse, Settings, UpdateStatus } from "../../shared/api.ts";
 import { UpdateChecker } from "../../updates.ts";
 import { requirePermission } from "../middleware.ts";
+import { reaches, viewOf } from "../access.ts";
 
 export function settingsRoutes(r: Routes, { repo, version, updates }: AppContext) {
   const admin = r.with(requirePermission("settings"));
@@ -34,7 +35,7 @@ export function settingsRoutes(r: Routes, { repo, version, updates }: AppContext
   admin.post("/api/updates/check", async (c) => c.json((await checker.check()) satisfies UpdateStatus));
 
   r.get("/api/checks", (c) => {
-    const scope = repo.resolveScope(c.req.query("scope") || "all");
+    const scope = repo.resolveScope(c.req.query("scope") || "all", c.get("user").entities);
     const scans = scope ? latestScans(repo, scope) : [];
     const stats = checkStats(scans);
     const o = repo.settings.overrides();
@@ -73,7 +74,7 @@ export function settingsRoutes(r: Routes, { repo, version, updates }: AppContext
   // Owners to suggest when triaging findings in these accounts (comma-separated ids). An entity is one
   // company, so suggestions come from every account in the same entities and never from other companies.
   r.get("/api/owners", (c) => {
-    const all = repo.accounts.list();
+    const all = viewOf(repo, c).accounts;
     const asked = new Set((c.req.query("accounts") || "").split(",").filter(Boolean));
     const entities = new Set(all.filter((a) => asked.has(a.id)).map((a) => a.entityId));
     const ids = all.filter((a) => entities.has(a.entityId)).map((a) => a.id);
@@ -86,6 +87,14 @@ export function settingsRoutes(r: Routes, { repo, version, updates }: AppContext
     const one = c.req.param("fp");
     const fps = fingerprints(one ? [one] : body.fingerprints);
     const { patch, appendNote } = triagePatch(body);
+    // Someone limited to some entities triages only findings found in them, and nothing is changed if one isn't.
+    const user = c.get("user");
+    if (user.entities)
+      for (const fp of fps) {
+        const where = repo.findings.locate(fp);
+        const account = where && repo.accounts.get(where.accountId);
+        if (!account || !reaches(user, account.entityId)) throw notFound("That finding no longer exists.");
+      }
     // Recorded with the username, so each finding's timeline says who changed it.
     repo.findings.setTriage(fps, patch, c.get("user").username || null, { appendNote });
     return c.json({ ok: true, updated: fps.length });

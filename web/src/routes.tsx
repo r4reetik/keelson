@@ -44,6 +44,8 @@ export interface RouteDef {
   providers?: ProviderId[];
   /** Only for roles with this permission: hidden from the sidebar for everyone else. */
   permission?: Permission;
+  /** Works before any account is connected, though it isn't `global`. */
+  withoutAccounts?: boolean;
 }
 
 // Pages load on demand so the first paint doesn't wait for the chart library.
@@ -111,7 +113,14 @@ export const ROUTES: RouteDef[] = [
     global: true,
     page: page(() => import("./pages/Accounts.tsx"), "AccountsPage"),
   },
-  { path: "/checks", label: "Checks", group: "Manage", icon: ListChecksIcon, page: page(() => import("./pages/Checks.tsx"), "ChecksPage") },
+  {
+    path: "/checks",
+    label: "Checks",
+    group: "Manage",
+    icon: ListChecksIcon,
+    withoutAccounts: true,
+    page: page(() => import("./pages/Checks.tsx"), "ChecksPage"),
+  },
   { path: "/scans", label: "Scans", group: "Manage", icon: ArrowsClockwiseIcon, page: page(() => import("./pages/Scans.tsx"), "ScansPage") },
   {
     path: "/users",

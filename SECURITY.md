@@ -55,7 +55,7 @@ AWS access keys), and a database describing accounts' configuration, including m
   - A strict Content-Security-Policy, framing denied.
   - CSV exports are protected against formula injection.
 - **Require authentication.**
-  - Everyone signs in with their own account, and the server checks their role (viewer, analyst, manager, admin) on every change. Creating the first admin from anywhere but the machine Keelson runs on needs the one-time setup code from its log. Sign-in can only be turned off by declaring an authenticating proxy with `KEELSON_AUTH=none`.
+  - Everyone signs in with their own account, and the server checks their role (viewer, analyst, manager, admin) on every change. A user an admin limited to some entities can't read or change anything in another entity; it answers as if it didn't exist. Creating the first admin from anywhere but the machine Keelson runs on needs the one-time setup code from its log. Sign-in can only be turned off by declaring an authenticating proxy with `KEELSON_AUTH=none`.
   - Sessions are HttpOnly, SameSite=Strict cookies.
   - Passwords are stored as scrypt hashes. Sign-in and setup-code attempts are rate-limited per IP and overall.
 

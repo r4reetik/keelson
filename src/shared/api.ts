@@ -164,6 +164,8 @@ export interface SessionUser {
   role: Role;
   /** Signed in with a one-time password, which must be replaced before anything else. */
   mustChangePassword: boolean;
+  /** The entities this user is limited to, or null for every entity. Admins are never limited. */
+  entities: number[] | null;
 }
 
 /** A user as the Users page lists them. */

@@ -1,31 +1,33 @@
 // Entities: the companies or teams that own accounts, with their own email
 // domains, alert destinations, and whether they appear in "All accounts".
+// Someone limited to some entities edits only theirs (names, domains, alerts), and
+// can't create or remove one, or change how entities sit together: whether one is
+// shown in All accounts, and the order of the list.
 
 import type { AppContext } from "../env.ts";
 import type { Routes } from "../router.ts";
 import { sendTest } from "../../notify.ts";
 import { requirePermission } from "../middleware.ts";
+import { ownEntity, unlimitedOnly } from "../access.ts";
 import { publicEntity } from "../present.ts";
 import { direction, mergeEntity, param, readJson, requireJson, requiredName } from "../validate.ts";
-import { badRequest, conflict, notFound } from "../errors.ts";
+import { badRequest, conflict } from "../errors.ts";
 
 export function entityRoutes(r: Routes, { repo }: AppContext) {
   const manage = r.with(requirePermission("accounts"));
-  const entity = (id: string) =>
-    repo.entities.get(Number(id)) ??
-    (() => {
-      throw notFound("Unknown entity");
-    })();
 
   manage.post("/api/entities", async (c) => {
+    if (c.get("user").entities) throw unlimitedOnly("create an entity");
     const body = await readJson(c);
     const e = repo.entities.create(requiredName(body?.name), { includeInAll: body?.includeInAll !== false });
     return c.json({ ok: true, entity: publicEntity(e) });
   });
 
   manage.patch("/api/entities/:id", async (c) => {
-    const e = entity(param(c, "id"));
+    const e = ownEntity(repo, c, Number(param(c, "id")));
     const body = await requireJson(c);
+    if (c.get("user").entities && (body.includeInAll !== undefined || body.move !== undefined))
+      throw unlimitedOnly("change which entities are shown together or their order");
     // Validate everything first, so a rejected request changes nothing.
     const next = mergeEntity(e, body);
     const move = body.move === undefined ? undefined : direction(body.move);
@@ -37,14 +39,15 @@ export function entityRoutes(r: Routes, { repo }: AppContext) {
   });
 
   manage.delete("/api/entities/:id", (c) => {
-    const e = entity(param(c, "id"));
+    const e = ownEntity(repo, c, Number(param(c, "id")));
+    if (c.get("user").entities) throw unlimitedOnly("remove an entity");
     if (repo.accounts.list().some((a) => a.entityId === e.id)) throw conflict("Move or remove this entity's accounts first.");
     repo.entities.delete(e.id);
     return c.json({ ok: true });
   });
 
   manage.post("/api/entities/:id/test-notification", async (c) => {
-    const e = entity(param(c, "id"));
+    const e = ownEntity(repo, c, Number(param(c, "id")));
     if (!e.notifications.slackWebhookUrl && !e.notifications.webhookUrl) throw badRequest("Add a Slack or webhook URL first.");
     return c.json(await sendTest(e.notifications, repo.settings.get().baseUrl, e.name));
   });

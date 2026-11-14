@@ -1,13 +1,13 @@
 // Every Vercel data source a scan reads. Like Cloudflare's registry (src/core/sources.ts),
 // each source has a coverage label, what grants it, and an optional probe for the
-// setup screen. Vercel tokens can't be limited to reading: a token can do what its
+// Add accounts dialog. Vercel tokens can't be limited to reading: a token can do what its
 // creator's team role allows, so `permission` names the role that can read it.
 
 export interface VercelSource {
   label: string;
   /** Who can read it, as Vercel's team roles describe it. */
   permission: string;
-  /** A cheap request that proves the token can read this source, for a team ID (setup screen). */
+  /** A cheap request that proves the token can read this source, for a team ID (Add accounts). */
   probe?: (team: VercelScope) => string;
   /** Only teams have it: a personal account skips it instead of reporting a gap. */
   teamOnly?: boolean;

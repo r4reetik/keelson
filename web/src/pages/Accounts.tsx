@@ -1,7 +1,8 @@
 // Accounts and the entities (companies or teams) that own them. This is where
 // people decide how accounts are grouped, named and shown: which entities appear
 // in "All accounts", the order of entities and accounts, display names, and
-// each entity's email domains and alert destinations.
+// each entity's email domains and alert destinations. It is also where the first
+// account is added: the Overview's "Add accounts" opens it with ?add=1.
 
 import { useEffect, useState } from "react";
 import { Badge, Button, Dialog, DropdownMenu, Input, Select, SensitiveInput, Switch, Table, Tooltip, useKumoToastManager } from "@cloudflare/kumo";
@@ -25,6 +26,8 @@ import {
   capitalize,
   navigate,
   plural,
+  setParams,
+  useLocation,
   PROVIDER_INFO,
   PROVIDERS,
   sameName,
@@ -35,7 +38,7 @@ import {
   type ProviderId,
   type Severity,
 } from "../lib.ts";
-import { AccountName, DialogHeader, ListCard, Page, PageState, Terms } from "../components/ui.tsx";
+import { AccountName, DialogHeader, ListCard, NoRows, Page, PageState, Terms } from "../components/ui.tsx";
 import { ConnectForm, CredentialFields, joinCredential, ProviderPicker, TokenHelp, type Connected } from "../components/connect.tsx";
 
 type Account = AccountRow;
@@ -57,10 +60,18 @@ const SCANNED = PROVIDERS.map((p) => `${PROVIDER_INFO[p].label} ${PROVIDER_INFO[
 const DESCRIPTION = `The ${SCANNED.slice(0, -1).join(", ")} and ${SCANNED[SCANNED.length - 1]} Keelson scans, grouped by the company or team that owns them. An entity can hold accounts on several platforms, has its own email domains and alerts, and you choose which entities appear together in All accounts.`;
 
 export function AccountsPage() {
-  const { dataVersion, status, refreshSession, setScope, startScan, can } = useShell();
+  const { dataVersion, status, refreshSession, setScope, startScan, can, limited, empty } = useShell();
   const { data, error, loading, reload } = useApi<{ entities: Entity[] }>("/api/accounts", [dataVersion, status?.running, status?.accountId]);
   const toasts = useKumoToastManager();
   const [modal, setModal] = useState<Modal>(null);
+  // ?add=1 (from the Overview before anything is connected) opens Add accounts once, then leaves the address.
+  const { params } = useLocation();
+  const asked = params.has("add") && can("accounts");
+  useEffect(() => {
+    if (!asked) return;
+    setModal({ kind: "add" });
+    setParams({ add: null });
+  }, [asked]);
 
   if (error || !data) return <PageState title={TITLE} description={DESCRIPTION} error={error} loading={loading} empty={false} retry={reload} />;
 
@@ -86,11 +97,14 @@ export function AccountsPage() {
 
   // Every role sees the accounts; only managers and admins change them.
   const manage = can("accounts");
+  // Someone limited to some entities works inside them: they don't create, remove or arrange entities.
   const actions = manage && (
     <>
-      <Button variant="secondary" icon={<PlusIcon />} onClick={() => setModal({ kind: "new-entity" })}>
-        New entity
-      </Button>
+      {!limited && (
+        <Button variant="secondary" icon={<PlusIcon />} onClick={() => setModal({ kind: "new-entity" })}>
+          New entity
+        </Button>
+      )}
       <Button variant="primary" icon={<PlusIcon />} onClick={() => setModal({ kind: "add" })}>
         Add accounts
       </Button>
@@ -99,6 +113,13 @@ export function AccountsPage() {
 
   return (
     <Page title={TITLE} description={DESCRIPTION} actions={actions}>
+      {!entities.length && (
+        <NoRows>
+          {manage
+            ? "No accounts yet. Add accounts to choose a platform, create a credential there, and pick what Keelson scans."
+            : "No accounts yet. An admin or a manager connects them."}
+        </NoRows>
+      )}
       {entities.map((e, i) => (
         <EntityCard
           key={e.id}
@@ -116,6 +137,7 @@ export function AccountsPage() {
           }}
           onScan={can("scan") ? (a) => startScan(`a:${a.id}`) : undefined}
           manage={manage}
+          arrange={manage && !limited}
         />
       ))}
 
@@ -129,9 +151,11 @@ export function AccountsPage() {
             await refresh();
             toasts.add({
               title: r.added.length ? `${plural(r.added.length, unit)} added` : "Credential replaced",
-              description: "Scans have started.",
+              description: empty ? "The first scan has started. Its findings show up on the Overview." : "Scans have started.",
               variant: "success",
             });
+            // The first accounts: back to the Overview, which now shows the scan running.
+            if (empty) navigate("/");
           }}
         />
       )}
@@ -220,6 +244,7 @@ function EntityCard({
   onShow,
   onScan,
   manage,
+  arrange,
 }: {
   entity: Entity;
   entities: Entity[];
@@ -234,6 +259,8 @@ function EntityCard({
   onScan?: (a: Account) => void;
   /** The role can change accounts and entities; otherwise the card only shows them. */
   manage: boolean;
+  /** The user can also show the entity in All accounts, move it, and delete it (not someone limited to some entities). */
+  arrange: boolean;
 }) {
   const n = e.notifications;
   const alerts = [n.slackConfigured && "Slack", n.webhookConfigured && "webhook"].filter(Boolean).join(" and ");
@@ -252,7 +279,7 @@ function EntityCard({
         <Switch
           aria-label={`Show ${e.name} in All accounts`}
           checked={e.includeInAll}
-          disabled={!manage}
+          disabled={!arrange}
           onCheckedChange={(v: boolean) => void patchEntity(e, { includeInAll: v }, v ? `${e.name} is shown in All accounts` : `${e.name} is kept separate`)}
         />
       </span>
@@ -275,19 +302,23 @@ function EntityCard({
                 <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => onModal({ kind: "rename-entity", entity: e })}>
                   Rename
                 </DropdownMenu.Item>
-                <DropdownMenu.Item className="sm:hidden" icon={EyeIcon} onClick={() => void patchEntity(e, { includeInAll: !e.includeInAll })}>
-                  {e.includeInAll ? "Keep out of All accounts" : "Show in All accounts"}
-                </DropdownMenu.Item>
-                <DropdownMenu.Item icon={ArrowUpIcon} disabled={first} onClick={() => void patchEntity(e, { move: "up" })}>
-                  Move up
-                </DropdownMenu.Item>
-                <DropdownMenu.Item icon={ArrowDownIcon} disabled={last} onClick={() => void patchEntity(e, { move: "down" })}>
-                  Move down
-                </DropdownMenu.Item>
-                <DropdownMenu.Separator />
-                <DropdownMenu.Item icon={TrashIcon} variant="danger" disabled={e.accounts.length > 0} onClick={onDeleteEntity}>
-                  {e.accounts.length ? "Delete (move its accounts first)" : "Delete entity"}
-                </DropdownMenu.Item>
+                {arrange && (
+                  <>
+                    <DropdownMenu.Item className="sm:hidden" icon={EyeIcon} onClick={() => void patchEntity(e, { includeInAll: !e.includeInAll })}>
+                      {e.includeInAll ? "Keep out of All accounts" : "Show in All accounts"}
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item icon={ArrowUpIcon} disabled={first} onClick={() => void patchEntity(e, { move: "up" })}>
+                      Move up
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item icon={ArrowDownIcon} disabled={last} onClick={() => void patchEntity(e, { move: "down" })}>
+                      Move down
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Separator />
+                    <DropdownMenu.Item icon={TrashIcon} variant="danger" disabled={e.accounts.length > 0} onClick={onDeleteEntity}>
+                      {e.accounts.length ? "Delete (move its accounts first)" : "Delete entity"}
+                    </DropdownMenu.Item>
+                  </>
+                )}
               </>
             )}
           </DropdownMenu.Content>
@@ -754,6 +785,7 @@ function AddAccountsDialog({
   onClose: () => void;
   onConnected: (r: Connected, unit: string) => void;
 }) {
+  const { limited } = useShell();
   const all = entities.flatMap((e) => e.accounts);
   const count = (p: ProviderId) => all.filter((a) => a.provider === p).length;
   // The first provider wins a tie, since sort is stable.
@@ -770,7 +802,14 @@ function AddAccountsDialog({
           <ProviderPicker value={provider} onChange={setProvider} />
           <TokenHelp provider={provider} />
         </div>
-        <ConnectForm key={provider} provider={provider} entities={entities} defaultEntityId={entityId} onConnected={(r) => onConnected(r, info.account)} />
+        <ConnectForm
+          key={provider}
+          provider={provider}
+          entities={entities}
+          defaultEntityId={entityId}
+          newEntity={!limited}
+          onConnected={(r) => onConnected(r, info.account)}
+        />
       </Dialog>
     </Dialog.Root>
   );

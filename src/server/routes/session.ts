@@ -21,7 +21,8 @@ export function sessionRoutes(r: Routes, { repo, auth, vault, version, updates }
   r.get("/api/session", (c) => {
     const user = auth.user(c);
     const ready = !!user && !user.mustChangePassword;
-    const accounts = repo.accounts.list();
+    // Someone limited to some entities sees only theirs, and "configured" means one of them has an account.
+    const { accounts, entities } = repo.view(user?.entities ?? null);
     return c.json({
       version,
       authRequired: auth.required,
@@ -30,9 +31,7 @@ export function sessionRoutes(r: Routes, { repo, auth, vault, version, updates }
       setupCodeRequired: auth.setupRequired && auth.setupCodeRequired(c),
       configured: accounts.length > 0,
       ...(user ? { user } : {}),
-      ...(ready
-        ? { accounts: accounts.map((a) => publicAccount(vault, a)), entities: repo.entities.list().map(sessionEntity), update: updates?.status() }
-        : {}),
+      ...(ready ? { accounts: accounts.map((a) => publicAccount(vault, a)), entities: entities.map(sessionEntity), update: updates?.status() } : {}),
     } satisfies Session);
   });
 

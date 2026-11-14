@@ -160,6 +160,18 @@ export const MIGRATIONS: string[] = [
     last_login_at TEXT
   );
   `,
+  `
+  -- Users an admin limited to some entities. A limited user sees and changes only
+  -- the accounts of the entities listed for them; everyone else sees every entity.
+  -- The flag is separate from the list, so removing a limited user's last entity
+  -- leaves them seeing nothing rather than everything.
+  ALTER TABLE users ADD COLUMN limited INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE user_entities (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, entity_id)
+  );
+  `,
 ];
 
 export class Store {

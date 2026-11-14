@@ -9,7 +9,7 @@ export interface AwsSource {
   label: string;
   /** The IAM actions that read it. */
   permission: string;
-  /** A cheap request that proves the access key can read this source (setup screen). */
+  /** A cheap request that proves the access key can read this source (Add accounts). */
   probe?: (c: AwsClient) => Promise<unknown>;
   /** Read in every enabled region. A region that refuses (a service control policy, for example) is left out rather than failing the source. */
   regional?: boolean;

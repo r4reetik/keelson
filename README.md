@@ -199,8 +199,8 @@ In the Cloudflare dashboard, go to **My Profile → API Tokens → Create Token*
 the accounts you want to scan: one token can cover several accounts. Accounts that belong to
 another company usually need their own token, created by someone with access to them.
 
-If you'd rather grant the minimum, the setup screen has a pre-filled link with the read
-permissions Cloudflare lets a link include, and lists the rest to add yourself. Setup checks the
+If you'd rather grant the minimum, Add accounts has a pre-filled link with the read
+permissions Cloudflare lets a link include, and lists the rest to add yourself. It checks the
 token against every permission before you connect. Anything it can't read is listed with the
 permission it needs, and the checks that depend on it are **skipped, never passed**
 ([full list](docs/permissions.md)). Two sources
@@ -256,7 +256,13 @@ chooses their own password when they first sign in. Every role sees every page:
 | Manager | Also connect and remove accounts, replace credentials, edit entities and their alerts, and turn checks off or change their severity |
 | Admin | Also add and remove users, change their roles, and change Keelson's settings |
 
-Roles apply to every entity and account. Each finding's timeline records who triaged it. Locked out? An admin can
+A role applies to every entity, unless the admin limits the person to some entities: an agency can give a client's
+people their own entity and nothing else. Someone limited to some entities sees only those entities' accounts,
+findings, scans, exports and reports ("All accounts" is their entities), and their role applies there. They can't
+create, remove or reorder entities, or change what applies to every entity (turning checks off, settings, users).
+Admins always see every entity.
+
+Each finding's timeline records who triaged it. Locked out? An admin can
 reset anyone's password from the Users page; if nobody can sign in as an admin, run
 `docker exec keelson node dist/bin.js --reset-password <username>` for a one-time password.
 
@@ -306,7 +312,7 @@ history, email domains and alert destinations.
   - There is no telemetry.
 - **Hardened web app.**
   - Every user has their own password, stored as an scrypt hash. Sign-in is rate-limited, and sessions are HttpOnly SameSite=Strict cookies.
-  - The server checks the user's role on every change; a changed role or a removed user applies at once.
+  - The server checks the user's role on every change, and the entities they may see on every request; a changed role or limit, or a removed user, applies at once.
   - Creating the first admin from anywhere but the machine Keelson runs on needs the setup code from its log.
   - With sign-in off on loopback, Host-header checks block DNS rebinding.
   - State-changing requests must be same-origin JSON, which blocks CSRF.

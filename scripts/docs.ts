@@ -121,7 +121,7 @@ export function permissionsDoc(): string {
     "- **Logpush jobs** can only be listed with a write permission, so Keelson doesn't list them; it reads Logpush health from GraphQL analytics instead.",
     "",
     "A source the token can't read shows up under **Scans → Data coverage** with the permission it needs, and the checks that depend on it are",
-    "skipped rather than passed. The setup screen tests a token against each source before you connect it.",
+    "skipped rather than passed. Add accounts tests a token against each source before you connect it.",
     "",
     "| Source | Permission | Checks that read it |",
     "|---|---|---|",

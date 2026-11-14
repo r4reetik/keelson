@@ -21,6 +21,10 @@ export interface Shell {
   multi: boolean;
   /** Whether the signed-in user's role may make this kind of change. Controls it can't use are hidden or disabled. */
   can: (permission: Permission) => boolean;
+  /** An admin limited the user to some entities: they can't create, remove or arrange entities, or change what applies to every entity. */
+  limited: boolean;
+  /** No account is in view, because none the user can see is connected yet. Pages that need one show GetStarted instead. */
+  empty: boolean;
 }
 
 export const ShellContext = createContext<Shell | null>(null);

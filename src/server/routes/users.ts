@@ -1,12 +1,13 @@
-// User management, for admins: add people with a role and a one-time password,
-// change roles, reset passwords, remove people. Keelson always keeps one admin.
+// User management, for admins: add people with a role, the entities they may see
+// and a one-time password, change roles and entities, reset passwords, remove
+// people. Keelson always keeps one admin, and admins always see every entity.
 
 import type { Context } from "hono";
 import type { AppContext, AppEnv } from "../env.ts";
 import type { Routes } from "../router.ts";
 import { requirePermission } from "../middleware.ts";
 import { sessionUser } from "../security.ts";
-import { param, personName, requireJson, role, username } from "../validate.ts";
+import { entityLimit, param, personName, requireJson, role, username } from "../validate.ts";
 import { badRequest, conflict, notFound } from "../errors.ts";
 import { hashPassword, oneTimePassword } from "../passwords.ts";
 import { log } from "../../log.ts";
@@ -32,11 +33,14 @@ export function userRoutes(r: Routes, { repo, auth }: AppContext) {
     const body = await requireJson(c);
     const name = username(body.username);
     if (repo.users.byUsername(name)) throw conflict(`${name} already has an account. Pick another username.`);
+    const r = role(body.role);
+    const entities = r === "admin" ? null : entityLimit(body.entities, repo.entities.list());
     const password = oneTimePassword();
     const user = repo.users.create({
       username: name,
       name: personName(body.name),
-      role: role(body.role),
+      role: r,
+      entities,
       passwordHash: await hashPassword(password),
       mustChangePassword: true,
       createdBy: by(c),
@@ -51,7 +55,9 @@ export function userRoutes(r: Routes, { repo, auth }: AppContext) {
     const next = body.role === undefined ? u.role : role(body.role);
     if (u.role === "admin" && next !== "admin" && repo.users.admins() < 2)
       throw conflict("Keelson needs at least one admin. Make someone else an admin first.");
-    repo.users.update(u.id, { role: next, ...(body.name !== undefined ? { name: personName(body.name) } : {}) });
+    // Validate everything first, so a rejected request changes nothing.
+    const entities = next === "admin" || body.entities === undefined ? undefined : entityLimit(body.entities, repo.entities.list());
+    repo.users.update(u.id, { role: next, entities, ...(body.name !== undefined ? { name: personName(body.name) } : {}) });
     if (next !== u.role) log.info(`${by(c) ?? "An admin"} changed ${u.username} from ${ROLE_INFO[u.role].label} to ${ROLE_INFO[next].label}`);
     return c.json({ user: row(repo.users.get(u.id)!) });
   });

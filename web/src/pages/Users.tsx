@@ -1,19 +1,39 @@
-// User management, for admins: who can sign in and what each person can do.
+// User management, for admins: who can sign in, what each person can do, and
+// which entities they see (every entity, or only some: an agency gives a client's
+// people their own entity).
 // New people and password resets get a one-time password, shown once here, which
 // the admin hands over and the person replaces when they first sign in.
 
 import { useState } from "react";
-import { Badge, Button, Dialog, DropdownMenu, Input, Select, Table, useKumoToastManager } from "@cloudflare/kumo";
-import { CopyIcon, DotsThreeIcon, KeyIcon, PlusIcon, TrashIcon, UserSwitchIcon } from "@phosphor-icons/react";
-import { ago, api, plural, ROLE_INFO, ROLES, useApi, withArticle, type OneTimePasswordResponse, type Role, type UserRow, type UsersResponse } from "../lib.ts";
+import { Badge, Button, Checkbox, Dialog, DropdownMenu, Input, Select, Table, useKumoToastManager } from "@cloudflare/kumo";
+import { BuildingsIcon, CopyIcon, DotsThreeIcon, KeyIcon, PlusIcon, TrashIcon, UserSwitchIcon } from "@phosphor-icons/react";
+import {
+  ago,
+  api,
+  plural,
+  ROLE_INFO,
+  ROLES,
+  useApi,
+  withArticle,
+  type OneTimePasswordResponse,
+  type Role,
+  type SessionEntity,
+  type UserRow,
+  type UsersResponse,
+} from "../lib.ts";
 import { Card, DialogHeader, FormGrid, ListCard, Page, PageState } from "../components/ui.tsx";
 import { useShell } from "../shell.tsx";
 
 const TITLE = "Users";
-const DESCRIPTION = "Who can sign in to Keelson, and what each person can do. Roles apply to every entity and account.";
+const DESCRIPTION = "Who can sign in to Keelson, what each person can do, and which entities they see. A role applies to every entity the person sees.";
 const ROLE_ITEMS = Object.fromEntries(ROLES.map((r) => [r, ROLE_INFO[r].label])) as Record<Role, string>;
 
-type Modal = { kind: "add" } | { kind: "password"; result: OneTimePasswordResponse; reset: boolean } | { kind: "remove"; user: UserRow } | null;
+type Modal =
+  | { kind: "add" }
+  | { kind: "entities"; user: UserRow }
+  | { kind: "password"; result: OneTimePasswordResponse; reset: boolean }
+  | { kind: "remove"; user: UserRow }
+  | null;
 
 export function UsersPage() {
   const { session } = useShell();
@@ -36,6 +56,7 @@ export function UsersPage() {
   if (error || !data) return <PageState title={TITLE} description={DESCRIPTION} error={error} loading={loading} empty={false} retry={reload} />;
 
   const users = data.users;
+  const entities = session.entities ?? [];
   const admins = users.filter((u) => u.role === "admin").length;
   const me = session.user?.id;
   const act = async (fn: () => Promise<unknown>, done?: string) => {
@@ -77,6 +98,7 @@ export function UsersPage() {
             <Table.Row>
               <Table.Head>User</Table.Head>
               <Table.Head>Role</Table.Head>
+              <Table.Head>Entities</Table.Head>
               <Table.Head className="whitespace-nowrap">Last sign-in</Table.Head>
               <Table.Head>Added</Table.Head>
               <Table.Head className="w-12">
@@ -98,6 +120,9 @@ export function UsersPage() {
                     {u.name && <div className="truncate text-sm text-kumo-subtle">{u.username}</div>}
                   </Table.Cell>
                   <Table.Cell className="whitespace-nowrap">{ROLE_INFO[u.role].label}</Table.Cell>
+                  <Table.Cell className="max-w-72">
+                    <span className={u.entities ? "line-clamp-2 text-kumo-default" : "text-kumo-subtle"}>{entityNames(u, entities)}</span>
+                  </Table.Cell>
                   <Table.Cell className="whitespace-nowrap text-kumo-subtle">{u.lastLoginAt ? ago(u.lastLoginAt) : "Never"}</Table.Cell>
                   <Table.Cell className="whitespace-nowrap text-kumo-subtle">
                     {ago(u.createdAt)}
@@ -120,6 +145,9 @@ export function UsersPage() {
                             ))}
                           </DropdownMenu.SubContent>
                         </DropdownMenu.Sub>
+                        <DropdownMenu.Item icon={BuildingsIcon} disabled={u.role === "admin"} onClick={() => setModal({ kind: "entities", user: u })}>
+                          {u.role === "admin" ? "Choose entities (admins see all)" : "Choose entities"}
+                        </DropdownMenu.Item>
                         <DropdownMenu.Item icon={KeyIcon} disabled={u.id === me} onClick={() => void resetPassword(u)}>
                           {u.id === me ? "Reset password (use your menu)" : "Reset password"}
                         </DropdownMenu.Item>
@@ -147,11 +175,25 @@ export function UsersPage() {
       {modal?.kind === "add" && (
         <AddUserDialog
           taken={users.map((u) => u.username)}
+          entities={entities}
           onClose={() => setModal(null)}
           onAdded={async (result) => {
             await reload();
             setModal({ kind: "password", result, reset: false });
           }}
+        />
+      )}
+      {modal?.kind === "entities" && (
+        <EntitiesDialog
+          user={modal.user}
+          entities={entities}
+          onClose={() => setModal(null)}
+          onSave={(picked) =>
+            act(
+              () => api(`/api/users/${modal.user.id}`, { method: "PATCH", body: { entities: picked } }),
+              picked ? `${modal.user.username} now sees ${plural(picked.length, "entity", "entities")}` : `${modal.user.username} now sees every entity`,
+            )
+          }
         />
       )}
       {modal?.kind === "password" && <PasswordDialog result={modal.result} reset={modal.reset} onClose={() => setModal(null)} />}
@@ -169,7 +211,10 @@ export function UsersPage() {
 /** What each role can do, so an admin can choose. */
 function RolesCard() {
   return (
-    <Card title="Roles" description="From least to most access: each role can do everything the one before it can, and more. Every role sees every page.">
+    <Card
+      title="Roles"
+      description="From least to most access: each role can do everything the one before it can, and more. Every role sees every page, for the entities the person sees."
+    >
       <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-4">
         {ROLES.map((r) => (
           <div key={r} className="min-w-0">
@@ -178,14 +223,117 @@ function RolesCard() {
           </div>
         ))}
       </dl>
+      <p className="mt-4 text-sm text-kumo-subtle">
+        Someone limited to some entities sees and changes only those entities' accounts and findings. They can't create, remove or reorder entities, or change
+        what applies to every entity: turning checks off, Keelson's settings and users. Admins always see every entity.
+      </p>
     </Card>
   );
 }
 
-function AddUserDialog({ taken, onClose, onAdded }: { taken: string[]; onClose: () => void; onAdded: (r: OneTimePasswordResponse) => void }) {
+/** "All entities", or the names of the entities a user is limited to. */
+function entityNames(u: UserRow, entities: SessionEntity[]): string {
+  if (!u.entities) return "All entities";
+  const names = u.entities.map((id) => entities.find((e) => e.id === id)?.name).filter(Boolean);
+  return names.length ? names.join(", ") : "None";
+}
+
+/**
+ * Tick boxes for the entities someone sees: "All entities" by default, which also covers entities added later.
+ * Unticking it shows one box per entity. `value` is null for every entity.
+ */
+function EntityPicker({ entities, value, onChange }: { entities: SessionEntity[]; value: number[] | null; onChange: (v: number[] | null) => void }) {
+  const toggle = (id: number, on: boolean) => {
+    const next = new Set(value ?? []);
+    if (on) next.add(id);
+    else next.delete(id);
+    onChange([...next].sort((a, b) => a - b));
+  };
+  return (
+    <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
+      <legend className="mb-2 p-0 text-sm font-medium text-kumo-default">Entities</legend>
+      <Checkbox
+        label="All entities, including ones added later"
+        checked={!value}
+        onCheckedChange={(v: boolean) => onChange(v ? null : entities.length === 1 ? [entities[0].id] : [])}
+      />
+      {value && (
+        <div className="ml-6 flex flex-col gap-2">
+          {entities.map((e) => (
+            <Checkbox key={e.id} label={e.name} checked={value.includes(e.id)} onCheckedChange={(v: boolean) => toggle(e.id, v)} />
+          ))}
+        </div>
+      )}
+      <p className="m-0 text-sm text-kumo-subtle">
+        {value
+          ? value.length
+            ? "They see only these entities' accounts and findings, and their role applies there."
+            : "Pick at least one entity."
+          : "Their role applies to every entity."}
+      </p>
+    </fieldset>
+  );
+}
+
+function EntitiesDialog({
+  user,
+  entities,
+  onClose,
+  onSave,
+}: {
+  user: UserRow;
+  entities: SessionEntity[];
+  onClose: () => void;
+  onSave: (entities: number[] | null) => Promise<boolean>;
+}) {
+  const [value, setValue] = useState<number[] | null>(user.entities);
+  const [busy, setBusy] = useState(false);
+  return (
+    <Dialog.Root open onOpenChange={(o: boolean) => !o && onClose()}>
+      <Dialog size="lg" className="p-6">
+        <DialogHeader title={`Entities ${user.username} sees`} description="The change applies at once, also to sessions already open." />
+        <EntityPicker entities={entities} value={value} onChange={setValue} />
+        <div className="mt-6 flex justify-end gap-2">
+          <Dialog.Close
+            render={(p) => (
+              <Button {...p} variant="secondary">
+                Cancel
+              </Button>
+            )}
+          />
+          <Button
+            variant="primary"
+            loading={busy}
+            disabled={!!value && !value.length}
+            onClick={async () => {
+              setBusy(true);
+              if (await onSave(value)) onClose();
+              else setBusy(false);
+            }}
+          >
+            Save
+          </Button>
+        </div>
+      </Dialog>
+    </Dialog.Root>
+  );
+}
+
+function AddUserDialog({
+  taken,
+  entities,
+  onClose,
+  onAdded,
+}: {
+  taken: string[];
+  entities: SessionEntity[];
+  onClose: () => void;
+  onAdded: (r: OneTimePasswordResponse) => void;
+}) {
   const [username, setUsername] = useState("");
   const [name, setName] = useState("");
   const [role, setRole] = useState<Role>("viewer");
+  const [limit, setLimit] = useState<number[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const clash = taken.includes(username.trim().toLowerCase());
@@ -203,7 +351,8 @@ function AddUserDialog({ taken, onClose, onAdded }: { taken: string[]; onClose: 
             setBusy(true);
             setErr(null);
             try {
-              onAdded(await api<OneTimePasswordResponse>("/api/users", { method: "POST", body: { username, name, role } }));
+              const body = { username, name, role, entities: role === "admin" ? null : limit };
+              onAdded(await api<OneTimePasswordResponse>("/api/users", { method: "POST", body }));
             } catch (x) {
               setErr((x as Error).message);
               setBusy(false);
@@ -228,6 +377,11 @@ function AddUserDialog({ taken, onClose, onAdded }: { taken: string[]; onClose: 
           </FormGrid>
           <Select className="w-full" label="Role" hideLabel={false} value={role} onValueChange={(v) => setRole(v as Role)} items={ROLE_ITEMS} />
           <p className="-mt-2 text-sm text-kumo-subtle">{ROLE_INFO[role].summary}</p>
+          {role === "admin" ? (
+            <p className="m-0 text-sm text-kumo-subtle">Admins see every entity.</p>
+          ) : (
+            <EntityPicker entities={entities} value={limit} onChange={setLimit} />
+          )}
           <div className="flex justify-end gap-2">
             <Dialog.Close
               render={(p) => (
@@ -236,7 +390,7 @@ function AddUserDialog({ taken, onClose, onAdded }: { taken: string[]; onClose: 
                 </Button>
               )}
             />
-            <Button type="submit" variant="primary" loading={busy} disabled={!username.trim() || clash}>
+            <Button type="submit" variant="primary" loading={busy} disabled={!username.trim() || clash || (role !== "admin" && !!limit && !limit.length)}>
               Add user
             </Button>
           </div>

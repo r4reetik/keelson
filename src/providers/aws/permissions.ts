@@ -1,5 +1,5 @@
 // Access key verification, the account the key belongs to, and the permission
-// probe for the setup screen. An access key belongs to one AWS account, so the
+// probe for the Add accounts dialog. An access key belongs to one AWS account, so the
 // "accounts it can read" are that one.
 
 import { AwsClient, parseCredentials, type AwsError } from "./client.ts";

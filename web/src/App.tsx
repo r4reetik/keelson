@@ -1,6 +1,7 @@
 // The app shell: session gate (create the admin, sign in, replace a one-time
-// password, connect a first account), sidebar, top bar with the scope switcher,
-// scan progress and the user menu, and the router. Pages are listed in routes.tsx.
+// password), sidebar, top bar with the scope switcher, scan progress and the user
+// menu, and the router. Pages are listed in routes.tsx. With no account connected
+// yet the shell still opens: pages that need one show how to add it (GetStarted).
 
 import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Breadcrumbs, Button, ButtonGroup, DropdownMenu, Sidebar, Toasty, Tooltip, TooltipProvider, useKumoToastManager } from "@cloudflare/kumo";
@@ -26,7 +27,7 @@ import {
 } from "@phosphor-icons/react";
 import {
   adoptScope,
-  can as roleCan,
+  allowed,
   ROLE_INFO,
   useScrollToHash,
   api,
@@ -54,7 +55,7 @@ import { ShellContext, useShell, type Shell } from "./shell.tsx";
 import { NAV_GROUPS, ROUTES, ReportPage, matchRoute } from "./routes.tsx";
 import { Loading, NoRows, Page, ProviderIcon } from "./components/ui.tsx";
 import { Wordmark } from "./components/brand.tsx";
-import { NotConnectedPage, SetupPage } from "./pages/Setup.tsx";
+import { GetStarted, NoAccountsYet } from "./pages/Setup.tsx";
 import { ChangePasswordDialog, ChangePasswordPage, LoginPage, SignupPage } from "./pages/Login.tsx";
 
 export function App() {
@@ -100,9 +101,8 @@ function Root() {
   if (session.setupRequired) return <SignupPage codeRequired={session.setupCodeRequired} onDone={refreshSession} />;
   if (!session.user) return <LoginPage onDone={refreshSession} />;
   if (session.user.mustChangePassword) return <ChangePasswordPage user={session.user} onDone={refreshSession} />;
-  if (!session.configured)
-    return roleCan(session.user.role, "accounts") ? <SetupPage onDone={refreshSession} /> : <NotConnectedPage session={session} onRefresh={refreshSession} />;
-  return <AppShell session={session} refreshSession={refreshSession} standalone={path === "/report"} />;
+  // Nothing connected yet still opens the app; the report has nothing to show, so it opens the app too.
+  return <AppShell session={session} refreshSession={refreshSession} standalone={path === "/report" && !!session.accounts?.length} />;
 }
 
 /** Status checks that fail in a row before the app says the server is unreachable. */
@@ -116,14 +116,21 @@ function AppShell({ session, refreshSession, standalone }: { session: Session; r
   const wasRunning = useRef(false);
   const failedPolls = useRef(0);
   const [key, setScope] = useScopeKey();
-  // A removed account or entity falls back to the default view.
-  const view = useMemo(() => (key && resolveView(session, key)) || resolveView(session, defaultScope(session))!, [session, key]);
+  // A removed account or entity falls back to the default view, and so does an empty one: "All accounts" holds nothing
+  // for someone whose entities are all kept separate (a user limited to such an entity, or a link from someone else).
+  const view = useMemo(() => {
+    const picked = key ? resolveView(session, key) : null;
+    return picked?.accounts.length ? picked : (resolveView(session, defaultScope(session)) ?? picked)!;
+  }, [session, key]);
   const scope = view.key;
   const scoped = useCallback((path: string) => withScope(path, scope), [scope]);
   // The URL always says which scope it shows, so it can be shared.
   useEffect(() => adoptScope(scope), [scope]);
 
+  // No account in view means nothing to scan, and the scoped API needs one.
+  const empty = view.accounts.length === 0;
   const poll = useCallback(async () => {
+    if (empty) return setStatus(null);
     try {
       const s = await api<ScanStatus>(withScope("/api/scan/status", scope));
       setStatus(s);
@@ -144,7 +151,7 @@ function AppShell({ session, refreshSession, standalone }: { session: Session; r
         toasts.add({ title: "Can't reach Keelson", description: `${(e as Error).message}. Checking again in a moment.`, variant: "error" });
       }
     }
-  }, [toasts, scope, refreshSession]);
+  }, [toasts, scope, refreshSession, empty]);
 
   useEffect(() => {
     void poll();
@@ -166,9 +173,23 @@ function AppShell({ session, refreshSession, standalone }: { session: Session; r
     [poll, toasts, scope],
   );
 
-  const role = session.user?.role ?? "viewer";
-  const can = useCallback((p: Permission) => roleCan(role, p), [role]);
-  const shell: Shell = { session, refreshSession, status, dataVersion, startScan, view, setScope, scoped, multi: view.accounts.length > 1, can };
+  const user = session.user ?? { role: "viewer" as const, entities: null };
+  const limited = !!user.entities;
+  const can = useCallback((p: Permission) => allowed({ role: user.role, entities: limited ? [] : null }, p), [user.role, limited]);
+  const shell: Shell = {
+    session,
+    refreshSession,
+    status,
+    dataVersion,
+    startScan,
+    view,
+    setScope,
+    scoped,
+    multi: view.accounts.length > 1,
+    can,
+    limited,
+    empty,
+  };
   if (standalone)
     return (
       <ShellContext.Provider value={shell}>
@@ -197,7 +218,7 @@ function AppShell({ session, refreshSession, standalone }: { session: Session; r
 
 function Router() {
   const { path } = useLocation();
-  const { can } = useShell();
+  const { can, empty } = useShell();
   const m = matchRoute(path);
   // Name the tab and history entry after the page.
   const label = m?.route.label;
@@ -216,6 +237,15 @@ function Router() {
         <NoRows>Your role can't open this page. Ask an admin if you need it.</NoRows>
       </Page>
     );
+  // Before any account is connected, the Overview shows how to start and other pages that need one say so.
+  if (empty && !m.route.global && !m.route.withoutAccounts)
+    return m.route.path === "/" ? (
+      <GetStarted />
+    ) : (
+      <Page title={m.route.label}>
+        <NoAccountsYet />
+      </Page>
+    );
   const P = m.route.page;
   return <P params={m.params} />;
 }
@@ -226,10 +256,9 @@ function Nav() {
   const { path } = useLocation();
   const { session, view, can } = useShell();
   const current = matchRoute(path)?.route;
-  // Pages for one provider only show when the view has an account on it (all accounts before any are connected).
+  // Pages for one provider only show when the view has an account on it, so none show before an account is connected.
   const inView = new Set(view.accounts.map((a) => a.provider));
-  const shown = (r: (typeof ROUTES)[number]) =>
-    !r.hidden && (!r.permission || can(r.permission)) && (!r.providers || !inView.size || r.providers.some((p) => inView.has(p)));
+  const shown = (r: (typeof ROUTES)[number]) => !r.hidden && (!r.permission || can(r.permission)) && (!r.providers || r.providers.some((p) => inView.has(p)));
   return (
     <Sidebar>
       <Sidebar.Header className="flex h-14 items-center border-b border-kumo-hairline">
@@ -291,7 +320,7 @@ function Nav() {
 }
 
 function TopBar() {
-  const { session, status } = useShell();
+  const { session, status, empty } = useShell();
   const { path } = useLocation();
   const [mode, setMode] = useMode();
   const route = matchRoute(path)?.route;
@@ -309,7 +338,9 @@ function TopBar() {
       <div className="flex h-full items-center gap-3 px-4">
         <Sidebar.Trigger />
         <Breadcrumbs size="sm" className="min-w-0">
-          {route?.global ? (
+          {empty ? (
+            <span className="shrink-0 text-kumo-subtle">No accounts yet</span>
+          ) : route?.global ? (
             <span className="shrink-0 text-kumo-subtle">Applies to every account</span>
           ) : (
             <>
@@ -336,9 +367,11 @@ function TopBar() {
           )}
         </Breadcrumbs>
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          <span className="mr-1 hidden truncate text-sm text-kumo-subtle lg:inline" aria-live="polite">
-            {progress}
-          </span>
+          {!empty && (
+            <span className="mr-1 hidden truncate text-sm text-kumo-subtle lg:inline" aria-live="polite">
+              {progress}
+            </span>
+          )}
           <Tooltip
             content={mode === "dark" ? "Light mode" : "Dark mode"}
             render={
@@ -374,7 +407,7 @@ function TopBar() {
 function ScanButton() {
   const { session, status, startScan, view, can } = useShell();
   const accounts = session.accounts || [];
-  if (!can("scan")) return null;
+  if (!can("scan") || !accounts.length) return null;
   const busy = !!status?.running && !!status?.inScope;
   const entityAccounts = view.entity ? accounts.filter((a) => a.entityId === view.entity!.id) : [];
   const entityCount = new Set(accounts.map((a) => a.entityId)).size;

@@ -8,6 +8,7 @@ import { countBySeverity, emptyCounts, type SeverityCounts } from "../../shared/
 import { badRequest, notFound } from "../errors.ts";
 import { FINGERPRINT, param, readJson } from "../validate.ts";
 import { requirePermission } from "../middleware.ts";
+import { reaches, viewOf } from "../access.ts";
 import {
   activity,
   brief,
@@ -100,10 +101,10 @@ export function dashboardRoutes(r: Routes, { repo, scanner, version }: AppContex
   };
 
   // Scans the accounts in `scope` (one account, an entity, or "all"), or with `every: true`
-  // every account in every entity, including entities kept out of "All accounts".
+  // every account in every entity the user sees, including entities kept out of "All accounts".
   r.with(requirePermission("scan")).post("/api/scan", async (c) => {
     const body = (await readJson(c)) as ScanRequest | null;
-    const accounts = body?.every === true ? repo.accounts.list() : c.get("scope").accounts;
+    const accounts = body?.every === true ? viewOf(repo, c).accounts : c.get("scope").accounts;
     if (!accounts.length) throw badRequest("No accounts in this view.");
     const s = scanner.start(
       "manual",
@@ -125,9 +126,15 @@ export function dashboardRoutes(r: Routes, { repo, scanner, version }: AppContex
       }
     }
     const inScope = new Set(scope.accounts.map((a) => a.id));
+    // Scans of accounts in entities this user can't see run too, but their account IDs aren't shown.
+    const seen = new Set(viewOf(repo, c).accounts.map((a) => a.id));
     const s = scanner.state;
+    const hidden = !!s.accountId && !seen.has(s.accountId);
     return c.json({
       ...s,
+      accountId: hidden ? null : s.accountId,
+      scanId: hidden ? null : s.scanId,
+      queued: s.queued.filter((id) => seen.has(id)),
       inScope: !!(s.accountId && inScope.has(s.accountId)) || s.queued.some((id) => inScope.has(id)),
       lastScanAt,
       lastFailed,
@@ -284,14 +291,15 @@ export function dashboardRoutes(r: Routes, { repo, scanner, version }: AppContex
   });
 }
 
-/** A finding by fingerprint, in whichever account it lives: permalinks work from any scope. */
+/** A finding by fingerprint, in whichever account it lives: permalinks work from any scope the user may see. */
 export function findingRoutes(r: Routes, { repo }: AppContext) {
   r.get("/api/finding/:fp", (c) => {
     const fp = param(c, "fp");
     if (!FINGERPRINT.test(fp)) throw notFound("Unknown finding");
     const where = repo.findings.locate(fp);
     const account = where && repo.accounts.get(where.accountId);
-    if (!where || !account) throw notFound("This finding no longer exists.");
+    // A finding in an entity this user can't see answers as if it didn't exist.
+    if (!where || !account || !reaches(c.get("user"), account.entityId)) throw notFound("This finding no longer exists.");
     const entity = repo.entities.get(account.entityId);
     const current =
       where.scanId === where.latestScanId ? (repo.findings.forScan(where.scanId, repo.settings.get().slaDays).find((f) => f.fingerprint === fp) ?? null) : null;

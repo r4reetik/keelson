@@ -2,8 +2,8 @@
 // three Cloudflare accounts, a Vercel team and an AWS account in two entities,
 // plus a Vercel-only entity with a personal account. Everything is scanned twice,
 // so trends, "new since last scan" and the checks that span providers have data.
-// One mock user per role signs in with MOCK_PASSWORD; with --signup there are none,
-// so Keelson starts at creating the admin.
+// One mock user per role signs in with MOCK_PASSWORD, plus "client", a manager
+// limited to Other Ltd; with --signup there are none, so Keelson starts at creating the admin.
 // Run with `npm run dev -- --mock` (or `node dev/mock/server.ts`).
 
 import "../../src/warnings.ts";
@@ -45,6 +45,17 @@ seedAccount(repo, vault, { entity: "Mock Group" });
 seedAccount(repo, vault, { id: MOCK_ACCOUNT_3, name: "Mock Co Staging", entity: "Mock Group" });
 const other = seedAccount(repo, vault, { id: MOCK_ACCOUNT_2, token: MOCK_TOKEN_2, name: "Other Ltd", entity: "Other Ltd" });
 repo.entities.update(other.entityId, { ...repo.entities.get(other.entityId)!, orgDomains: ["other.example"], includeInAll: false });
+// A client's manager, who sees only their own company.
+if (!signup)
+  repo.users.create({
+    username: "client",
+    name: "Mock Client",
+    role: "manager",
+    passwordHash: hashPasswordSync(MOCK_PASSWORD),
+    mustChangePassword: false,
+    createdBy: null,
+    entities: [other.entityId],
+  });
 seedVercel(repo, vault, { entity: "Mock Group", personal: { entity: "Side Projects" } });
 seedAws(repo, vault, { entity: "Mock Group" });
 await scanner.start("setup").done;
@@ -55,4 +66,8 @@ await scanner.start("manual").done;
 await scanner.start("manual", [MOCK_ACCOUNT]).done;
 seedTriageHistory(repo, MOCK_ACCOUNT);
 console.log(`\n  Keelson (mock ${providerList()} data)\n\n  Open:  ${running.url}`);
-console.log(signup ? "  Users: none yet, so it starts at creating the admin.\n" : `  Users: ${ROLES.join(", ")} (one per role), password ${MOCK_PASSWORD}\n`);
+console.log(
+  signup
+    ? "  Users: none yet, so it starts at creating the admin.\n"
+    : `  Users: ${ROLES.join(", ")} (one per role) and client (a manager who sees only Other Ltd), password ${MOCK_PASSWORD}\n`,
+);

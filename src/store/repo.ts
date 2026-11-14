@@ -45,8 +45,22 @@ export class Repo {
     this.users = new UserRepo(store);
   }
 
-  /** "all" (accounts whose entity is included in combined views), "e:<entity id>" or "a:<account id>"; null if unknown. */
-  resolveScope(key: string): Scope | null {
-    return resolveScope(this.accounts.list(), this.entities.list(), key);
+  /**
+   * The entities and accounts someone limited to `limit` may see (src/store/users.ts), or every one with null.
+   * Everything a user reads or changes is looked up here, so another entity's accounts are unknown to them.
+   */
+  view(limit: number[] | null): { entities: Entity[]; accounts: Account[] } {
+    const entities = limit ? this.entities.list().filter((e) => limit.includes(e.id)) : this.entities.list();
+    const ids = new Set(entities.map((e) => e.id));
+    return { entities, accounts: this.accounts.list().filter((a) => ids.has(a.entityId)) };
+  }
+
+  /**
+   * "all" (accounts whose entity is included in combined views), "e:<entity id>", "a:<account id>" or a set, among
+   * the entities in `limit` (null for every entity); null if unknown there.
+   */
+  resolveScope(key: string, limit: number[] | null): Scope | null {
+    const { accounts, entities } = this.view(limit);
+    return resolveScope(accounts, entities, key);
   }
 }
