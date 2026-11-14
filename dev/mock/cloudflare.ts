@@ -370,6 +370,25 @@ const routes: [RegExp, Handler][] = [
               // An Elastic IP the mock AWS account gives up between scans, and an AWS address that was never its own.
               { id: "r13", name: "old-vm.mock.example", type: "A", content: "198.51.100.99", proxied: false, created_on: ago(450), modified_on: ago(450) },
               { id: "r14", name: "vendor.mock.example", type: "A", content: "198.51.100.201", proxied: false, created_on: ago(450), modified_on: ago(450) },
+              // Served by the mock GitHub organization's Pages site (dev/mock/github.ts), and one no Pages site uses any more.
+              {
+                id: "r15",
+                name: "docs.mock.example",
+                type: "CNAME",
+                content: "mock-org.github.io",
+                proxied: false,
+                created_on: ago(350),
+                modified_on: ago(350),
+              },
+              {
+                id: "r16",
+                name: "blog.mock.example",
+                type: "CNAME",
+                content: "mock-org.github.io",
+                proxied: false,
+                created_on: ago(600),
+                modified_on: ago(600),
+              },
               // The bucket behind this one isn't in the mock AWS account.
               {
                 id: "r10",

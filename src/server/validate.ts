@@ -15,7 +15,8 @@ import { MAX_PASSWORD, MIN_PASSWORD } from "./passwords.ts";
 export const FINGERPRINT = /^[0-9a-f]{20}$/;
 export const ACCOUNT_ID = ACCOUNT_ID_PATTERN.cloudflare;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const MAX_TOKEN = 200;
+// A GitHub App's private key is the longest credential: about 1,700 characters for a 2048-bit key, 3,300 for 4096.
+const MAX_TOKEN = 8192;
 export const MAX_ACCOUNTS_PER_ADD = 50;
 export const MAX_TRIAGE_BATCH = 5000;
 

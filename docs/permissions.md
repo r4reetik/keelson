@@ -3,7 +3,7 @@
 # Permissions
 
 Keelson only reads, on every provider. Each provider's section lists the data a scan reads and what grants it:
-a token permission on Cloudflare, a team role on Vercel, IAM actions on AWS.
+a token permission on Cloudflare, a team role on Vercel, IAM actions on AWS, an App permission on GitHub.
 
 ## Cloudflare
 
@@ -52,7 +52,7 @@ skipped rather than passed. Add accounts tests a token against each source befor
 | mTLS certificates | Account · SSL and Certificates · Read | TLS-014 |
 | Load balancer pools | Account · Load Balancing: Monitors and Pools · Read | DNS-009 |
 | Zone settings | Zone · Zone Settings · Read | TLS-001, TLS-002, TLS-003, TLS-004, TLS-005, TLS-006, TLS-007, TLS-009, TLS-012, WAF-006, WAF-007, WAF-011, TRF-006 |
-| DNS records | Zone · DNS · Read | ZT-008, TLS-010, WAF-015, DNS-001, DNS-002, DNS-003, DNS-004, DNS-005, DNS-007, DNS-008, EML-001, EML-002, EML-003, EML-004, EML-005, EML-006, EML-007, EML-008, EML-009, EML-011, ATS-001, ATS-002, ATS-003, ATS-006, ATS-007, ATS-008, TRF-009, XP-001, XP-002, XP-004, XP-007, XP-008 |
+| DNS records | Zone · DNS · Read | ZT-008, TLS-010, WAF-015, DNS-001, DNS-002, DNS-003, DNS-004, DNS-005, DNS-007, DNS-008, EML-001, EML-002, EML-003, EML-004, EML-005, EML-006, EML-007, EML-008, EML-009, EML-011, ATS-001, ATS-002, ATS-003, ATS-006, ATS-007, ATS-008, TRF-009, XP-001, XP-002, XP-004, XP-007, XP-008, XP-009 |
 | DNSSEC | Zone · DNS · Read | DNS-006 |
 | Edge certificates | Zone · SSL and Certificates · Read | TLS-008, TLS-010, TLS-015 |
 | Origin certificates | Zone · SSL and Certificates · Read | TLS-011, TLS-014, ATS-002 |
@@ -151,3 +151,33 @@ for example) is skipped and shown as not readable on the Regions page: nothing t
 | CloudFront distributions | `cloudfront:ListDistributions` | AED-001, AED-002, AED-003, AED-004, ADN-001 |
 | Route 53 hosted zones and records | `route53:ListHostedZones`, `route53:ListResourceRecordSets` | ADN-001, ADN-002, ADN-003, XP-005 |
 | AWS's published address ranges (ip-ranges.amazonaws.com) | `None: a public file`, `read without the access key` | ADN-003 |
+
+## GitHub
+
+Keelson reads GitHub as a GitHub App that you register and own: it isn't tied to a person, and each organization's owners see it under
+**Settings → GitHub Apps**. Register it from the pre-filled link in Add accounts, which asks for the read-only permissions below and no
+webhook, then install it on the organizations to scan and paste its App ID and private key into Keelson. One App covers every
+organization it's installed on; to install a private App on more than one organization, make it public under its Advanced settings.
+
+On each scan Keelson signs a short-lived token request with the private key and asks GitHub for an installation token with read access
+to the permissions below and nothing else, so even an App that was given more can only read through Keelson. That request is the one
+POST Keelson sends to GitHub; every other request is GET (`test/github.test.ts` fails on anything else). Secret scanning alerts are read
+without the secret's value, and only the scheme and host of webhook URLs are kept.
+
+| Source | App permission | Checks that read it |
+|---|---|---|
+| Organization settings | Organization permissions → Administration: Read-only | GID-001, GID-002, GID-003, GID-005 |
+| Organization owners | Organization permissions → Members: Read-only | GID-004 |
+| Actions permissions | Organization permissions → Administration: Read-only | GAC-001, GAC-002, GAC-003 |
+| Organization webhooks | Organization permissions → Webhooks: Read-only | GHK-001, GHK-002 |
+| Installed GitHub Apps | Organization permissions → Administration: Read-only | GHK-004 |
+| Repositories | Repository permissions → Metadata: Read-only (always granted) | Supporting data for other checks |
+| Code security settings | Repository permissions → Administration: Read-only | GSC-001, GSC-002, GSC-006 |
+| Branch protection | Repository permissions → Administration: Read-only | GBR-001, GBR-002, GBR-003 |
+| Rulesets that apply to default branches | Repository permissions → Metadata: Read-only (always granted) | GBR-001, GBR-002, GBR-003 |
+| Deploy keys | Repository permissions → Administration: Read-only | GHK-003 |
+| Repository webhooks | Repository permissions → Webhooks: Read-only | GHK-001, GHK-002 |
+| GitHub Pages sites | Repository permissions → Pages: Read-only | GPG-001 |
+| Dependabot alerts | Repository permissions → Dependabot alerts: Read-only | GSC-004 |
+| Code scanning alerts | Repository permissions → Code scanning alerts: Read-only | GSC-005 |
+| Secret scanning alerts | Repository permissions → Secret scanning alerts: Read-only | GSC-003 |

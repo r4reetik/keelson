@@ -9,6 +9,7 @@ import { CATEGORIES, CHECKS, type CheckDef } from "../src/providers/catalog.ts";
 import { SOURCES, SOURCE_KEYS } from "../src/core/sources.ts";
 import { VERCEL_SOURCES, VERCEL_SOURCE_KEYS } from "../src/providers/vercel/sources.ts";
 import { AWS_SOURCES, AWS_SOURCE_KEYS } from "../src/providers/aws/sources.ts";
+import { GITHUB_SOURCES, GITHUB_SOURCE_KEYS } from "../src/providers/github/sources.ts";
 import { PROVIDERS, PROVIDER_INFO, providerOfUrl, type ProviderId } from "../src/shared/providers.ts";
 import { SEVERITY_LABEL } from "../src/shared/severity.ts";
 
@@ -30,7 +31,12 @@ function steps(text: string): string {
 }
 
 /** Each provider's source registry. A new provider doesn't compile until it is listed here. */
-const SOURCE_REGISTRY: Record<ProviderId, Record<string, { label: string }>> = { cloudflare: SOURCES, vercel: VERCEL_SOURCES, aws: AWS_SOURCES };
+const SOURCE_REGISTRY: Record<ProviderId, Record<string, { label: string }>> = {
+  cloudflare: SOURCES,
+  vercel: VERCEL_SOURCES,
+  aws: AWS_SOURCES,
+  github: GITHUB_SOURCES,
+};
 const sourceLabel = (c: CheckDef, k: string) => SOURCE_REGISTRY[c.provider][k].label;
 /** A check links its own provider's docs; one that spans providers may link the other's. */
 const docsLabel = (c: CheckDef) => `${PROVIDER_INFO[providerOfUrl(c.docs!) ?? c.provider].label} docs`;
@@ -98,6 +104,11 @@ export function permissionsDoc(): string {
     const ids = needs(k, "vercel");
     return `| ${s.label} | ${s.permission} | ${ids.length ? ids.join(", ") : "Supporting data for other checks"} |`;
   });
+  const githubRows = GITHUB_SOURCE_KEYS.map((k) => {
+    const s = GITHUB_SOURCES[k];
+    const ids = needs(k, "github");
+    return `| ${s.label} | ${s.permission} | ${ids.length ? ids.join(", ") : "Supporting data for other checks"} |`;
+  });
   const rows = SOURCE_KEYS.filter((k) => !SOURCES[k].external).map((k) => {
     const s = SOURCES[k];
     const ids = needs(k);
@@ -110,7 +121,7 @@ export function permissionsDoc(): string {
     "# Permissions",
     "",
     "Keelson only reads, on every provider. Each provider's section lists the data a scan reads and what grants it:",
-    "a token permission on Cloudflare, a team role on Vercel, IAM actions on AWS.",
+    "a token permission on Cloudflare, a team role on Vercel, IAM actions on AWS, an App permission on GitHub.",
     "",
     "## Cloudflare",
     "",
@@ -162,6 +173,22 @@ export function permissionsDoc(): string {
     "| Source | IAM actions | Checks that read it |",
     "|---|---|---|",
     ...awsRows,
+    "",
+    "## GitHub",
+    "",
+    "Keelson reads GitHub as a GitHub App that you register and own: it isn't tied to a person, and each organization's owners see it under",
+    "**Settings → GitHub Apps**. Register it from the pre-filled link in Add accounts, which asks for the read-only permissions below and no",
+    "webhook, then install it on the organizations to scan and paste its App ID and private key into Keelson. One App covers every",
+    "organization it's installed on; to install a private App on more than one organization, make it public under its Advanced settings.",
+    "",
+    "On each scan Keelson signs a short-lived token request with the private key and asks GitHub for an installation token with read access",
+    "to the permissions below and nothing else, so even an App that was given more can only read through Keelson. That request is the one",
+    "POST Keelson sends to GitHub; every other request is GET (`test/github.test.ts` fails on anything else). Secret scanning alerts are read",
+    "without the secret's value, and only the scheme and host of webhook URLs are kept.",
+    "",
+    "| Source | App permission | Checks that read it |",
+    "|---|---|---|",
+    ...githubRows,
     "",
   ].join("\n");
 }

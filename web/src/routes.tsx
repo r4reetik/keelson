@@ -11,6 +11,7 @@ import {
   ClockCounterClockwiseIcon,
   GaugeIcon,
   GearIcon,
+  GitBranchIcon,
   GlobeIcon,
   ListChecksIcon,
   StackIcon,
@@ -88,6 +89,14 @@ export const ROUTES: RouteDef[] = [
     icon: MapPinIcon,
     providers: ["aws"],
     page: page(() => import("./pages/Regions.tsx"), "RegionsPage"),
+  },
+  {
+    path: "/repositories",
+    label: "Repositories",
+    group: "Inventory",
+    icon: GitBranchIcon,
+    providers: ["github"],
+    page: page(() => import("./pages/Repositories.tsx"), "RepositoriesPage"),
   },
   {
     path: "/activity",

@@ -20,6 +20,7 @@ import type {
   FindingGroup,
   ProjectRow,
   RegionRow,
+  RepoRow,
   ProviderScore,
   ScanMeta,
   Settings,
@@ -230,6 +231,11 @@ export function projects(scans: AccountScan[]): ProjectRow[] | null {
 export function regions(scans: AccountScan[]): RegionRow[] | null {
   if (!scans.some((s) => s.scan.snap.regions)) return null;
   return scans.flatMap(({ account, scan }) => tag(scan.snap.regions, account));
+}
+
+export function repos(scans: AccountScan[]): RepoRow[] | null {
+  if (!scans.some((s) => s.scan.snap.repos)) return null;
+  return scans.flatMap(({ account, scan }) => tag(scan.snap.repos, account));
 }
 
 export function value(scans: AccountScan[]): ValueView | null {

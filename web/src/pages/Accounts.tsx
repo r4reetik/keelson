@@ -796,7 +796,7 @@ function AddAccountsDialog({
       <Dialog size="xl" className="max-h-[90vh] overflow-y-auto p-6">
         <DialogHeader
           title="Add accounts"
-          description={`Choose the platform, paste its ${info.credential}, pick the ${info.accounts} it should scan, and choose the entity they belong to.`}
+          description={`Choose the platform, add its ${info.credential}, pick the ${info.accounts} it should scan, and choose the entity they belong to.`}
         />
         <div className="mb-6 flex flex-col gap-6">
           <ProviderPicker value={provider} onChange={setProvider} />

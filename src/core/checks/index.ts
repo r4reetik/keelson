@@ -17,6 +17,7 @@ import changeRisk from "./change-risk.ts";
 import cost from "./cost.ts";
 import vercelLinks from "./vercel-links.ts";
 import awsLinks from "./aws-links.ts";
+import githubLinks from "./github-links.ts";
 import type { CheckModule } from "./define.ts";
 
 export const MODULES = [
@@ -35,6 +36,7 @@ export const MODULES = [
   cost,
   vercelLinks,
   awsLinks,
+  githubLinks,
 ] as const;
 
 type IdsOf<M> = M extends CheckModule<infer Id> ? Id : never;

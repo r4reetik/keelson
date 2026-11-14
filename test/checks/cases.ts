@@ -319,6 +319,7 @@ export const CASES: Record<CheckId, () => Inventory> = {
   "XP-004": () => withDns(record(`assets.${Z}`, "CNAME", "d111111abcdef8.cloudfront.net")),
   "XP-007": () => withDns(record(`old-vm.${Z}`, "A", "198.51.100.77")),
   "XP-008": () => ({ ...withDns(record(`vendor.${Z}`, "A", "198.51.100.77")), awsPrefixes: toPrefixes(["198.51.100.0/24"]) }),
+  "XP-009": () => withDns(record(`docs.${Z}`, "CNAME", "example-org.github.io")),
 };
 
 /** Engine options a case needs beyond the defaults: checks that span providers read the entity's other accounts. */
@@ -327,4 +328,5 @@ export const CASE_OPTS: Partial<Record<CheckId, Partial<EngineOptions>>> = {
   "XP-004": { related: { awsEndpoints: [{ kind: "cloudfront", name: "d222222abcdef8.cloudfront.net" }] } },
   "XP-007": { related: { awsAddresses: ["198.51.100.9"], awsReleased: [{ ip: "198.51.100.77", at: "2026-05-20T00:00:00.000Z" }] } },
   "XP-008": { related: { awsAddresses: ["198.51.100.9"] } },
+  "XP-009": { related: { githubPages: [{ host: `www.${Z}`, repo: "site" }] } },
 };

@@ -626,6 +626,7 @@ export interface ReportData {
   zones: ZoneRow[] | null;
   projects: ProjectRow[] | null;
   regions: RegionRow[] | null;
+  repos: RepoRow[] | null;
   valueCounts: ValueCounts | undefined;
   checks: Record<string, { evaluated: number; failed: number }>;
 }
@@ -645,6 +646,8 @@ export interface ScanSnapshot {
   projects?: ProjectRow[];
   /** AWS: regions and the account's global resources. */
   regions?: RegionRow[];
+  /** GitHub: repositories. */
+  repos?: RepoRow[];
   /** AWS: the public addresses the account held at its last complete scan, and the ones seen to leave it since. */
   addressHistory?: AddressHistory;
   /** Domains the account owns, when no other part of the snapshot lists them (AWS: public hosted zones). */
@@ -678,6 +681,8 @@ export interface ProviderLinks {
   awsReleased?: { ip: string; at: string }[];
   /** The AWS account's own ID, so its siblings can tell a role trusted inside the entity from one trusted outside it. */
   awsAccounts?: string[];
+  /** Custom domains of a GitHub organization's Pages sites, with the repository that serves each. */
+  githubPages?: { host: string; repo: string }[];
 }
 
 /** How an AWS account's public addresses changed over its scans: what it holds, and what it gave up and when. */
@@ -699,6 +704,7 @@ export const LINK_KEYS = [
   "awsAddresses",
   "awsReleased",
   "awsAccounts",
+  "githubPages",
 ] as const satisfies readonly (keyof ProviderLinks)[];
 export type LinkKey = (typeof LINK_KEYS)[number];
 
@@ -712,6 +718,7 @@ export const LINK_PROVIDER: Record<LinkKey, ProviderId> = {
   awsAddresses: "aws",
   awsReleased: "aws",
   awsAccounts: "aws",
+  githubPages: "github",
 };
 
 /** One region of an AWS account as the Regions page shows it, or the account's global resources. */
@@ -755,6 +762,32 @@ export interface ProjectRow {
   sensitiveEnvVars: number | null;
   gitForkProtection: boolean | null;
   findings: SeverityCounts;
+}
+
+/** A GitHub repository as the Repositories page shows it. */
+export interface RepoRow {
+  name: string;
+  account?: string;
+  accountId?: string;
+  /** "public", "private" or "internal". */
+  visibility: string;
+  archived: boolean;
+  defaultBranch: string;
+  /** How the default branch is protected: "Pull request, 2 approvals", "Protected", "None"; null when unreadable or the repository is archived or empty. */
+  protection: string | null;
+  secretScanning: boolean | null;
+  pushProtection: boolean | null;
+  /** Open alerts by kind; null when that kind couldn't be read. Dependabot and code scanning count critical and high only. */
+  alerts: { secrets: number | null; dependabot: number | null; codeScanning: number | null };
+  /** The Pages site's custom domain, "github.io" without one, or null without a site. */
+  pages: string | null;
+  findings: SeverityCounts;
+}
+
+export interface ReposResponse {
+  scan: ScanMeta | null;
+  repos: RepoRow[] | null;
+  coverage: Coverage[];
 }
 
 export interface ProjectsResponse {

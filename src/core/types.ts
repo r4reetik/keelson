@@ -249,6 +249,7 @@ export const NO_RELATED: Related = {
   awsAddresses: null,
   awsReleased: null,
   awsAccounts: null,
+  githubPages: null,
   unknown: [],
 };
 

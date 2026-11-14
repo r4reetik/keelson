@@ -7,6 +7,7 @@ import { TokenVault } from "../../src/config.ts";
 import { MOCK_ACCOUNT, MOCK_TOKEN } from "./cloudflare.ts";
 import { MOCK_VERCEL_TEAM, MOCK_VERCEL_TOKEN, MOCK_VERCEL_TOKEN_2, MOCK_VERCEL_USER } from "./vercel.ts";
 import { MOCK_AWS_ACCOUNT, MOCK_AWS_TOKEN } from "./aws.ts";
+import { MOCK_GITHUB_ACCOUNT, MOCK_GITHUB_TOKEN } from "./github.ts";
 import { DAY_MS, isoDate } from "../../src/shared/time.ts";
 import type { ProviderId } from "../../src/shared/providers.ts";
 
@@ -42,6 +43,17 @@ export function seedVercel(repo: Repo, vault: TokenVault, o: { entity?: string |
 /** Adds the mock AWS account the way the Accounts page would. */
 export function seedAws(repo: Repo, vault: TokenVault, o: { entity?: string | number } = {}) {
   return seedAccount(repo, vault, { id: MOCK_AWS_ACCOUNT, token: MOCK_AWS_TOKEN, name: "mock-aws", entity: o.entity ?? "Mock Group", provider: "aws" });
+}
+
+/** Adds the mock GitHub organization the way the Accounts page would. */
+export function seedGithub(repo: Repo, vault: TokenVault, o: { entity?: string | number } = {}) {
+  return seedAccount(repo, vault, {
+    id: MOCK_GITHUB_ACCOUNT,
+    token: MOCK_GITHUB_TOKEN,
+    name: "mock-org",
+    entity: o.entity ?? "Mock Group",
+    provider: "github",
+  });
 }
 
 /** An in-memory repo and vault with live probes off, so scans touch only the mocked APIs. */

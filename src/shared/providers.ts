@@ -5,10 +5,10 @@
 // Everything the UI and the server say about a provider comes from PROVIDER_INFO,
 // so no screen has to branch on a provider's name.
 
-export const PROVIDERS = ["cloudflare", "vercel", "aws"] as const;
+export const PROVIDERS = ["cloudflare", "vercel", "aws", "github"] as const;
 export type ProviderId = (typeof PROVIDERS)[number];
 
-/** One input of a provider's credential. Most providers have one; AWS has a key ID and a secret. */
+/** One input of a provider's credential. Most providers have one; AWS has a key ID and a secret, a GitHub App its ID and private key. */
 export interface CredentialField {
   label: string;
   /** Hidden while typing. A key ID is shown, a secret isn't. */
@@ -117,19 +117,44 @@ export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
     idHint: "An AWS account ID is 12 digits.",
     lowercaseIds: false,
   },
+  github: {
+    id: "github",
+    label: "GitHub",
+    account: "organization",
+    accounts: "organizations",
+    resource: "repository",
+    blurb: "Organization settings, branch protection, code security alerts, Actions and webhooks",
+    covers: "organization settings, branch protection, code security alerts, Actions and webhooks",
+    credential: "GitHub App",
+    fields: [
+      { label: "App ID", secret: false, placeholder: "1234567" },
+      { label: "Private key", secret: true, placeholder: "-----BEGIN RSA PRIVATE KEY-----…" },
+    ],
+    dashboard: "settings",
+    // The App is given read permissions only, and Keelson asks GitHub for a token limited to reading on every scan.
+    readOnlyCredential: true,
+    apiHost: "api.github.com",
+    sites: ["github.com"],
+    noAccounts: "Install the GitHub App on the organizations you want to scan, from the App's settings under Install App.",
+    needsToRead: "gets the read permission",
+    idHint: "A GitHub organization ID in Keelson is gh_ followed by its number.",
+    lowercaseIds: false,
+  },
 };
 
 export const isProvider = (v: unknown): v is ProviderId => typeof v === "string" && (PROVIDERS as readonly string[]).includes(v);
 
-/** Account IDs as each provider issues them: Cloudflare's are 32 hex characters, Vercel's are team or user IDs, AWS's are 12 digits. */
+/** Account IDs as each provider issues them: Cloudflare's are 32 hex characters, Vercel's are team or user IDs, AWS's are 12 digits, GitHub's are gh_ and the organization's number. */
 export const ACCOUNT_ID_PATTERN: Record<ProviderId, RegExp> = {
   cloudflare: /^[0-9a-f]{32}$/,
   vercel: /^(team_)?[A-Za-z0-9]{8,40}$/,
   aws: /^\d{12}$/,
+  // GitHub's organization IDs are plain numbers, which would pass for AWS's; the prefix keeps them apart.
+  github: /^gh_\d{1,20}$/,
 };
 
 /** The provider an account ID can belong to, judged by its shape. The strictest shapes are tried first: 12 digits would also pass as a Vercel user ID. */
-const BY_STRICTEST_ID: ProviderId[] = ["cloudflare", "aws", "vercel"];
+const BY_STRICTEST_ID: ProviderId[] = ["cloudflare", "aws", "github", "vercel"];
 export const providerForId = (id: string): ProviderId | null => BY_STRICTEST_ID.find((p) => ACCOUNT_ID_PATTERN[p].test(id)) ?? null;
 
 /** "Cloudflare", "Cloudflare and Vercel", "Cloudflare, Vercel and AWS". */

@@ -30,17 +30,18 @@
   <img src="docs/images/overview.png" alt="The Keelson overview: attack paths, posture score, overdue and unowned findings, and the findings to fix first">
 </picture>
 
-Point Keelson at your Cloudflare accounts, your Vercel teams, your AWS accounts, or any mix of them, and it
+Point Keelson at your Cloudflare accounts, your Vercel teams, your AWS accounts, your GitHub organizations, or any mix of them, and it
 scans them (one, or dozens across several companies), scores them, and tracks every finding until it's fixed:
 who owns it, when it's due, and which risks were accepted and until when. It runs on your machine or your
 server, and only ever reads. Use it for one platform or several: a company's accounts on every platform sit
 together in one entity, and checks that span platforms catch what no single dashboard shows.
 
-Keelson is growing into one place for the security of everything you run: next come your code (GitHub
-repositories), where that code is deployed and who can reach it, cloud activity such as CloudTrail and VPC flow
-logs, runtime security, and an AI penetration tester that works from all of it. See the [roadmap](#roadmap).
+Keelson is growing into one place for the security of everything you run: it already reads your GitHub
+organizations' settings and security alerts; next come the code itself, where that code is deployed and who can
+reach it, cloud activity such as CloudTrail and VPC flow logs, runtime security, and an AI penetration tester that
+works from all of it. See the [roadmap](#roadmap).
 
-> Keelson is an independent open-source project, not affiliated with or endorsed by Cloudflare, Vercel or AWS.
+> Keelson is an independent open-source project, not affiliated with or endorsed by Cloudflare, Vercel, AWS or GitHub.
 > Its interface is built with [Kumo](https://github.com/cloudflare/kumo), Cloudflare's open-source design system.
 
 ## Quick start
@@ -54,8 +55,8 @@ docker logs keelson
 
 That's the whole install: Keelson ships as this one image, for Intel and Arm, and needs nothing but Docker. Open
 http://localhost:4317 and create the admin account with the setup code that `docker logs keelson` shows. Then
-choose a platform (Cloudflare, Vercel or AWS), paste its token or access key, pick the accounts or teams it should
-scan, and the first scans run. `127.0.0.1:` keeps it reachable from this machine only; to run it for a team, see
+choose a platform (Cloudflare, Vercel, AWS or GitHub), add its token, access key or GitHub App, pick the accounts,
+teams or organizations it should scan, and the first scans run. `127.0.0.1:` keeps it reachable from this machine only; to run it for a team, see
 [below](#run-it-for-a-team-docker).
 
 ## What it checks
@@ -114,6 +115,21 @@ objects in a bucket, the rows in a database, a policy document's text or a Lambd
 Per-region settings are only judged where something runs, so an empty region doesn't fill the list.
 CloudTrail, KMS and Config aren't read yet: their APIs only answer POST requests, and Keelson only sends GET.
 
+### GitHub
+
+Every organization a GitHub App you register is installed on, and every repository it can read. Keelson reads
+settings and the alerts GitHub's own code security raises; it doesn't read or run your code, and never reads a
+leaked secret's value.
+
+| Area | Examples |
+|---|---|
+| Identity & access | Two-factor authentication not required, a base permission that lets every member write to every repository, members who can create public repositories or fork private ones, too many owners, deploy keys that can push, other GitHub Apps that can change every repository |
+| Change risk | Default branches that take changes without a pull request, that allow force pushes or deletion, or whose review rule administrators can skip. Classic branch protection and rulesets, the repository's and the organization's, count alike |
+| Secrets | Leaked secrets GitHub found and nobody resolved (critical while GitHub says the secret still works), public repositories without secret scanning, push protection off |
+| Platform | Open critical and high Dependabot and code scanning alerts, Dependabot security updates off |
+| Deployments | Workflows whose GITHUB_TOKEN can write by default, workflows that can approve pull requests, any third-party action allowed to run |
+| TLS & HTTPS | Webhooks that skip certificate checks or send over plain HTTP, Pages sites that don't enforce HTTPS |
+
 ### Across providers
 
 Checks that compare a company's accounts on different platforms in the same entity:
@@ -122,8 +138,9 @@ Checks that compare a company's accounts on different platforms in the same enti
   accepts web traffic from the whole internet, so an attacker who finds the origin skips your WAF, rate limits and
   bot rules. The same for a Vercel site behind Cloudflare whose *.vercel.app URLs are public.
 - **Dangling records.** A Cloudflare DNS record that points at a CloudFront distribution or S3 bucket that none of
-  the entity's AWS accounts has, and a Cloudflare or Route 53 record that points at Vercel when no Vercel project
-  serves it. Whoever claims the missing resource serves your hostname.
+  the entity's AWS accounts has, a Cloudflare or Route 53 record that points at Vercel when no Vercel project
+  serves it, and a Cloudflare record that points at GitHub Pages when no Pages site in the entity's GitHub
+  organizations uses it. Whoever claims the missing resource serves your hostname.
 - **Released addresses.** Keelson remembers the public addresses each AWS account holds. When one disappears
   between scans (a deleted instance, a released Elastic IP) and a Cloudflare or Route 53 record still points at it,
   that record is reported: AWS hands the address to another customer. An AWS address nobody in the entity ever
@@ -161,6 +178,7 @@ finding has its own page with a history of each scan and triage change, to share
 - **Zones** (Cloudflare). A settings grid for every zone: TLS, HSTS, DNSSEC, WAF, rate limits, bots and more.
 - **Projects** (Vercel). Every project: who can open its previews and *.vercel.app URLs, fork protection, the firewall and its managed rules, how many secrets are Sensitive.
 - **Regions** (AWS). Every enabled region: what runs there, whether GuardDuty is on, and its open findings, plus the account's global resources.
+- **Repositories** (GitHub). Every repository: how its default branch is protected, secret scanning and push protection, open security alerts, its Pages site and its open findings.
 - **Activity** (Cloudflare). Seven days of audit log, filtered down to changes, with destructive actions highlighted.
 - **Value** (Cloudflare). What you pay for, the traffic and threats it handled, and features your plans include but that are switched off.
 - **Audit report.** A print-ready report for auditors and management (use the browser's Save as PDF). Findings also export as CSV and JSON.
@@ -169,7 +187,7 @@ finding has its own page with a history of each scan and triage change, to share
 
 ## Several accounts and companies
 
-Keelson watches as many Cloudflare accounts, Vercel teams and AWS accounts as you add, from one credential or
+Keelson watches as many Cloudflare accounts, Vercel teams, AWS accounts and GitHub organizations as you add, from one credential or
 many. Accounts are grouped into **entities**: a company, legal entity or team that owns them. An entity can hold
 accounts on every platform. You decide how they're shown, and can
 change it at any time on the **Accounts** page:
@@ -225,6 +243,19 @@ SecurityAudit reads configuration only: it can't change anything and can't read 
 buckets or databases. An access key belongs to one account, so each account needs its own; temporary keys
 (the ones starting with ASIA) aren't accepted because they expire within hours. The IAM actions each source
 needs are in [docs/permissions.md](docs/permissions.md#aws).
+
+### GitHub
+
+Keelson reads GitHub as a GitHub App that you register and own, so it isn't tied to anyone's account and each
+organization's owners can see and remove it. In Add accounts, type the organization's name and follow the link:
+GitHub's App registration opens with read-only permissions and no webhook already chosen. Create the App, copy its
+**App ID**, generate a **private key**, then **Install App** on the organization. Paste the App ID and the whole key
+file into Keelson. One App covers every organization it's installed on; to install a private App on more than one,
+make it public under its **Advanced** settings (the key stays yours, so nobody else can use it).
+
+On every scan Keelson asks GitHub for a token limited to reading what it checks, even if the App was given more.
+That request is the one POST Keelson sends to GitHub; everything else is GET. The permissions each source needs
+are in [docs/permissions.md](docs/permissions.md#github).
 
 ## Run it for a team (Docker)
 
@@ -301,13 +332,13 @@ history, email domains and alert destinations.
 
 ## Security and privacy
 
-- **Read-only.** The scanner only sends GET requests to every provider, and GraphQL analytics queries to Cloudflare (GraphQL is POST by design, and query-only). Tests run full scans of each provider and fail if any request is anything else. Vercel environment variables are listed without their values, drain and webhook URLs are stored without their paths or secrets, and AWS policy documents, Lambda environment variables and instance start-up scripts are never stored (start-up scripts are scanned for credentials in memory, and only the kind found is kept).
+- **Read-only.** The scanner only sends GET requests to every provider, GraphQL analytics queries to Cloudflare (GraphQL is POST by design, and query-only), and to GitHub one request for an installation token limited to read permissions. Tests run full scans of each provider and fail if any request is anything else. GitHub secret scanning alerts are read without the secret's value, and GitHub webhook URLs are stored without their paths. Vercel environment variables are listed without their values, drain and webhook URLs are stored without their paths or secrets, and AWS policy documents, Lambda environment variables and instance start-up scripts are never stored (start-up scripts are scanned for credentials in memory, and only the kind found is kept).
 - **Local.** Findings and tokens stay in the data directory. The database, tokens and backups are readable by your user only, and so is the directory when Keelson creates it.
   Tokens live in `credentials.json`, apart from the database, which only holds a reference to each one.
 - **Contained.**
   - Tokens are never sent to the browser or written to logs. Each account is only ever scanned with its own token.
   - Webhook URLs are write-only in the UI.
-  - Outbound traffic goes to `api.cloudflare.com`, `api.vercel.com` and `*.amazonaws.com` (for the platforms you connect; with AWS connected that includes AWS's public address-range file at `ip-ranges.amazonaws.com`, read without your access key), to `cloudflare-dns.com` (public DNS lookups), to any webhook you configure, and to `api.github.com` shortly after start and then daily, to see if there's a newer release (no identifying data; turn it off in Settings or with `KEELSON_UPDATE_CHECK=off`).
+  - Outbound traffic goes to `api.cloudflare.com`, `api.vercel.com`, `*.amazonaws.com` and `api.github.com` (for the platforms you connect; with AWS connected that includes AWS's public address-range file at `ip-ranges.amazonaws.com`, read without your access key), to `cloudflare-dns.com` (public DNS lookups), to any webhook you configure, and to `api.github.com` shortly after start and then daily, to see if there's a newer release (no identifying data; turn it off in Settings or with `KEELSON_UPDATE_CHECK=off`).
   - **Takeover check (on by default):** a `GET /` to each of your own hostnames that points at a cloud provider known for takeovers (S3, GitHub Pages, Heroku, Vercel, Azure…), over HTTPS and then HTTP if that fails, following at most two redirects on the same host. At most 100 hosts per scan, no cookies, the first 64 KB of the answer, and a User-Agent of `Keelson takeover check (+https://github.com/r4reetik/keelson)`. Turn it off under **Settings → Scans → Confirm subdomain takeovers** to keep every request inside Cloudflare's API.
   - There is no telemetry.
 - **Hardened web app.**
@@ -334,9 +365,10 @@ than roughly 20–30. Confirm with the record's owner before deleting anything.
 ## FAQ
 
 **Can Keelson change anything in my account?** No. The scanner only sends GET requests (and, to Cloudflare,
-GraphQL queries), and tests that run full scans fail the build if it ever sends anything else. Give Cloudflare a
-read-only token and AWS a user with only the SecurityAudit policy; Vercel has no read-only tokens, so its token
-can do what its user's role allows, and Keelson still only reads.
+GraphQL queries; to GitHub, one request for a read-only token), and tests that run full scans fail the build if it
+ever sends anything else. Give Cloudflare a read-only token, AWS a user with only the SecurityAudit policy and
+GitHub an App with read-only permissions; Vercel has no read-only tokens, so its token can do what its user's role
+allows, and Keelson still only reads.
 
 **Does any data leave my machine?** Only requests to the APIs of the platforms you connect and public DNS, the optional takeover
 check (one GET to your own hostnames that point at cloud providers), alerts to webhooks you configure, and the
@@ -349,11 +381,11 @@ Keelson imports its insights, and adds checks that correlate sources Security Ce
 with tunnels with Access policies, rules with traffic analytics, the audit log with settings), plus a
 workflow to track each finding to a fix across many accounts.
 
-**Which plans does it support?** All of them, on both platforms. Checks for features a plan doesn't include are
+**Which plans does it support?** All of them, on every platform. Checks for features a plan doesn't include are
 skipped, and Cloudflare analytics queries adapt to what each zone's plan exposes.
 
 **Which platforms are next?** Keelson is built so each platform is a provider behind one interface
-(`src/providers`). AWS, Google Cloud and Google Workspace are the likely next ones.
+(`src/providers`). Google Cloud and Google Workspace are the likely next ones.
 
 **A finding is wrong. What do I do?** Mark it **False positive** in its triage panel so it stops counting,
 and please [report it](https://github.com/r4reetik/keelson/issues/new?template=false_positive.yml).
@@ -367,8 +399,9 @@ integrations (Jira, Linear, GitHub Issues), saved views, and more platforms (Goo
 Further out, Keelson grows beyond configuration, keeping the same rules: self-hosted, and read-only unless you
 explicitly allow more:
 
-- **Code:** connect GitHub repositories and scan them for vulnerable dependencies, secrets and risky
-  configuration, without running any of their code.
+- **Code:** scan the code in your GitHub repositories itself, for vulnerable dependencies, secrets and risky
+  workflows beyond what GitHub's own alerts report, without running any of it. (Organization settings, branch
+  protection and GitHub's alerts are read today.)
 - **Deployments and exposure:** map which code runs where, and what can reach it from the internet.
 - **Cloud activity:** read CloudTrail, VPC flow logs and similar records to see what actually happened.
 - **Runtime:** watch running workloads.
@@ -385,7 +418,7 @@ and the test suite tells you what's missing.
 
 ```bash
 npm install
-npm run dev -- --mock   # mocked Cloudflare, Vercel and AWS data, in three entities
+npm run dev -- --mock   # mocked Cloudflare, Vercel, AWS and GitHub data, in three entities
 npm run dev             # your real accounts, kept in ./.keelson
 npm run check           # typecheck, lint, tests
 ```

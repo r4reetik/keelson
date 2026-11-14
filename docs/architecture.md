@@ -12,6 +12,9 @@ flowchart LR
   subgraph AWS
     AREST[Query and REST APIs<br/>signed GET only]
   end
+  subgraph GitHub
+    GREST[REST API<br/>read-only App token, GET only]
+  end
   DOH[Public DNS<br/>cloudflare-dns.com]
   HOSTS[Your hostnames<br/>takeover probe, optional]
 
@@ -20,10 +23,12 @@ flowchart LR
   PROV --> INV[Cloudflare inventory<br/>inventory.ts, analytics.ts]
   PROV --> VINV[Vercel inventory<br/>providers/vercel]
   PROV --> AINV[AWS inventory<br/>providers/aws]
+  PROV --> GINV[GitHub inventory<br/>providers/github]
   INV --> REST & GQL & DOH & HOSTS
   VINV --> VREST
   AINV --> AREST
-  INV & VINV & AINV --> ENG[Engine<br/>check modules]
+  GINV --> GREST
+  INV & VINV & AINV & GINV --> ENG[Engine<br/>check modules]
   ENG --> DB[(SQLite<br/>scans, findings,<br/>history, triage)]
   DB --> API[HTTP API<br/>Hono]
   API --> WEB[Web app<br/>React + Kumo]
@@ -32,11 +37,11 @@ flowchart LR
 
 ## Providers
 
-Every account belongs to one provider (Cloudflare, Vercel or AWS), recorded on the account. The scanner, the account
+Every account belongs to one provider (Cloudflare, Vercel, AWS or GitHub), recorded on the account. The scanner, the account
 routes and the Add accounts dialog only talk to a provider through the `Provider` interface in `src/providers/types.ts`:
 verify a credential, list the accounts it reaches, probe what it can read, and scan an account. `src/providers/index.ts`
 lists them. Cloudflare's code predates providers and lives in `src/core`, wrapped by `src/providers/cloudflare.ts`;
-Vercel's lives in `src/providers/vercel/` and AWS's in `src/providers/aws/`, and new providers get their own folder
+Vercel's lives in `src/providers/vercel/`, AWS's in `src/providers/aws/` and GitHub's in `src/providers/github/`, and new providers get their own folder
 the same way.
 
 What the app says about a provider (its label, what it calls an account and a credential, the credential's fields,
@@ -57,7 +62,12 @@ user, users with their keys and MFA, roles and policies), S3, CloudFront and Rou
 instances, EBS settings, VPCs, databases, load balancers, functions and GuardDuty in every enabled region
 (about twelve requests per region, plus a few per user, bucket, load balancer and function). A region that
 refuses the access key is skipped and recorded, rather than failing the scan. AWS has no client library here:
-`src/providers/aws/sigv4.ts` signs each GET, and `xml.ts` reads the XML answers.
+`src/providers/aws/sigv4.ts` signs each GET, and `xml.ts` reads the XML answers. A GitHub scan signs a JWT with the
+App's private key (`node:crypto`), finds the App's installation on the organization, and asks for an installation
+token limited to read permissions; with it, it reads the organization's settings, owners, Actions policy, webhooks
+and installed Apps, then each repository's default branch protection and rulesets, deploy keys, webhooks and Pages
+site (about six requests per repository), and the organization's open Dependabot, code scanning and secret scanning
+alerts.
 
 1. **Inventory.** For one account, Keelson reads everything the checks need into one typed `Inventory`:
    zones and their settings, DNS records, rulesets, certificates, members, tokens, Access, Gateway, Workers,
@@ -76,9 +86,10 @@ refuses the access key is skipped and recorded, rather than failing the scan. AW
 5. **Alert.** New findings at or above the chosen severity, and findings that came back after being fixed,
    go to each entity's Slack channel or webhook.
 
-The scanner never changes anything: REST calls are GET, GraphQL is POST but only ever queries, and
-`test/integration.test.ts` (Cloudflare), `test/vercel.test.ts` (Vercel) and `test/aws.test.ts` (AWS) fail on any
-other request. AWS services whose APIs only answer POST (CloudTrail, KMS, Config) are left unread for that reason.
+The scanner never changes anything: REST calls are GET, GraphQL is POST but only ever queries, GitHub's
+installation token request is the one other POST (it creates a token that can only read), and
+`test/integration.test.ts` (Cloudflare), `test/vercel.test.ts` (Vercel), `test/aws.test.ts` (AWS) and
+`test/github.test.ts` (GitHub) fail on any other request. AWS services whose APIs only answer POST (CloudTrail, KMS, Config) are left unread for that reason.
 
 ## Checks that span providers
 
@@ -87,7 +98,7 @@ DNS record that points at Vercel when no Vercel project in the company serves th
 distribution none of its AWS accounts has. Each scan stores a few `links` in its snapshot (`ProviderLinks` in
 `src/shared/api.ts`): Cloudflare, its DNS records that point at Vercel and at AWS, and the address of every A
 record; Vercel, the domains its projects serve; AWS, its CloudFront domain names, load balancer names, buckets,
-public addresses and account ID. A list is left out when its scan couldn't read all of it. When an account is
+public addresses and account ID; GitHub, the custom domains of its Pages sites. A list is left out when its scan couldn't read all of it. When an account is
 scanned, the scanner merges every list from the latest scans of the other accounts in the same entity and passes
 them to the checks as `related`. A list is only used when every account of the provider that publishes it
 (`LINK_PROVIDER`) supplied it: if one hasn't been scanned yet, or left it out, the merged list is incomplete, it is
@@ -147,11 +158,12 @@ src/
   providers/            the Provider interface, the registry, Cloudflare's adapter and the full check catalog
     vercel/             Vercel: read-only client, sources, inventory, checks, views, token checks
     aws/                AWS: signed read-only client, sources, inventory, checks, views, access key checks
+    github/             GitHub: App client (JWT, read-only installation token), sources, inventory, checks, views, App checks
   store/                SQLite: migrations (db.ts) and one repository per concern
   server/               Hono app: routes/, guards, validation, presentation
   shared/               API types and logic shared with the web app (no Node, no DOM)
 web/src/                React app: routes.tsx lists every page
-dev/mock/               mocked Cloudflare, Vercel and AWS APIs, for tests and `npm run dev -- --mock`
+dev/mock/               mocked Cloudflare, Vercel, AWS and GitHub APIs, for tests and `npm run dev -- --mock`
 scripts/                dev runner, and the generator for docs/checks.md and docs/permissions.md
 test/                   node:test suites
 ```

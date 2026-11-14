@@ -269,6 +269,7 @@ const PATH_SOURCES: Record<ProviderId, string> = {
   cloudflare: "DNS, rules, tunnels, Access, traffic and the audit log",
   vercel: "deployment protection, secrets, the firewall and domains",
   aws: "IAM, security groups, buckets, databases and DNS",
+  github: "organization settings, branch protection and code security alerts",
 };
 
 function AttackPaths({ data, multi }: { data: Extract<Overview, { trend: unknown }>; multi: boolean }) {

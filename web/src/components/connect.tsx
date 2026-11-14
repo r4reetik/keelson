@@ -11,6 +11,7 @@ import {
   api,
   capitalize,
   CREDENTIAL_SEPARATOR,
+  githubAppTemplate,
   plural,
   PROVIDER_INFO,
   PROVIDERS,
@@ -49,7 +50,12 @@ export function ProviderPicker({ value, onChange }: { value: ProviderId; onChang
 }
 
 /** How to create the credential, one set of steps per provider. A new provider doesn't compile until it has one. */
-const TOKEN_HELP: Record<ProviderId, () => React.ReactNode> = { cloudflare: CloudflareTokenHelp, vercel: VercelTokenHelp, aws: AwsTokenHelp };
+const TOKEN_HELP: Record<ProviderId, () => React.ReactNode> = {
+  cloudflare: CloudflareTokenHelp,
+  vercel: VercelTokenHelp,
+  aws: AwsTokenHelp,
+  github: GithubTokenHelp,
+};
 
 export function TokenHelp({ provider = "cloudflare" }: { provider?: ProviderId }) {
   const Help = TOKEN_HELP[provider];
@@ -170,6 +176,44 @@ function AwsTokenHelp() {
         Open the user, go to <span className="font-medium">Security credentials → Create access key</span>, choose{" "}
         <span className="font-medium">Application running outside AWS</span>, and paste the key ID and the secret below. An access key belongs to one AWS
         account, so each account needs its own.
+      </li>
+    </ol>
+  );
+}
+
+function GithubTokenHelp() {
+  const [org, setOrg] = useState("");
+  return (
+    <ol className="ml-5 list-decimal space-y-2 text-base text-kumo-default marker:text-kumo-subtle">
+      <li className="space-y-2">
+        <div>Register a GitHub App for Keelson in the organization you want to scan. The link fills in read-only permissions and no webhook.</div>
+        <div className="flex flex-wrap items-center gap-3">
+          <Input
+            className="w-56"
+            aria-label="Organization"
+            placeholder="Organization name"
+            value={org}
+            onChange={(e) => setOrg(e.target.value.trim())}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <Link href={githubAppTemplate(org || null)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1">
+            Register the App{org ? ` in ${org}` : ""} <ArrowSquareOutIcon />
+          </Link>
+        </div>
+      </li>
+      <li>
+        Check the permissions are all <span className="font-medium">Read-only</span>, then choose <span className="font-medium">Create GitHub App</span>. App
+        names are unique across GitHub, so change the name if it's taken.
+      </li>
+      <li>
+        On the App's page, copy the <span className="font-medium">App ID</span>. Under <span className="font-medium">Private keys</span>, choose{" "}
+        <span className="font-medium">Generate a private key</span> and paste the whole downloaded file below.
+      </li>
+      <li>
+        Choose <span className="font-medium">Install App</span> and install it on the organization, on all repositories or the ones to scan. To scan more
+        organizations with one App, make it public under <span className="font-medium">Advanced</span> and install it on each. Keelson only reads, and asks
+        GitHub for a read-only token on every scan.
       </li>
     </ol>
   );

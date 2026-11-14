@@ -96,4 +96,9 @@ export function removeLegacyConfig(dataDir: string): void {
 }
 
 /** "…a1b2" — the only part of a token ever shown in the UI or logs. */
-export const maskToken = (t: string): string => (t.length > 8 ? `…${t.slice(-4)}` : "…");
+export const maskToken = (t: string): string => {
+  // A private key always ends in "-----", which tells nothing apart; the App ID before it isn't secret and does (GitHub).
+  const app = /^([^:\s]{1,40}):[\s\S]*-----BEGIN [A-Z ]+-----/.exec(t);
+  if (app) return `App ${app[1]}`;
+  return t.length > 8 ? `…${t.slice(-4)}` : "…";
+};

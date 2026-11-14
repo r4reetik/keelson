@@ -23,7 +23,7 @@ A false positive or missed finding in a check is not a vulnerability; use the
 ## Threat model
 
 Keelson holds the credentials of the platforms you connect (Cloudflare API tokens, Vercel access tokens,
-AWS access keys), and a database describing accounts' configuration, including member email addresses. It is designed to:
+AWS access keys, GitHub App private keys), and a database describing accounts' configuration, including member email addresses. It is designed to:
 
 - **Only read.** The scanner issues GET requests, plus Cloudflare GraphQL analytics queries (GraphQL is sent
   as POST, as Cloudflare requires, and only ever queries). Use a Cloudflare token with read permissions;
@@ -31,11 +31,16 @@ AWS access keys), and a database describing accounts' configuration, including m
   user's role allows: Keelson still only sends GET requests to Vercel, and tests fail on anything else.
   For AWS, give the access key's user only the managed SecurityAudit policy; Keelson sends signed GET requests
   and nothing else, so services whose APIs only answer POST (CloudTrail, KMS, Config) aren't read.
+  For GitHub, register the App with read-only permissions. On each scan Keelson signs a short-lived JWT with the
+  App's private key and sends one POST to GitHub, for an installation token limited to the read permissions it
+  needs, so a token Keelson holds can't write even if the App can. Every other request is GET, and tests fail on
+  anything else.
 - **Never read secret values.** Vercel environment variables are listed without their values; drain and
   webhook URLs are stored without their paths, query strings or headers. AWS policy documents are reduced to
   what they allow and Lambda environment variables are dropped as the answer is read; neither is stored. Instance
   start-up scripts (user data) are scanned for credentials in memory and dropped: only the kind of credential found
-  is stored, never the script or the value.
+  is stored, never the script or the value. GitHub secret scanning alerts are read with `hide_secret` and the value
+  field is dropped regardless; GitHub webhook URLs keep only their scheme and host, and deploy keys only their title.
 - **Contact only what it needs.** Besides the APIs of the platforms you connect and public DNS, the optional takeover check
   sends one GET to your own hostnames that point at known cloud providers, and the update check reads
   GitHub's public list of releases once a day, sending nothing about the installation. Both can be turned off in Settings.

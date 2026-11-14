@@ -20,7 +20,7 @@ of those accounts, and are skipped when the entity has no scanned account on the
 | Cloudflare | [Zero Trust](#cloudflare-zero-trust) | 22 |
 | Cloudflare | [TLS & HTTPS](#cloudflare-tls--https) | 15 |
 | Cloudflare | [WAF & bots](#cloudflare-waf--bots) | 23 |
-| Cloudflare | [DNS](#cloudflare-dns) | 13 |
+| Cloudflare | [DNS](#cloudflare-dns) | 14 |
 | Cloudflare | [Email](#cloudflare-email) | 11 |
 | Cloudflare | [Platform](#cloudflare-platform) | 6 |
 | Cloudflare | [Monitoring](#cloudflare-monitoring) | 4 |
@@ -43,6 +43,12 @@ of those accounts, and are skipped when the entity has no scanned account on the
 | AWS | [DNS](#aws-dns) | 4 |
 | AWS | [Platform](#aws-platform) | 5 |
 | AWS | [Monitoring](#aws-monitoring) | 3 |
+| GitHub | [Identity & access](#github-identity--access) | 7 |
+| GitHub | [Deployments](#github-deployments) | 3 |
+| GitHub | [Secrets](#github-secrets) | 3 |
+| GitHub | [TLS & HTTPS](#github-tls--https) | 3 |
+| GitHub | [Platform](#github-platform) | 3 |
+| GitHub | [Change risk](#github-change-risk) | 3 |
 
 ## Cloudflare
 
@@ -1086,6 +1092,19 @@ The address is in AWS's EC2 range, but none of the entity's AWS accounts holds i
 2. If it is an AWS account of yours, add it to this entity so its addresses are tracked.
 3. If it is a vendor's, mark the finding as accepted.
 4. If nobody knows, delete the record.
+
+#### XP-009: DNS record points at GitHub Pages, but no Pages site in the entity uses it
+
+**Severity:** High · **Attack path** · **Spans providers** · **Reads:** DNS records · [GitHub docs](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/verifying-your-custom-domain-for-github-pages)
+
+The record sends visitors to GitHub Pages, yet none of the entity's GitHub organizations has a Pages site with this hostname. Anyone can create a Pages site in their own account with this hostname as its custom domain and serve content under it, unless the domain is verified for your organization.
+
+**How to fix**
+
+1. If the site moved or was retired, delete the DNS record in Cloudflare.
+2. If it should be live, set the hostname as the custom domain in the repository's Settings → Pages.
+3. Verify the domain under the organization's Settings → Pages, so nobody else can use it.
+4. If the site is in a GitHub organization that isn't in Keelson, add it to this entity.
 
 ### Cloudflare: Email
 
@@ -2313,3 +2332,241 @@ The load balancer is where the internet meets your application, and without acce
 **How to fix**
 
 In EC2 → Load Balancers → the load balancer → Attributes → Edit, turn on Access logs and choose an S3 bucket. Give the bucket a lifecycle rule so old logs expire.
+
+## GitHub
+
+### GitHub: Identity & access
+
+#### GID-001: Organization doesn't require two-factor authentication
+
+**Severity:** High · **Attack path** · **Reads:** Organization settings · [GitHub docs](https://docs.github.com/en/organizations/keeping-your-organization-secure/managing-two-factor-authentication-for-your-organization/requiring-two-factor-authentication-in-your-organization)
+
+Members can sign in with a password alone. A phished or reused password then gives someone your code, your Actions secrets and whatever those workflows deploy to.
+
+**How to fix**
+
+1. Open the organization's Settings → Authentication security.
+2. Tick Require two-factor authentication for everyone. Members without it are removed until they set it up, so tell them first.
+
+#### GID-002: Every member can change every repository
+
+**Severity:** Medium · **Reads:** Organization settings · [GitHub docs](https://docs.github.com/en/organizations/managing-user-access-to-your-organizations-repositories/managing-repository-roles/setting-base-permissions-for-an-organization)
+
+The base permission is Write or Admin, so every member can push to every repository, including ones they have nothing to do with. One stolen login reaches all of your code.
+
+**How to fix**
+
+Under Settings → Member privileges, set Base permissions to Read or No permission, and give teams write access to the repositories they work on.
+
+#### GID-003: Members can create public repositories
+
+**Severity:** Low · **Reads:** Organization settings · [GitHub docs](https://docs.github.com/en/organizations/managing-organization-settings/restricting-repository-creation-in-your-organization)
+
+Anyone in the organization can publish code under its name, and a repository meant to be private can be created public by mistake.
+
+**How to fix**
+
+Under Settings → Member privileges → Repository creation, untick Public. Owners can still create public repositories.
+
+#### GID-004: Too many organization owners
+
+**Severity:** Medium · **Reads:** Organization owners · [GitHub docs](https://docs.github.com/en/organizations/managing-peoples-access-to-your-organization-with-roles/roles-in-an-organization)
+
+Every owner can change any setting, delete repositories, read every secret's name and add Apps with access to all code. Each extra owner widens what a stolen login can do.
+
+**How to fix**
+
+Keep two or three owners for break-glass access. Under People, change everyone else's role to Member and give their teams the access they need.
+
+#### GID-005: Members can fork private repositories
+
+**Severity:** Low · **Reads:** Organization settings · [GitHub docs](https://docs.github.com/en/organizations/managing-organization-settings/managing-the-forking-policy-for-your-organization)
+
+A fork of a private repository can live in a personal account, outside the organization's settings, and stays with the person after they leave.
+
+**How to fix**
+
+Under Settings → Member privileges, untick Allow forking of private repositories, or allow it only within the organization where your plan offers that.
+
+#### GHK-003: Deploy key can push to the repository
+
+**Severity:** Medium · **Reads:** Deploy keys · [GitHub docs](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys#deploy-keys)
+
+A deploy key with write access isn't tied to a person, doesn't expire and isn't covered by two-factor authentication. Whoever holds the private key can push, and it usually sits on a server.
+
+**How to fix**
+
+In the repository's Settings → Deploy keys, remove the key and add it again without Allow write access, or replace it with a GitHub App that has only the access it needs.
+
+#### GHK-004: GitHub App can change every repository
+
+**Severity:** Medium · **Reads:** Installed GitHub Apps · [GitHub docs](https://docs.github.com/en/apps/using-github-apps/reviewing-and-modifying-installed-github-apps)
+
+The App can write code, workflows or settings in every repository, including ones created later. If the vendor or its keys are compromised, so is all of your code.
+
+**How to fix**
+
+Under the organization's Settings → GitHub Apps, open the App's Configure page and choose Only select repositories, or remove it if nobody uses it.
+
+### GitHub: Deployments
+
+#### GAC-001: Workflows get a token that can write by default
+
+**Severity:** Medium · **Reads:** Actions permissions · [GitHub docs](https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication#modifying-the-permissions-for-the-github_token)
+
+Every workflow run gets a GITHUB_TOKEN that can push code, create releases and change issues, even when it only builds or tests. A compromised action or a script injection then changes the repository.
+
+**How to fix**
+
+Under the organization's Settings → Actions → General → Workflow permissions, choose Read repository contents and packages permissions. Give a workflow more with a permissions block where it needs it.
+
+#### GAC-002: Workflows can approve pull requests
+
+**Severity:** Medium · **Reads:** Actions permissions · [GitHub docs](https://docs.github.com/en/organizations/managing-organization-settings/disabling-or-limiting-github-actions-for-your-organization#preventing-github-actions-from-creating-or-approving-pull-requests)
+
+A workflow can approve a pull request, including one it opened. That satisfies a required review with no person involved, so the review rule protects nothing against a compromised workflow.
+
+**How to fix**
+
+Under the organization's Settings → Actions → General → Workflow permissions, untick Allow GitHub Actions to create and approve pull requests.
+
+#### GAC-003: Any third-party action can run
+
+**Severity:** Low · **Reads:** Actions permissions · [GitHub docs](https://docs.github.com/en/organizations/managing-organization-settings/disabling-or-limiting-github-actions-for-your-organization#allowing-select-actions-and-reusable-workflows-to-run)
+
+Workflows can use any action from any author. An action runs with the workflow's token and secrets, so one compromised action reaches every repository that uses it.
+
+**How to fix**
+
+Under the organization's Settings → Actions → General → Policies, choose Allow enterprise, and select non-enterprise, actions and reusable workflows. Allow actions created by GitHub, verified creators and the ones you name.
+
+### GitHub: Secrets
+
+#### GSC-001: Public repository doesn't scan for leaked secrets
+
+**Severity:** High · **Reads:** Code security settings · [GitHub docs](https://docs.github.com/en/code-security/secret-scanning/enabling-secret-scanning-features/enabling-secret-scanning-for-your-repository)
+
+Anyone can read a public repository and its whole history. Secret scanning is free there and tells you when a key or token is committed, often before someone else finds it.
+
+**How to fix**
+
+In the repository's Settings → Code security, enable Secret scanning. To cover every public repository, apply a security configuration under the organization's Settings → Code security → Configurations.
+
+#### GSC-002: Push protection is off
+
+**Severity:** Medium · **Reads:** Code security settings · [GitHub docs](https://docs.github.com/en/code-security/secret-scanning/protecting-pushes-with-secret-scanning)
+
+Secret scanning only reports a secret after it's pushed, when it's already in the history. Push protection stops the push instead.
+
+**How to fix**
+
+In the repository's Settings → Code security, enable Push protection under Secret scanning, or turn it on in the organization's security configuration.
+
+#### GSC-003: Leaked secret found in a repository and not resolved
+
+**Severity:** Critical · **Attack path** · **Reads:** Secret scanning alerts · [GitHub docs](https://docs.github.com/en/code-security/secret-scanning/managing-alerts-from-secret-scanning/resolving-alerts-from-secret-scanning)
+
+GitHub found a credential in the code or its history. Anyone who can read the repository, or who cloned it before, can use it until it's revoked.
+
+**How to fix**
+
+1. Revoke or rotate the credential where it was issued. Deleting the commit doesn't help: the value stays in clones and forks.
+2. Close the alert in the repository's Security → Secret scanning as Revoked.
+
+### GitHub: TLS & HTTPS
+
+#### GHK-001: Webhook doesn't verify the receiver's certificate
+
+**Severity:** Medium · **Reads:** Organization webhooks, Repository webhooks · [GitHub docs](https://docs.github.com/en/webhooks/using-webhooks/creating-webhooks)
+
+SSL verification is off, so anyone who can intercept the traffic can pose as the receiver and read every event GitHub sends, including code changes and who made them.
+
+**How to fix**
+
+Open the webhook in Settings → Webhooks, choose Enable SSL verification, and give the receiver a valid certificate.
+
+#### GHK-002: Webhook sends events over plain HTTP
+
+**Severity:** Medium · **Reads:** Organization webhooks, Repository webhooks · [GitHub docs](https://docs.github.com/en/webhooks/using-webhooks/best-practices-for-using-webhooks)
+
+Events, with commit messages, branch names and who pushed what, cross the internet unencrypted, and the signature header can be replayed.
+
+**How to fix**
+
+Change the webhook's Payload URL to https:// and make sure the receiver serves HTTPS.
+
+#### GPG-001: GitHub Pages site doesn't enforce HTTPS
+
+**Severity:** Low · **Reads:** GitHub Pages sites · [GitHub docs](https://docs.github.com/en/pages/getting-started-with-github-pages/securing-your-github-pages-site-with-https)
+
+Visitors who type the address or follow an old http:// link get the site unencrypted, where anyone on the network can change it.
+
+**How to fix**
+
+In the repository's Settings → Pages, tick Enforce HTTPS. GitHub offers it once the custom domain's certificate is issued.
+
+### GitHub: Platform
+
+#### GSC-004: Dependency with a critical or high vulnerability
+
+**Severity:** High · **Reads:** Dependabot alerts · [GitHub docs](https://docs.github.com/en/code-security/dependabot/dependabot-alerts/viewing-and-updating-dependabot-alerts)
+
+A package the repository depends on has a published vulnerability rated critical or high, so how to exploit it is public.
+
+**How to fix**
+
+Open the repository's Security → Dependabot alerts, update the packages, or dismiss an alert with the reason when the vulnerable code isn't reachable.
+
+#### GSC-005: Code scanning found a critical or high vulnerability
+
+**Severity:** High · **Reads:** Code scanning alerts · [GitHub docs](https://docs.github.com/en/code-security/code-scanning/managing-code-scanning-alerts/assessing-code-scanning-alerts-for-your-repository)
+
+Code scanning found a weakness in the repository's own code rated critical or high, such as an injection or a path traversal.
+
+**How to fix**
+
+Open the repository's Security → Code scanning, fix the code it points at, or dismiss the alert with the reason when it's a false positive.
+
+#### GSC-006: Dependabot security updates are off
+
+**Severity:** Low · **Reads:** Code security settings · [GitHub docs](https://docs.github.com/en/code-security/dependabot/dependabot-security-updates/configuring-dependabot-security-updates)
+
+Without them, a fix for a vulnerable dependency waits for someone to notice the alert and make the change by hand.
+
+**How to fix**
+
+In the repository's Settings → Code security, enable Dependabot security updates, or turn it on in the organization's security configuration.
+
+### GitHub: Change risk
+
+#### GBR-001: Default branch accepts changes without a pull request
+
+**Severity:** Medium · **Reads:** Branch protection, Rulesets that apply to default branches · [GitHub docs](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets)
+
+Anyone with write access, or a token or deploy key that has it, can push straight to the branch your releases come from, with no review and nothing in the history to stop it.
+
+**How to fix**
+
+1. Under the organization's Settings → Repository → Rulesets (or the repository's Settings → Rules), create a branch ruleset targeting the default branch.
+2. Turn on Require a pull request before merging, with at least one approval.
+3. Turn on Block force pushes and Restrict deletions.
+
+#### GBR-002: Default branch history can be rewritten or deleted
+
+**Severity:** Medium · **Reads:** Branch protection, Rulesets that apply to default branches · [GitHub docs](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)
+
+The branch is protected, but a force push or deletion is still allowed. That rewrites or removes reviewed history, which also removes the evidence of what was there.
+
+**How to fix**
+
+In the rule or ruleset that protects the default branch, turn on Block force pushes and Restrict deletions.
+
+#### GBR-003: Administrators can skip the default branch's review rule
+
+**Severity:** Low · **Reads:** Branch protection, Rulesets that apply to default branches · [GitHub docs](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#do-not-allow-bypassing-the-above-settings)
+
+Branch protection requires a pull request, but repository administrators and owners can push past it. Their logins and tokens are the ones most worth stealing.
+
+**How to fix**
+
+In the branch protection rule, tick Do not allow bypassing the above settings, or move the rule to a ruleset and list only who may bypass it.

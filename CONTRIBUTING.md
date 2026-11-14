@@ -15,11 +15,11 @@ git clone https://github.com/<you>/keelson.git
 cd keelson
 git remote add upstream https://github.com/r4reetik/keelson.git
 npm install
-npm run dev -- --mock   # mocked Cloudflare, Vercel and AWS data, nothing written to disk
+npm run dev -- --mock   # mocked Cloudflare, Vercel, AWS and GitHub data, nothing written to disk
 npm run dev             # your real accounts, data kept in ./.keelson
 ```
 
-Both start the API on port 4317 and the web app with hot reload on http://localhost:5173. To run a second copy beside the first (the mock next to your real accounts, say), give it its own ports: `KEELSON_PORT=4417 KEELSON_WEB_PORT=5273 npm run dev -- --mock`. The mock (`dev/mock/cloudflare.ts`, `dev/mock/vercel.ts` and `dev/mock/aws.ts`, seeded by `dev/mock/server.ts`) serves Cloudflare accounts, Vercel teams and an AWS account in three entities, one of them with every platform, with fictional data that trips every family of checks. You don't need an account on any of them to work on Keelson. If you do scan your own, use a read-only Cloudflare token, and remember that a Vercel token can do whatever your role allows.
+Both start the API on port 4317 and the web app with hot reload on http://localhost:5173. To run a second copy beside the first (the mock next to your real accounts, say), give it its own ports: `KEELSON_PORT=4417 KEELSON_WEB_PORT=5273 npm run dev -- --mock`. The mock (`dev/mock/cloudflare.ts`, `dev/mock/vercel.ts`, `dev/mock/aws.ts` and `dev/mock/github.ts`, seeded by `dev/mock/server.ts`) serves Cloudflare accounts, Vercel teams, an AWS account and a GitHub organization in three entities, one of them with every platform, with fictional data that trips every family of checks. You don't need an account on any of them to work on Keelson. If you do scan your own, use a read-only Cloudflare token, and remember that a Vercel token can do whatever your role allows.
 
 Before opening a pull request:
 
@@ -46,11 +46,12 @@ src/
     cloudflare.ts       Cloudflare as a provider: an adapter over core/
     vercel/             Vercel: client.ts (GET only), sources.ts, inventory.ts, checks/, views.ts, permissions.ts
     aws/                AWS: client.ts (signed GET only; sigv4.ts, xml.ts), sources.ts, inventory.ts, checks/, views.ts, permissions.ts
+    github/             GitHub: client.ts (GitHub App JWT, one read-only token POST, then GET only), sources.ts, inventory.ts, checks/, views.ts, permissions.ts
   store/                SQLite: migrations (db.ts) and one repository per concern behind Repo
   server/               Hono app: routes/, guards in middleware.ts, validation, presentation
   shared/               code shared with the web app: API types, severities, triage, scope, filters; providers.ts says everything the app knows about each provider
 web/src/                React app: routes.tsx lists every page, shell.tsx holds shared state
-dev/mock/               mocked provider APIs (Cloudflare, Vercel, AWS) and seeding, for tests and the mock dev server
+dev/mock/               mocked provider APIs (Cloudflare, Vercel, AWS, GitHub) and seeding, for tests and the mock dev server
 test/                   node:test suites; fixtures/ and checks/cases.ts for Cloudflare checks, vercel-cases.ts and aws-cases.ts for the others
 ```
 
@@ -59,7 +60,7 @@ The decisions behind the project, and the rules that follow from them, are in [A
 Rules worth knowing:
 
 - **The scanner only reads.** REST calls are GET; Cloudflare's GraphQL is POST but query-only. `test/integration.test.ts`, `test/vercel.test.ts` and `test/aws.test.ts` fail on any other method.
-- **Secret values are never read.** Vercel environment variables are listed without `decrypt`, and values, drain headers and URL paths are dropped as the inventory is built. AWS policy documents and Lambda environment variables are dropped the same way.
+- **Secret values are never read.** Vercel environment variables are listed without `decrypt`, and values, drain headers and URL paths are dropped as the inventory is built. AWS policy documents and Lambda environment variables are dropped the same way, and GitHub secret scanning alerts are read without the secret's value.
 - **`src/shared` is portable**: no `node:` imports, no DOM. The server returns its DTOs (`satisfies`), the web imports them as types.
 - **Routes carry their guards** (`router.ts`): `routes(app).with(requireSession(auth))`. Moving a route never changes who can reach it.
 - **A route that changes something names its permission** (`requirePermission("triage")` and the rest, from `src/shared/roles.ts`), or `anyone` for signing in. Registering a change without one throws, so a new write route can't be open to every role. When you add a kind of change, decide which role it belongs to in `PERMISSION_ROLE`, and hide the control for other roles in the web (`useShell().can`). A user may be limited to some entities: look accounts and entities up through `src/server/access.ts` (`ownAccount`, `ownEntity`, `viewOf`) rather than `repo.accounts.list()`, and add a permission that reaches every entity to `INSTANCE_WIDE`.
@@ -75,16 +76,16 @@ Rules worth knowing:
 
 ### A check for another provider
 
-The same steps, in the provider's folder (`src/providers/vercel/`, `src/providers/aws/`): a module in `checks/` written with that folder's
+The same steps, in the provider's folder (`src/providers/vercel/`, `src/providers/aws/`, `src/providers/github/`): a module in `checks/` written with that folder's
 `defineChecks`, a `docs` link to the provider's own documentation, `requires` from `sources.ts`, the read in `inventory.ts` (GET only,
 values dropped), a mock route in `dev/mock/<id>.ts`, and a failing case in `test/<id>-cases.ts`, which `test/<id>-checks.test.ts` checks
 the same way. An AWS finding's `zone` is its region, or "Global" for IAM, S3 settings, CloudFront and Route 53; a per-region setting is
-only judged where something runs. Checks that compare providers in an entity get an
+only judged where something runs. A GitHub finding's `zone` is its repository, or none for a setting of the whole organization. Checks that compare providers in an entity get an
 `XP-` ID and read `related` (see [docs/architecture.md](docs/architecture.md#checks-that-span-providers)).
 
 ## Adding a provider
 
-Google Cloud, Google Workspace, Alibaba Cloud and others fit the same shape as Vercel and AWS:
+Google Cloud, Google Workspace, Alibaba Cloud and others fit the same shape as Vercel, AWS and GitHub:
 
 1. Add it to `src/shared/providers.ts`: its ID, and a `PROVIDER_INFO` entry with its label, its words for an account, a resource and a credential, the credential's fields, its API host and the shape of its account IDs. The UI and the server word everything from that entry, so nothing else should compare a provider's name. Add its mark to `PROVIDER_GLYPH` (`web/src/components/ui.tsx`): the provider's monochrome logo as one 24×24 SVG path, such as the one Simple Icons publishes.
 2. Create `src/providers/<id>/` with a read-only client (GET or the provider's read-only equivalent, recording coverage), a sources registry, an inventory, check modules written with `checksFor<YourContext, YourSourceKey>()`, a catalog and an engine that ends in `summarize` from `src/core/engine.ts`.

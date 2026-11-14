@@ -20,6 +20,7 @@ import {
   projects,
   providerScores,
   regions,
+  repos,
   scopeFindings,
   scores,
   securityCenter,
@@ -39,6 +40,7 @@ import type {
   Overview,
   ProjectsResponse,
   RegionsResponse,
+  ReposResponse,
   Report,
   ScanRow,
   ScansResponse,
@@ -228,6 +230,10 @@ export function dashboardRoutes(r: Routes, { repo, scanner, version }: AppContex
     const s = latestScans(repo, c.get("scope"));
     return c.json({ scan: scanMeta(s), regions: regions(s), coverage: coverage(s) } satisfies RegionsResponse);
   });
+  r.get("/api/repos", (c) => {
+    const s = latestScans(repo, c.get("scope"));
+    return c.json({ scan: scanMeta(s), repos: repos(s), coverage: coverage(s) } satisfies ReposResponse);
+  });
   r.get("/api/value", (c) => {
     const s = latestScans(repo, c.get("scope"));
     return c.json({ scan: scanMeta(s), value: value(s), coverage: coverage(s) } satisfies ValueResponse);
@@ -285,6 +291,7 @@ export function dashboardRoutes(r: Routes, { repo, scanner, version }: AppContex
       zones: zones(scans),
       projects: projects(scans),
       regions: regions(scans),
+      repos: repos(scans),
       valueCounts: value(scans)?.counts,
       checks: checkStats(scans),
     } satisfies Report);

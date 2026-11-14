@@ -1,4 +1,4 @@
-// How DNS records are recognised as pointing at another provider (Vercel, AWS),
+// How DNS records are recognised as pointing at another provider (Vercel, AWS, GitHub Pages),
 // and what a Cloudflare scan shares with the entity's other accounts.
 
 import type { AwsEndpointKind, ProviderLinks } from "../shared/api.ts";
@@ -11,6 +11,16 @@ const VERCEL_A = /^(76\.76\.21\.\d{1,3}|216\.198\.79\.\d{1,3})$/;
 export function pointsAtVercel(type: string, content: string): boolean {
   if (type === "CNAME") return VERCEL_CNAME.test(content);
   if (type === "A") return VERCEL_A.test(content);
+  return false;
+}
+
+/** GitHub Pages: a CNAME to <owner>.github.io, or the A and AAAA addresses GitHub publishes for apex domains. */
+const PAGES_CNAME = /\.github\.io\.?$/i;
+const PAGES_ADDR = /^(185\.199\.(108|109|110|111)\.153|2606:50c0:800[0-3]::153)$/i;
+
+export function pointsAtGithubPages(type: string, content: string): boolean {
+  if (type === "CNAME") return PAGES_CNAME.test(content);
+  if (type === "A" || type === "AAAA") return PAGES_ADDR.test(content);
   return false;
 }
 
