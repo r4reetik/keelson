@@ -683,6 +683,10 @@ export interface ProviderLinks {
   awsAccounts?: string[];
   /** Custom domains of a GitHub organization's Pages sites, with the repository that serves each. */
   githubPages?: { host: string; repo: string }[];
+  /** The GitHub organization's login, lowercase, so AWS roles can tell a repository inside the entity from one outside it. */
+  githubOrgs?: string[];
+  /** Every repository of a GitHub organization ("org/name", lowercase), its default branch, and whether a change there needs a reviewed pull request. */
+  githubRepos?: { repo: string; defaultBranch: string; reviewed: boolean }[];
 }
 
 /** How an AWS account's public addresses changed over its scans: what it holds, and what it gave up and when. */
@@ -705,6 +709,8 @@ export const LINK_KEYS = [
   "awsReleased",
   "awsAccounts",
   "githubPages",
+  "githubOrgs",
+  "githubRepos",
 ] as const satisfies readonly (keyof ProviderLinks)[];
 export type LinkKey = (typeof LINK_KEYS)[number];
 
@@ -719,6 +725,8 @@ export const LINK_PROVIDER: Record<LinkKey, ProviderId> = {
   awsReleased: "aws",
   awsAccounts: "aws",
   githubPages: "github",
+  githubOrgs: "github",
+  githubRepos: "github",
 };
 
 /** One region of an AWS account as the Regions page shows it, or the account's global resources. */

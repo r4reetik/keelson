@@ -36,7 +36,7 @@ of those accounts, and are skipped when the entity has no scanned account on the
 | Vercel | [Monitoring](#vercel-monitoring) | 4 |
 | Vercel | [Change risk](#vercel-change-risk) | 1 |
 | AWS | [Attack surface](#aws-attack-surface) | 10 |
-| AWS | [Identity & access](#aws-identity--access) | 12 |
+| AWS | [Identity & access](#aws-identity--access) | 15 |
 | AWS | [Secrets](#aws-secrets) | 1 |
 | AWS | [TLS & HTTPS](#aws-tls--https) | 5 |
 | AWS | [WAF & bots](#aws-waf--bots) | 2 |
@@ -47,7 +47,7 @@ of those accounts, and are skipped when the entity has no scanned account on the
 | GitHub | [Deployments](#github-deployments) | 3 |
 | GitHub | [Secrets](#github-secrets) | 3 |
 | GitHub | [TLS & HTTPS](#github-tls--https) | 3 |
-| GitHub | [Platform](#github-platform) | 3 |
+| GitHub | [Platform](#github-platform) | 5 |
 | GitHub | [Change risk](#github-change-risk) | 3 |
 
 ## Cloudflare
@@ -2103,6 +2103,39 @@ The instance has a public address and open ports, and the role attached to it ca
 2. Require IMDSv2 on the instance.
 3. Put it behind a load balancer and close its public ports, or remove its public address.
 
+#### AID-012: GitHub Actions in any repository can assume this IAM role
+
+**Severity:** Critical · **Attack path** · **Reads:** IAM roles, groups and policies · [AWS docs](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-idp_oidc.html#idp_oidc_Create_GitHub)
+
+The role trusts GitHub's OIDC provider without limiting the token's subject to your repositories. A workflow in anyone's repository, on any GitHub account, can get a token GitHub signs and assume the role.
+
+**How to fix**
+
+Open the role in IAM → Trust relationships and add a condition on token.actions.githubusercontent.com:sub naming your organization and repository, for example repo:your-org/your-repo:ref:refs/heads/main or repo:your-org/your-repo:environment:production.
+
+#### XP-010: IAM role trusts GitHub repositories outside the entity
+
+**Severity:** High · **Spans providers** · **Reads:** IAM roles, groups and policies · [GitHub docs](https://docs.github.com/en/actions/security-for-github-actions/security-hardening-your-deployments/about-security-hardening-with-openid-connect)
+
+GitHub Actions in a GitHub organization that isn't one of the entity's can assume this role. That organization's members, and anyone who gets write access to its repositories, get the role's AWS access.
+
+**How to fix**
+
+1. If the organization is yours, add it to this entity in Keelson.
+2. If it belongs to a vendor, confirm they still need the role and limit it to the repository and branch they use.
+3. Otherwise remove it from the role's trust policy.
+
+#### XP-011: Anyone who can push to the repository can assume this IAM role
+
+**Severity:** High · **Attack path** · **Spans providers** · **Reads:** IAM roles, groups and policies · [GitHub docs](https://docs.github.com/en/actions/security-for-github-actions/security-hardening-your-deployments/about-security-hardening-with-openid-connect#example-subject-claims)
+
+The role trusts GitHub Actions from a repository in the entity, either from any branch or pull request, or from a default branch that takes changes without review. Anyone with write access, or a stolen token or deploy key that has it, can push a workflow and act as the role in AWS.
+
+**How to fix**
+
+1. Limit the trust policy's subject to the protected default branch (repo:org/repo:ref:refs/heads/main) or, better, to a GitHub environment with required reviewers (repo:org/repo:environment:production).
+2. Require a reviewed pull request on that branch in GitHub.
+
 ### AWS: Secrets
 
 #### AEC-008: Credential in an instance's start-up script
@@ -2509,7 +2542,7 @@ In the repository's Settings → Pages, tick Enforce HTTPS. GitHub offers it onc
 
 #### GSC-004: Dependency with a critical or high vulnerability
 
-**Severity:** High · **Reads:** Dependabot alerts · [GitHub docs](https://docs.github.com/en/code-security/dependabot/dependabot-alerts/viewing-and-updating-dependabot-alerts)
+**Severity:** High · **Reads:** Dependabot alerts, Whether Dependabot alerts are on · [GitHub docs](https://docs.github.com/en/code-security/dependabot/dependabot-alerts/viewing-and-updating-dependabot-alerts)
 
 A package the repository depends on has a published vulnerability rated critical or high, so how to exploit it is public.
 
@@ -2519,7 +2552,7 @@ Open the repository's Security → Dependabot alerts, update the packages, or di
 
 #### GSC-005: Code scanning found a critical or high vulnerability
 
-**Severity:** High · **Reads:** Code scanning alerts · [GitHub docs](https://docs.github.com/en/code-security/code-scanning/managing-code-scanning-alerts/assessing-code-scanning-alerts-for-your-repository)
+**Severity:** High · **Reads:** Code scanning alerts, Whether code scanning has run · [GitHub docs](https://docs.github.com/en/code-security/code-scanning/managing-code-scanning-alerts/assessing-code-scanning-alerts-for-your-repository)
 
 Code scanning found a weakness in the repository's own code rated critical or high, such as an injection or a path traversal.
 
@@ -2527,15 +2560,35 @@ Code scanning found a weakness in the repository's own code rated critical or hi
 
 Open the repository's Security → Code scanning, fix the code it points at, or dismiss the alert with the reason when it's a false positive.
 
-#### GSC-006: Dependabot security updates are off
+#### GSC-006: Dependabot security updates are off where Dependabot has found something
 
-**Severity:** Low · **Reads:** Code security settings · [GitHub docs](https://docs.github.com/en/code-security/dependabot/dependabot-security-updates/configuring-dependabot-security-updates)
+**Severity:** Low · **Reads:** Code security settings, Dependabot alerts · [GitHub docs](https://docs.github.com/en/code-security/dependabot/dependabot-security-updates/configuring-dependabot-security-updates)
 
-Without them, a fix for a vulnerable dependency waits for someone to notice the alert and make the change by hand.
+The repository has open Dependabot alerts, and without security updates each fix waits for someone to notice the alert and make the change by hand.
 
 **How to fix**
 
-In the repository's Settings → Code security, enable Dependabot security updates, or turn it on in the organization's security configuration.
+In the repository's Settings → Code security, enable Dependabot security updates, or turn it on in the organization's security configuration. Dependabot then opens a pull request for each fix.
+
+#### GSC-007: Dependabot alerts are off
+
+**Severity:** Medium · **Reads:** Whether Dependabot alerts are on · [GitHub docs](https://docs.github.com/en/code-security/dependabot/dependabot-alerts/configuring-dependabot-alerts)
+
+GitHub doesn't tell anyone when a dependency of this repository has a published vulnerability. Dependabot alerts are free on every repository, private ones included.
+
+**How to fix**
+
+In the repository's Settings → Code security, enable Dependabot alerts. To cover every repository, apply a security configuration under the organization's Settings → Code security → Configurations.
+
+#### GSC-008: Public repository isn't scanned for vulnerabilities in its code
+
+**Severity:** Medium · **Reads:** Whether code scanning has run · [GitHub docs](https://docs.github.com/en/code-security/code-scanning/enabling-code-scanning/configuring-default-setup-for-code-scanning)
+
+Anyone can read this code and look for injections and other weaknesses in it. Code scanning is free on public repositories and finds many of them first.
+
+**How to fix**
+
+In the repository's Settings → Code security, choose Set up → Default under Code scanning, or turn it on for every public repository in the organization's security configuration.
 
 ### GitHub: Change risk
 

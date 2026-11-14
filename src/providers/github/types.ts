@@ -62,6 +62,10 @@ export interface GithubRepo {
   rules: BranchRule[] | null;
   deployKeys: { title: string; readOnly: boolean; createdAt: number | null }[] | null;
   hooks: GithubHook[] | null;
+  /** Whether Dependabot alerts are on; null when it couldn't be read, or the repository is archived. */
+  dependabotAlerts: boolean | null;
+  /** Whether code scanning has analysed the repository; null when it couldn't be read, or the repository is archived or empty. */
+  codeScanning: boolean | null;
   /** The Pages site: null when there is none, undefined when it couldn't be read. */
   pages: { cname: string | null; httpsEnforced: boolean | null } | null | undefined;
 }

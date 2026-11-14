@@ -105,7 +105,7 @@ objects in a bucket, the rows in a database, a policy document's text or a Lambd
 
 | Area | Examples |
 |---|---|
-| Identity & access | Root user without MFA or with access keys, console users without MFA (critical when they are administrators), access keys that are old or unused, a missing or weak password policy, administrators holding long-lived keys, roles any AWS account can assume, roles that trust an AWS account outside the entity without an external ID, customer managed policies that allow everything, internet-facing instances that run with administrator access |
+| Identity & access | Root user without MFA or with access keys, console users without MFA (critical when they are administrators), access keys that are old or unused, a missing or weak password policy, administrators holding long-lived keys, roles any AWS account or any GitHub repository can assume, roles that trust an AWS account outside the entity without an external ID, customer managed policies that allow everything, internet-facing instances that run with administrator access |
 | Attack surface | Public S3 buckets (policy or ACL, after the bucket's and the account's Block Public Access, and whether CloudFront serves them), security groups open to the internet on SSH, RDP, database ports or everything, rated by what they are attached to (something with a public address, something private, or nothing), publicly accessible databases, public EBS snapshots and machine images, Lambda function URLs without authentication |
 | Secrets | Credentials written into an instance's start-up script (user data): access keys, tokens, private keys, passwords in URLs. Only the kind is reported; the script is never stored |
 | TLS, HTTPS & WAF | CloudFront distributions and load balancers that serve plain HTTP or accept TLS 1.0 and 1.1, CloudFront reaching its origin over HTTP, distributions without a web ACL |
@@ -126,7 +126,7 @@ leaked secret's value.
 | Identity & access | Two-factor authentication not required, a base permission that lets every member write to every repository, members who can create public repositories or fork private ones, too many owners, deploy keys that can push, other GitHub Apps that can change every repository |
 | Change risk | Default branches that take changes without a pull request, that allow force pushes or deletion, or whose review rule administrators can skip. Classic branch protection and rulesets, the repository's and the organization's, count alike |
 | Secrets | Leaked secrets GitHub found and nobody resolved (critical while GitHub says the secret still works), public repositories without secret scanning, push protection off |
-| Platform | Open critical and high Dependabot and code scanning alerts, Dependabot security updates off |
+| Platform | Open critical and high Dependabot and code scanning alerts, Dependabot alerts off, public repositories code scanning has never analysed, Dependabot security updates off where Dependabot has found something |
 | Deployments | Workflows whose GITHUB_TOKEN can write by default, workflows that can approve pull requests, any third-party action allowed to run |
 | TLS & HTTPS | Webhooks that skip certificate checks or send over plain HTTP, Pages sites that don't enforce HTTPS |
 
@@ -147,6 +147,9 @@ Checks that compare a company's accounts on different platforms in the same enti
   held is only noted, at low severity, since it is usually a vendor's server or an account that isn't connected.
 - **Who is inside the entity.** With several AWS accounts in an entity, a role one of them trusts from another is
   internal; a role that trusts an account outside the entity is reported.
+- **From a GitHub push to AWS.** An AWS role that GitHub Actions can assume is compared with the entity's GitHub
+  organizations: a role that trusts an organization outside the entity is reported, and so is one that anyone who
+  can push to the repository can assume, from any branch or from a default branch that takes changes without review.
 
 A comparison only runs when every account it depends on has been scanned and could read what it needs; otherwise
 the check is skipped, not passed.

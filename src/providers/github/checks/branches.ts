@@ -4,7 +4,11 @@
 // organization's) count the same; either one is enough.
 
 import { defineChecks, withCode } from "./define.ts";
+import { DAY_MS } from "../../../shared/time.ts";
 import type { GithubRepo } from "../types.ts";
+
+/** A repository nobody has pushed to for this long is rated lower: an unreviewed change there is less likely, and it likely deploys nothing. */
+const IDLE_DAYS = 365;
 
 /** What protects the branch, combining classic protection and every ruleset that applies to it. */
 export function branchGuard(r: GithubRepo) {
@@ -57,14 +61,13 @@ export default defineChecks(
       if (r.protection === undefined || !r.rules) continue;
       const g = branchGuard(r);
       const where = { zone: r.name, resource: `${r.name}:${r.defaultBranch}`, link: d.repo(r.name, "settings/rules") };
+      const idle = r.pushedAt != null && inv.now - r.pushedAt > IDLE_DAYS * DAY_MS;
+      const unreviewed = g.protected ? `${r.defaultBranch} is protected, but doesn't require a pull request` : `${r.defaultBranch} has no protection`;
       report("GBR-001", {
         ...where,
         pass: g.pullRequests,
-        detail: g.pullRequests
-          ? ""
-          : g.protected
-            ? `${r.defaultBranch} is protected, but doesn't require a pull request`
-            : `${r.defaultBranch} has no protection`,
+        severity: !g.pullRequests && idle ? "low" : undefined,
+        detail: g.pullRequests ? "" : idle ? `${unreviewed}; last push ${new Date(r.pushedAt!).toISOString().slice(0, 10)}` : unreviewed,
       });
       if (!g.protected) continue;
       const gaps = [!g.blocksForcePush && "force pushes", !g.blocksDeletion && "deletion"].filter(Boolean);

@@ -70,8 +70,8 @@ describe("AWS scan against the mocked API", () => {
 
     const findings = findingsOf(repo);
     const ids = new Set(findings.map((f) => f.checkId));
-    // Everything but the checks that need a Vercel or Cloudflare account in the entity.
-    const expected = AWS_CHECKS.map((c) => c.id).filter((id) => id !== "XP-005" && id !== "XP-006" && id !== "ADN-002");
+    // Everything but the checks that need another platform's account in the entity.
+    const expected = AWS_CHECKS.filter((c) => !c.spans && c.id !== "ADN-002").map((c) => c.id);
     assert.deepEqual(
       expected.filter((id) => !ids.has(id)),
       [],

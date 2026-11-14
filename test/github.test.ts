@@ -16,7 +16,8 @@ import {
   MOCK_GITHUB_TOKEN_ONE_LINE,
   MOCK_LEAKED_SECRET,
 } from "../dev/mock/github.ts";
-import { seedAccount, seedGithub, testRepo } from "../dev/mock/accounts.ts";
+import { seedAccount, seedAws, seedGithub, testRepo } from "../dev/mock/accounts.ts";
+import { installMockAws, MOCK_AWS_ACCOUNT } from "../dev/mock/aws.ts";
 import { appJwt, nextPage, normalizePem, parseCredentials } from "../src/providers/github/client.ts";
 import { GITHUB_PERMISSION_KEYS, githubAppTemplate } from "../src/shared/github.ts";
 import { makeApp } from "./helpers/app.ts";
@@ -97,6 +98,8 @@ describe("GitHub scan against the mocked API", () => {
       "GSC-004",
       "GSC-005",
       "GSC-006",
+      "GSC-007",
+      "GSC-008",
       "GAC-001",
       "GAC-002",
       "GAC-003",
@@ -128,6 +131,15 @@ describe("GitHub scan against the mocked API", () => {
     assert.equal(snap.repos.find((r: { name: string }) => r.name === "api").protection, "Pull request, 2 approvals");
     assert.equal(snap.repos.find((r: { name: string }) => r.name === "web").protection, "None");
     assert.deepEqual(snap.links.githubPages, [{ host: "docs.mock.example", repo: "web" }]);
+    assert.deepEqual(snap.links.githubOrgs, ["mock-org"]);
+    assert.deepEqual(
+      snap.links.githubRepos.filter((r: { reviewed: boolean }) => r.reviewed).map((r: { repo: string }) => r.repo),
+      ["mock-org/api", "mock-org/handbook", "mock-org/infra", "mock-org/old-site"],
+    );
+    assert.ok(
+      !findings.some((f) => f.checkId === "GSC-008" && f.zone !== "web" && f.zone !== "handbook"),
+      "only public repositories are asked for code scanning",
+    );
     assert.ok(
       snap.coverage.every((c: { ok: boolean }) => c.ok),
       JSON.stringify(snap.coverage),
@@ -162,6 +174,30 @@ describe("GitHub scan against the mocked API", () => {
       "only the record no Pages site uses",
     );
     assert.equal(dangling[0].confidence, "likely");
+  });
+
+  test("an AWS role that GitHub Actions can assume is compared with the entity's repositories", async () => {
+    const aws = installMockAws();
+    try {
+      const { repo, vault } = testRepo();
+      seedGithub(repo, vault, { entity: "Mock Group" });
+      seedAws(repo, vault, { entity: "Mock Group" });
+      const scanner = new Scanner(repo, vault, () => {});
+      await scanner.start("setup").done;
+      await scanner.start("manual").done;
+      const found = repo.findings.forScan(repo.scans.latest(MOCK_AWS_ACCOUNT)!.id, repo.settings.get().slaDays);
+      const any = found.find((f) => f.checkId === "XP-011");
+      assert.equal(any?.resource, "github-deploy");
+      assert.match(any?.detail ?? "", /any branch or pull request of mock-org\//);
+      assert.ok(!found.some((f) => f.checkId === "XP-010"), "the role names the entity's own organization");
+      assert.deepEqual(
+        found.filter((f) => f.checkId === "AID-012").map((f) => f.resource),
+        ["github-legacy"],
+        "a role with no subject condition trusts every repository on GitHub",
+      );
+    } finally {
+      aws();
+    }
   });
 
   test("XP-009 is skipped when the entity has no GitHub organization", async () => {

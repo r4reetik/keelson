@@ -320,6 +320,12 @@ export function installMockGithub(o: MockOptions = {}): () => void {
     if (rest === "/keys") return paged(url, KEYS[r.name] ?? []);
     if (rest === "/hooks") return paged(url, HOOKS[r.name] ?? []);
     if (rest === "/pages") return PAGES[r.name] ? json(PAGES[r.name]) : fail(404, "Not Found");
+    // Dependabot alerts are on everywhere but "web"; code scanning has run on "api" only, and private repositories without Code Security say so.
+    if (rest === "/vulnerability-alerts") return r.name === "web" ? fail(404, "Vulnerability alerts are disabled.") : new Response(null, { status: 204 });
+    if (rest === "/code-scanning/analyses") {
+      if (r.name === "api") return json([{ id: 1, tool: { name: "CodeQL" }, created_at: iso(2) }]);
+      return r.private ? fail(403, "Code Security must be enabled for this repository to use code scanning.") : fail(404, "no analysis found");
+    }
     return fail(404, `No mock for ${path}`);
   }) as typeof fetch;
   return () => {

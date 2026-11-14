@@ -238,6 +238,25 @@ function statements(encoded: string | null): Statement[] {
 export const grantsEverything = (st: Statement[]): boolean =>
   st.some((s) => s.Effect === "Allow" && !s.Condition && list(s.Action).some((a) => a === "*" || a === "*:*") && list(s.Resource).includes("*"));
 
+/** GitHub Actions' OIDC provider, as IAM names it in a trust policy. */
+const GITHUB_OIDC = /oidc-provider\/token\.actions\.githubusercontent\.com$/i;
+const GITHUB_SUB = "token.actions.githubusercontent.com:sub";
+
+/**
+ * The GitHub subjects a statement's condition allows: every value of the sub claim under a String… operator
+ * (StringEquals, StringLike, with or without ForAnyValue). Negated operators don't narrow who may assume the role,
+ * so they're left out. Only these patterns are kept, never the rest of the policy.
+ */
+function githubSubjects(condition: unknown): string[] {
+  const out: string[] = [];
+  for (const [op, claims] of Object.entries((condition ?? {}) as Record<string, Record<string, string | string[]>>)) {
+    if (!/String(Equals|Like)/i.test(op) || /Not/i.test(op)) continue;
+    for (const [claim, values] of Object.entries(claims ?? {}))
+      if (claim.toLowerCase() === GITHUB_SUB) out.push(...list(values).map((v) => String(v).toLowerCase()));
+  }
+  return out;
+}
+
 /** Who a trust policy lets assume the role. */
 export function trustOf(st: Statement[]): AwsTrust[] {
   const out: AwsTrust[] = [];
@@ -249,7 +268,12 @@ export function trustOf(st: Statement[]): AwsTrust[] {
       for (const p of list(s.Principal.AWS))
         out.push(p === "*" ? { principal: "*", kind: "anyone", conditional } : { principal: p, kind: "account", conditional });
       for (const p of list(s.Principal.Service)) out.push({ principal: p, kind: "service", conditional });
-      for (const p of list(s.Principal.Federated)) out.push({ principal: p, kind: "federated", conditional });
+      for (const p of list(s.Principal.Federated))
+        out.push(
+          GITHUB_OIDC.test(p)
+            ? { principal: p, kind: "federated", conditional, github: githubSubjects(s.Condition) }
+            : { principal: p, kind: "federated", conditional },
+        );
     }
   }
   return out;

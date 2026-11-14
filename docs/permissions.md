@@ -132,7 +132,7 @@ for example) is skipped and shown as not readable on the Regions page: nothing t
 | IAM account summary (root user) | `iam:GetAccountSummary` | AID-001, AID-002 |
 | IAM password policy | `iam:GetAccountPasswordPolicy` | AID-007 |
 | IAM users, their access keys and MFA devices | `iam:ListUsers`, `iam:ListAccessKeys`, `iam:GetAccessKeyLastUsed`, `iam:ListMFADevices`, `iam:GetLoginProfile` | AID-003, AID-004, AID-005, AID-006, AID-007, AID-008 |
-| IAM roles, groups and policies | `iam:GetAccountAuthorizationDetails` | AID-008, AID-009, AID-010, AID-011, AEC-007 |
+| IAM roles, groups and policies | `iam:GetAccountAuthorizationDetails` | AID-008, AID-009, AID-010, AID-011, AEC-007, AID-012, XP-010, XP-011 |
 | S3 Block Public Access for the account | `s3:GetAccountPublicAccessBlock` | AS3-001, AS3-002, AS3-003 |
 | S3 buckets | `s3:ListAllMyBuckets`, `s3:GetBucketLocation` | AS3-001, AS3-002, AS3-003, ADN-001 |
 | S3 bucket access settings | `s3:GetBucketPublicAccessBlock`, `s3:GetBucketPolicyStatus`, `s3:GetBucketAcl` | AS3-002, AS3-003 |
@@ -178,6 +178,8 @@ without the secret's value, and only the scheme and host of webhook URLs are kep
 | Deploy keys | Repository permissions → Administration: Read-only | GHK-003 |
 | Repository webhooks | Repository permissions → Webhooks: Read-only | GHK-001, GHK-002 |
 | GitHub Pages sites | Repository permissions → Pages: Read-only | GPG-001 |
-| Dependabot alerts | Repository permissions → Dependabot alerts: Read-only | GSC-004 |
+| Whether Dependabot alerts are on | Repository permissions → Administration: Read-only | GSC-004, GSC-007 |
+| Whether code scanning has run | Repository permissions → Code scanning alerts: Read-only | GSC-005, GSC-008 |
+| Dependabot alerts | Repository permissions → Dependabot alerts: Read-only | GSC-004, GSC-006 |
 | Code scanning alerts | Repository permissions → Code scanning alerts: Read-only | GSC-005 |
 | Secret scanning alerts | Repository permissions → Secret scanning alerts: Read-only | GSC-003 |
