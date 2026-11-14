@@ -13,7 +13,8 @@ const DESCRIPTION =
   "Every check Keelson runs. Turning a check off or changing its severity applies to every account, from the next scan. The counts show the accounts in view.";
 
 export function ChecksPage() {
-  const { multi } = useShell();
+  const { multi, can } = useShell();
+  const editable = can("checks");
   const { data, error, loading, reload, setData } = useScopedApi<ChecksResponse>("/api/checks");
   const toasts = useKumoToastManager();
   const [cat, setCat] = useState(ALL);
@@ -44,7 +45,7 @@ export function ChecksPage() {
   const providers = new Set(data.checks.map((c) => c.provider));
 
   return (
-    <Page title={TITLE} description={DESCRIPTION}>
+    <Page title={TITLE} description={editable ? DESCRIPTION : `${DESCRIPTION} Managers and admins can change them.`}>
       <ListCard
         toolbar={
           <>
@@ -114,6 +115,7 @@ export function ChecksPage() {
                       size="sm"
                       className="w-40"
                       value={c.severityOverride || DEFAULT}
+                      disabled={!editable}
                       onValueChange={(v) => save(c, { severityOverride: v === DEFAULT ? null : (v as Severity) })}
                       items={{
                         [DEFAULT]: `${SEVERITY_LABEL[c.severity]} (default)`,
@@ -143,7 +145,12 @@ export function ChecksPage() {
                     {c.evaluated ? pct((c.evaluated - c.failed) / c.evaluated) : <span className="text-kumo-subtle">Not run</span>}
                   </Table.Cell>
                   <Table.Cell>
-                    <Switch aria-label={`Enable ${c.id}`} checked={!c.disabled} onCheckedChange={(v: boolean) => save(c, { disabled: !v })} />
+                    <Switch
+                      aria-label={`Enable ${c.id}`}
+                      checked={!c.disabled}
+                      disabled={!editable}
+                      onCheckedChange={(v: boolean) => save(c, { disabled: !v })}
+                    />
                   </Table.Cell>
                 </Table.Row>
               ))}

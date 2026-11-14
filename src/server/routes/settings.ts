@@ -10,14 +10,18 @@ import { fingerprints, mergeSettings, param, requireJson, severityOrNull, triage
 import { notFound } from "../errors.ts";
 import type { CheckRow, ChecksResponse, OwnersResponse, Settings, UpdateStatus } from "../../shared/api.ts";
 import { UpdateChecker } from "../../updates.ts";
+import { requirePermission } from "../middleware.ts";
 
-export function settingsRoutes(r: Routes, { repo, auth, version, updates }: AppContext) {
+export function settingsRoutes(r: Routes, { repo, version, updates }: AppContext) {
+  const admin = r.with(requirePermission("settings"));
+  const manage = r.with(requirePermission("checks"));
+  const triage = r.with(requirePermission("triage"));
   // Without a checker (tests, the mock server) updates read as switched off.
   const checker = updates ?? new UpdateChecker({ version, repository: null, install: "source", enabled: () => false });
 
   r.get("/api/settings", (c) => c.json(repo.settings.get() satisfies Settings));
 
-  r.put("/api/settings", async (c) => {
+  admin.put("/api/settings", async (c) => {
     const before = repo.settings.get();
     const next = mergeSettings(before, await requireJson(c));
     repo.settings.save(next);
@@ -27,7 +31,7 @@ export function settingsRoutes(r: Routes, { repo, auth, version, updates }: AppC
   });
 
   r.get("/api/updates", (c) => c.json(checker.status() satisfies UpdateStatus));
-  r.post("/api/updates/check", async (c) => c.json((await checker.check()) satisfies UpdateStatus));
+  admin.post("/api/updates/check", async (c) => c.json((await checker.check()) satisfies UpdateStatus));
 
   r.get("/api/checks", (c) => {
     const scope = repo.resolveScope(c.req.query("scope") || "all");
@@ -58,7 +62,7 @@ export function settingsRoutes(r: Routes, { repo, auth, version, updates }: AppC
     } satisfies ChecksResponse);
   });
 
-  r.put("/api/checks/:id", async (c) => {
+  manage.put("/api/checks/:id", async (c) => {
     const id = param(c, "id");
     if (!CHECK_BY_ID[id]) throw notFound("Unknown check");
     const body = await requireJson(c);
@@ -77,12 +81,13 @@ export function settingsRoutes(r: Routes, { repo, auth, version, updates }: AppC
   });
 
   // PUT /api/triage/:fp for one finding; POST /api/triage with { fingerprints } for many.
-  r.on(["PUT", "POST"], ["/api/triage/:fp", "/api/triage"], async (c) => {
+  triage.on(["PUT", "POST"], ["/api/triage/:fp", "/api/triage"], async (c) => {
     const body = await requireJson(c);
     const one = c.req.param("fp");
     const fps = fingerprints(one ? [one] : body.fingerprints);
     const { patch, appendNote } = triagePatch(body);
-    repo.findings.setTriage(fps, patch, auth.required ? "admin" : "local", { appendNote });
+    // Recorded with the username, so each finding's timeline says who changed it.
+    repo.findings.setTriage(fps, patch, c.get("user").username || null, { appendNote });
     return c.json({ ok: true, updated: fps.length });
   });
 }

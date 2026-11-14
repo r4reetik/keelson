@@ -9,6 +9,8 @@ import { TRIAGE_STATUSES, type TriageStatus } from "../shared/triage.ts";
 import type { Entity, EntityUpdate, TriagePatch } from "../store/repo.ts";
 import type { Settings } from "../shared/api.ts";
 import { ACCOUNT_ID_PATTERN, PROVIDER_INFO, isProvider, type ProviderId } from "../shared/providers.ts";
+import { isRole, type Role } from "../shared/roles.ts";
+import { MAX_PASSWORD, MIN_PASSWORD } from "./passwords.ts";
 
 export const FINGERPRINT = /^[0-9a-f]{20}$/;
 export const ACCOUNT_ID = ACCOUNT_ID_PATTERN.cloudflare;
@@ -180,6 +182,33 @@ export function severityOrNull(v: unknown) {
   if (!isSeverity(v)) throw badRequest("Invalid severity");
   return v;
 }
+
+/** A username: 1 to 64 letters, digits, dots, dashes, underscores or @, stored lowercase. An email address works too. */
+export const USERNAME = /^[a-z0-9][a-z0-9._@-]{0,63}$/;
+
+export function username(v: unknown): string {
+  const u = String(v ?? "")
+    .trim()
+    .toLowerCase();
+  if (!u) throw badRequest("Enter a username.");
+  if (!USERNAME.test(u)) throw badRequest("Usernames use letters, digits, dots, dashes, underscores and @, up to 64 characters.");
+  return u;
+}
+
+export function password(v: unknown): string {
+  const p = typeof v === "string" ? v : "";
+  if (p.length < MIN_PASSWORD) throw badRequest(`Passwords need at least ${MIN_PASSWORD} characters.`);
+  if (p.length > MAX_PASSWORD) throw badRequest(`Passwords can have at most ${MAX_PASSWORD} characters.`);
+  return p;
+}
+
+export function role(v: unknown): Role {
+  if (!isRole(v)) throw badRequest("Choose a role: viewer, analyst, manager or admin.");
+  return v;
+}
+
+/** An optional display name for a person; empty clears it. */
+export const personName = (v: unknown): string | null => cleanName(v) || null;
 
 /** A path parameter (always present when the route matched). */
 export function param(c: Context, name: string): string {

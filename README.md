@@ -48,14 +48,15 @@ logs, runtime security, and an AI penetration tester that works from all of it. 
 ```bash
 docker run -d --name keelson -p 127.0.0.1:4317:4317 \
   -v keelson-data:/data \
-  -e KEELSON_PASSWORD='a-long-admin-password' \
   ghcr.io/r4reetik/keelson:0.10
+docker logs keelson
 ```
 
 That's the whole install: Keelson ships as this one image, for Intel and Arm, and needs nothing but Docker. Open
-http://localhost:4317, sign in with the password, choose a platform (Cloudflare, Vercel or AWS), paste its token or
-access key, pick the accounts or teams it should scan, and the first scans run. `127.0.0.1:` keeps it reachable from
-this machine only; to run it for a team, see [below](#run-it-for-a-team-docker).
+http://localhost:4317 and create the admin account with the setup code that `docker logs keelson` shows. Then
+choose a platform (Cloudflare, Vercel or AWS), paste its token or access key, pick the accounts or teams it should
+scan, and the first scans run. `127.0.0.1:` keeps it reachable from this machine only; to run it for a team, see
+[below](#run-it-for-a-team-docker).
 
 ## What it checks
 
@@ -230,17 +231,34 @@ needs are in [docs/permissions.md](docs/permissions.md#aws).
 ```bash
 docker run -d --name keelson -p 4317:4317 \
   -v keelson-data:/data \
-  -e KEELSON_PASSWORD='a-long-admin-password' \
   ghcr.io/r4reetik/keelson:0.10
 ```
 
-Open it, sign in with the password, and add accounts in the browser. Tokens are stored in the volume.
+Open it and create the admin account with the setup code from `docker logs keelson`. Until the admin exists,
+nobody without that code can do anything, so create it before you tell anyone the address. Then add accounts in
+the browser, and add your team on the **Users** page. Tokens are stored in the volume.
 
-The container listens on all interfaces, so it **refuses to start without a password**. If an
-authenticating proxy such as Cloudflare Access already protects it, set `KEELSON_AUTH=none`
-instead. Behind a TLS-terminating proxy, also set `KEELSON_TRUST_PROXY=1` so session cookies are
-marked Secure. Data lives in `/data`; back up that volume. [docs/deployment.md](docs/deployment.md) covers
-Compose, Cloudflare Access, reverse proxies and backups.
+If an authenticating proxy such as Cloudflare Access already decides who gets in, you can turn Keelson's own
+sign-in off with `KEELSON_AUTH=none`; everyone the proxy lets through is then an admin. Behind a TLS-terminating
+proxy, also set `KEELSON_TRUST_PROXY=1` so session cookies are marked Secure. Data lives in `/data`; back up that
+volume. [docs/deployment.md](docs/deployment.md) covers Compose, Cloudflare Access, reverse proxies and backups.
+
+## Users and roles
+
+Everyone signs in with their own username and password. The first person to open Keelson creates the admin
+account; the admin adds everyone else on the **Users** page, with a one-time password to hand over, and each person
+chooses their own password when they first sign in. Every role sees every page:
+
+| Role | Can |
+|---|---|
+| Viewer | Read everything, and export findings and reports. Changes nothing |
+| Analyst | Also triage findings (status, owner, due date, notes) and run scans |
+| Manager | Also connect and remove accounts, replace credentials, edit entities and their alerts, and turn checks off or change their severity |
+| Admin | Also add and remove users, change their roles, and change Keelson's settings |
+
+Roles apply to every entity and account. Each finding's timeline records who triaged it. Locked out? An admin can
+reset anyone's password from the Users page; if nobody can sign in as an admin, run
+`docker exec keelson node dist/bin.js --reset-password <username>` for a one-time password.
 
 ## Updating
 
@@ -257,21 +275,20 @@ Set these on the container:
 
 | Environment | Default | |
 |---|---|---|
-| `KEELSON_PASSWORD` | none | Admin password, at least 12 characters. Required unless `KEELSON_AUTH=none` |
 | `KEELSON_PORT` | `4317` | Port to listen on inside the container |
 | `KEELSON_HOST` | `0.0.0.0` | Address to bind inside the container |
 | `KEELSON_DATA_DIR` | `/data` | Database and stored tokens; mount a volume here |
 | `KEELSON_TRUST_PROXY=1` | off | Trust `X-Forwarded-*` from your reverse proxy |
-| `KEELSON_AUTH=none` | | Allow no password (only behind an authenticating proxy) |
-| `KEELSON_ALLOWED_HOSTS` | | Extra hostnames accepted when Keelson listens on loopback without a password, comma-separated |
+| `KEELSON_AUTH=none` | | No sign-in: an authenticating proxy decides who gets in, and everyone it lets through is an admin |
+| `KEELSON_ALLOWED_HOSTS` | | Extra names for this machine when Keelson listens on loopback, comma-separated: creating the admin from them needs no setup code, and with `KEELSON_AUTH=none` they're the only other names accepted |
 | `KEELSON_LOG=json` | text | Log one JSON object per line |
 | `KEELSON_UPDATE_CHECK=off` | on | Never check GitHub for new releases |
 
-[docs/deployment.md](docs/deployment.md#configuration) also covers the command-line flags (`--password-file`, for a
-password kept in a Docker secret) and the defaults when running from a clone.
+[docs/deployment.md](docs/deployment.md#configuration) also covers the command-line flags (`--reset-password`, for
+someone locked out) and the defaults when running from a clone.
 
 Schedule, retention, SLAs and the takeover probe are set in **Settings**. Accounts, entities, company
-email domains and alert destinations are set on the **Accounts** page.
+email domains and alert destinations are set on the **Accounts** page, and who can sign in on the **Users** page.
 
 Upgrading from 0.2? The single account it scanned is imported into an entity on first start, with its
 history, email domains and alert destinations.
@@ -288,10 +305,12 @@ history, email domains and alert destinations.
   - **Takeover check (on by default):** a `GET /` to each of your own hostnames that points at a cloud provider known for takeovers (S3, GitHub Pages, Heroku, Vercel, Azure…), over HTTPS and then HTTP if that fails, following at most two redirects on the same host. At most 100 hosts per scan, no cookies, the first 64 KB of the answer, and a User-Agent of `Keelson takeover check (+https://github.com/r4reetik/keelson)`. Turn it off under **Settings → Scans → Confirm subdomain takeovers** to keep every request inside Cloudflare's API.
   - There is no telemetry.
 - **Hardened web app.**
-  - In local mode, Host-header checks block DNS rebinding.
+  - Every user has their own password, stored as an scrypt hash. Sign-in is rate-limited, and sessions are HttpOnly SameSite=Strict cookies.
+  - The server checks the user's role on every change; a changed role or a removed user applies at once.
+  - Creating the first admin from anywhere but the machine Keelson runs on needs the setup code from its log.
+  - With sign-in off on loopback, Host-header checks block DNS rebinding.
   - State-changing requests must be same-origin JSON, which blocks CSRF.
   - Strict CSP, framing blocked, and CSV exports are protected against formula injection.
-  - Password mode uses scrypt, rate-limited login and HttpOnly SameSite=Strict cookies.
 
 See [SECURITY.md](SECURITY.md) to report a vulnerability.
 

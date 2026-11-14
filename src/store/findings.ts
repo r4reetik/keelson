@@ -62,7 +62,7 @@ export class FindingRepo {
   }
 
   /** Applies a triage patch to each finding, recording what changed. */
-  setTriage(fingerprints: string[], patch: TriagePatch, user: string, opts: { appendNote?: string } = {}): void {
+  setTriage(fingerprints: string[], patch: TriagePatch, user: string | null, opts: { appendNote?: string } = {}): void {
     const now = new Date().toISOString();
     this.#s.tx(() => {
       const upsert = this.#s.db.prepare(

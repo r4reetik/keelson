@@ -4,12 +4,14 @@
 //   repo.accounts   Cloudflare accounts
 //   repo.scans      scan lifecycle, trends and retention
 //   repo.findings   findings with triage, and each finding's timeline
+//   repo.users      the people who sign in, and their roles
 
 import type { Store } from "./db.ts";
 import { SettingsRepo } from "./settings.ts";
 import { AccountRepo, EntityRepo, type Account, type Entity } from "./accounts.ts";
 import { ScanRepo } from "./scans.ts";
 import { FindingRepo } from "./findings.ts";
+import { UserRepo } from "./users.ts";
 import { resolveScope, type ResolvedScope } from "../shared/scope.ts";
 
 export type { Account, Entity, EntityNotifications, EntityUpdate } from "./accounts.ts";
@@ -17,6 +19,7 @@ export { DEFAULT_NOTIFICATIONS } from "./accounts.ts";
 export { DEFAULT_SETTINGS, type Overrides } from "./settings.ts";
 export type { StoredFinding, TriagePatch } from "./findings.ts";
 export type { DoneScan } from "./scans.ts";
+export type { User } from "./users.ts";
 export type { Settings } from "../shared/api.ts";
 export { displayName } from "../shared/scope.ts";
 
@@ -30,6 +33,7 @@ export class Repo {
   readonly accounts: AccountRepo;
   readonly scans: ScanRepo;
   readonly findings: FindingRepo;
+  readonly users: UserRepo;
 
   constructor(store: Store) {
     this.store = store;
@@ -38,6 +42,7 @@ export class Repo {
     this.accounts = new AccountRepo(store);
     this.scans = new ScanRepo(store);
     this.findings = new FindingRepo(store);
+    this.users = new UserRepo(store);
   }
 
   /** "all" (accounts whose entity is included in combined views), "e:<entity id>" or "a:<account id>"; null if unknown. */

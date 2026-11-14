@@ -57,7 +57,7 @@ const SCANNED = PROVIDERS.map((p) => `${PROVIDER_INFO[p].label} ${PROVIDER_INFO[
 const DESCRIPTION = `The ${SCANNED.slice(0, -1).join(", ")} and ${SCANNED[SCANNED.length - 1]} Keelson scans, grouped by the company or team that owns them. An entity can hold accounts on several platforms, has its own email domains and alerts, and you choose which entities appear together in All accounts.`;
 
 export function AccountsPage() {
-  const { dataVersion, status, refreshSession, setScope, startScan } = useShell();
+  const { dataVersion, status, refreshSession, setScope, startScan, can } = useShell();
   const { data, error, loading, reload } = useApi<{ entities: Entity[] }>("/api/accounts", [dataVersion, status?.running, status?.accountId]);
   const toasts = useKumoToastManager();
   const [modal, setModal] = useState<Modal>(null);
@@ -84,7 +84,9 @@ export function AccountsPage() {
   const patchAccount = (a: Account, body: Record<string, unknown>, done?: string) => act(() => api(`/api/accounts/${a.id}`, { method: "PATCH", body }), done);
   const close = () => setModal(null);
 
-  const actions = (
+  // Every role sees the accounts; only managers and admins change them.
+  const manage = can("accounts");
+  const actions = manage && (
     <>
       <Button variant="secondary" icon={<PlusIcon />} onClick={() => setModal({ kind: "new-entity" })}>
         New entity
@@ -112,7 +114,8 @@ export function AccountsPage() {
             setScope(scope);
             navigate("/");
           }}
-          onScan={(a) => startScan(`a:${a.id}`)}
+          onScan={can("scan") ? (a) => startScan(`a:${a.id}`) : undefined}
+          manage={manage}
         />
       ))}
 
@@ -216,6 +219,7 @@ function EntityCard({
   onDeleteEntity,
   onShow,
   onScan,
+  manage,
 }: {
   entity: Entity;
   entities: Entity[];
@@ -226,7 +230,10 @@ function EntityCard({
   patchAccount: (a: Account, body: Record<string, unknown>, done?: string) => Promise<boolean>;
   onDeleteEntity: () => void;
   onShow: (scope: string) => void;
-  onScan: (a: Account) => void;
+  /** Absent when the role can't run scans. */
+  onScan?: (a: Account) => void;
+  /** The role can change accounts and entities; otherwise the card only shows them. */
+  manage: boolean;
 }) {
   const n = e.notifications;
   const alerts = [n.slackConfigured && "Slack", n.webhookConfigured && "webhook"].filter(Boolean).join(" and ");
@@ -245,40 +252,47 @@ function EntityCard({
         <Switch
           aria-label={`Show ${e.name} in All accounts`}
           checked={e.includeInAll}
+          disabled={!manage}
           onCheckedChange={(v: boolean) => void patchEntity(e, { includeInAll: v }, v ? `${e.name} is shown in All accounts` : `${e.name} is kept separate`)}
         />
       </span>
-      <DropdownMenu>
-        <DropdownMenu.Trigger
-          render={<Button variant="ghost" size="sm" shape="square" icon={<DotsThreeIcon weight="bold" />} aria-label={`${e.name} options`} />}
-        />
-        <DropdownMenu.Content align="end">
-          {e.accounts.length > 0 && (
-            <DropdownMenu.Item icon={EyeIcon} onClick={() => onShow(`e:${e.id}`)}>
-              Show on dashboard
-            </DropdownMenu.Item>
-          )}
-          <DropdownMenu.Item icon={EnvelopeSimpleIcon} onClick={() => onModal({ kind: "entity-settings", entity: e })}>
-            Email domains and alerts
-          </DropdownMenu.Item>
-          <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => onModal({ kind: "rename-entity", entity: e })}>
-            Rename
-          </DropdownMenu.Item>
-          <DropdownMenu.Item className="sm:hidden" icon={EyeIcon} onClick={() => void patchEntity(e, { includeInAll: !e.includeInAll })}>
-            {e.includeInAll ? "Keep out of All accounts" : "Show in All accounts"}
-          </DropdownMenu.Item>
-          <DropdownMenu.Item icon={ArrowUpIcon} disabled={first} onClick={() => void patchEntity(e, { move: "up" })}>
-            Move up
-          </DropdownMenu.Item>
-          <DropdownMenu.Item icon={ArrowDownIcon} disabled={last} onClick={() => void patchEntity(e, { move: "down" })}>
-            Move down
-          </DropdownMenu.Item>
-          <DropdownMenu.Separator />
-          <DropdownMenu.Item icon={TrashIcon} variant="danger" disabled={e.accounts.length > 0} onClick={onDeleteEntity}>
-            {e.accounts.length ? "Delete (move its accounts first)" : "Delete entity"}
-          </DropdownMenu.Item>
-        </DropdownMenu.Content>
-      </DropdownMenu>
+      {(manage || e.accounts.length > 0) && (
+        <DropdownMenu>
+          <DropdownMenu.Trigger
+            render={<Button variant="ghost" size="sm" shape="square" icon={<DotsThreeIcon weight="bold" />} aria-label={`${e.name} options`} />}
+          />
+          <DropdownMenu.Content align="end">
+            {e.accounts.length > 0 && (
+              <DropdownMenu.Item icon={EyeIcon} onClick={() => onShow(`e:${e.id}`)}>
+                Show on dashboard
+              </DropdownMenu.Item>
+            )}
+            {manage && (
+              <>
+                <DropdownMenu.Item icon={EnvelopeSimpleIcon} onClick={() => onModal({ kind: "entity-settings", entity: e })}>
+                  Email domains and alerts
+                </DropdownMenu.Item>
+                <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => onModal({ kind: "rename-entity", entity: e })}>
+                  Rename
+                </DropdownMenu.Item>
+                <DropdownMenu.Item className="sm:hidden" icon={EyeIcon} onClick={() => void patchEntity(e, { includeInAll: !e.includeInAll })}>
+                  {e.includeInAll ? "Keep out of All accounts" : "Show in All accounts"}
+                </DropdownMenu.Item>
+                <DropdownMenu.Item icon={ArrowUpIcon} disabled={first} onClick={() => void patchEntity(e, { move: "up" })}>
+                  Move up
+                </DropdownMenu.Item>
+                <DropdownMenu.Item icon={ArrowDownIcon} disabled={last} onClick={() => void patchEntity(e, { move: "down" })}>
+                  Move down
+                </DropdownMenu.Item>
+                <DropdownMenu.Separator />
+                <DropdownMenu.Item icon={TrashIcon} variant="danger" disabled={e.accounts.length > 0} onClick={onDeleteEntity}>
+                  {e.accounts.length ? "Delete (move its accounts first)" : "Delete entity"}
+                </DropdownMenu.Item>
+              </>
+            )}
+          </DropdownMenu.Content>
+        </DropdownMenu>
+      )}
     </>
   );
 
@@ -295,9 +309,11 @@ function EntityCard({
             {" · "}
             {alerts ? `Alerts to ${alerts}` : "No alerts"}
           </span>
-          <Button size="sm" variant="ghost" icon={<PlusIcon />} onClick={() => onModal({ kind: "add", entityId: e.id })}>
-            Add accounts
-          </Button>
+          {manage && (
+            <Button size="sm" variant="ghost" icon={<PlusIcon />} onClick={() => onModal({ kind: "add", entityId: e.id })}>
+              Add accounts
+            </Button>
+          )}
         </>
       }
     >
@@ -367,6 +383,7 @@ function EntityCard({
                   <Switch
                     aria-label={`Include ${a.display} in the daily scan`}
                     checked={a.scheduled}
+                    disabled={!manage}
                     onCheckedChange={(v: boolean) =>
                       void patchAccount(a, { scheduled: v }, v ? `${a.display} is in the daily scan` : `${a.display} is left out of the daily scan`)
                     }
@@ -381,37 +398,43 @@ function EntityCard({
                       <DropdownMenu.Item icon={EyeIcon} onClick={() => onShow(`a:${a.id}`)}>
                         Show on dashboard
                       </DropdownMenu.Item>
-                      <DropdownMenu.Item icon={ArrowsClockwiseIcon} disabled={a.busy} onClick={() => onScan(a)}>
-                        Scan now
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => onModal({ kind: "rename-account", account: a })}>
-                        Rename
-                      </DropdownMenu.Item>
-                      {others.length > 0 && (
-                        <DropdownMenu.Sub>
-                          <DropdownMenu.SubTrigger icon={ArrowsLeftRightIcon}>Move to entity</DropdownMenu.SubTrigger>
-                          <DropdownMenu.SubContent>
-                            {others.map((x) => (
-                              <DropdownMenu.Item key={x.id} onClick={() => void patchAccount(a, { entityId: x.id }, `${a.display} moved to ${x.name}`)}>
-                                {x.name}
-                              </DropdownMenu.Item>
-                            ))}
-                          </DropdownMenu.SubContent>
-                        </DropdownMenu.Sub>
+                      {onScan && (
+                        <DropdownMenu.Item icon={ArrowsClockwiseIcon} disabled={a.busy} onClick={() => onScan(a)}>
+                          Scan now
+                        </DropdownMenu.Item>
                       )}
-                      <DropdownMenu.Item icon={ArrowUpIcon} disabled={i === 0} onClick={() => void patchAccount(a, { move: "up" })}>
-                        Move up
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Item icon={ArrowDownIcon} disabled={i === e.accounts.length - 1} onClick={() => void patchAccount(a, { move: "down" })}>
-                        Move down
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Item icon={KeyIcon} onClick={() => onModal({ kind: "token", account: a })}>
-                        Replace {PROVIDER_INFO[a.provider].credential}
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Separator />
-                      <DropdownMenu.Item icon={TrashIcon} variant="danger" disabled={a.busy} onClick={() => onModal({ kind: "remove", account: a })}>
-                        Remove account
-                      </DropdownMenu.Item>
+                      {manage && (
+                        <>
+                          <DropdownMenu.Item icon={PencilSimpleIcon} onClick={() => onModal({ kind: "rename-account", account: a })}>
+                            Rename
+                          </DropdownMenu.Item>
+                          {others.length > 0 && (
+                            <DropdownMenu.Sub>
+                              <DropdownMenu.SubTrigger icon={ArrowsLeftRightIcon}>Move to entity</DropdownMenu.SubTrigger>
+                              <DropdownMenu.SubContent>
+                                {others.map((x) => (
+                                  <DropdownMenu.Item key={x.id} onClick={() => void patchAccount(a, { entityId: x.id }, `${a.display} moved to ${x.name}`)}>
+                                    {x.name}
+                                  </DropdownMenu.Item>
+                                ))}
+                              </DropdownMenu.SubContent>
+                            </DropdownMenu.Sub>
+                          )}
+                          <DropdownMenu.Item icon={ArrowUpIcon} disabled={i === 0} onClick={() => void patchAccount(a, { move: "up" })}>
+                            Move up
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item icon={ArrowDownIcon} disabled={i === e.accounts.length - 1} onClick={() => void patchAccount(a, { move: "down" })}>
+                            Move down
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item icon={KeyIcon} onClick={() => onModal({ kind: "token", account: a })}>
+                            Replace {PROVIDER_INFO[a.provider].credential}
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Separator />
+                          <DropdownMenu.Item icon={TrashIcon} variant="danger" disabled={a.busy} onClick={() => onModal({ kind: "remove", account: a })}>
+                            Remove account
+                          </DropdownMenu.Item>
+                        </>
+                      )}
                     </DropdownMenu.Content>
                   </DropdownMenu>
                 </Table.Cell>

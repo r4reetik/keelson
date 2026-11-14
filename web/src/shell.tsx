@@ -1,8 +1,8 @@
-// The app shell's shared state: session, scope, scan status. Pages read it with
+// The app shell's shared state: session, signed-in user, scope, scan status. Pages read it with
 // useShell(); useScopedApi() fetches scoped data and refetches after each scan.
 
 import { createContext, useContext } from "react";
-import { useApi, withScope, type ScanStatus, type Session, type View } from "./lib.ts";
+import { useApi, withScope, type Permission, type ScanStatus, type Session, type View } from "./lib.ts";
 
 export interface Shell {
   session: Session;
@@ -19,6 +19,8 @@ export interface Shell {
   scoped: (path: string) => string;
   /** More than one account is in view, so pages show which account each row belongs to. */
   multi: boolean;
+  /** Whether the signed-in user's role may make this kind of change. Controls it can't use are hidden or disabled. */
+  can: (permission: Permission) => boolean;
 }
 
 export const ShellContext = createContext<Shell | null>(null);

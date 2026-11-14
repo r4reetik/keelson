@@ -7,6 +7,7 @@ import { CHECK_BY_ID } from "../../providers/catalog.ts";
 import { countBySeverity, emptyCounts, type SeverityCounts } from "../../shared/severity.ts";
 import { badRequest, notFound } from "../errors.ts";
 import { FINGERPRINT, param, readJson } from "../validate.ts";
+import { requirePermission } from "../middleware.ts";
 import {
   activity,
   brief,
@@ -100,7 +101,7 @@ export function dashboardRoutes(r: Routes, { repo, scanner, version }: AppContex
 
   // Scans the accounts in `scope` (one account, an entity, or "all"), or with `every: true`
   // every account in every entity, including entities kept out of "All accounts".
-  r.post("/api/scan", async (c) => {
+  r.with(requirePermission("scan")).post("/api/scan", async (c) => {
     const body = (await readJson(c)) as ScanRequest | null;
     const accounts = body?.every === true ? repo.accounts.list() : c.get("scope").accounts;
     if (!accounts.length) throw badRequest("No accounts in this view.");

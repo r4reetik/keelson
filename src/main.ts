@@ -25,8 +25,7 @@ export interface StartOptions {
   port: number;
   /** Where the database and credentials live; null keeps everything in memory. */
   dataDir: string | null;
-  password: string | null;
-  /** An authenticating proxy sits in front, so no password is needed off loopback. */
+  /** No sign-in: an authenticating proxy sits in front and decides who gets in (KEELSON_AUTH=none). */
   insecureNoAuth: boolean;
   trustProxy: boolean;
   allowedHosts: string[];
@@ -43,6 +42,7 @@ export interface Running {
   repo: Repo;
   vault: TokenVault;
   scanner: Scanner;
+  auth: Auth;
   close: () => Promise<void>;
 }
 
@@ -62,13 +62,15 @@ export async function start(o: StartOptions): Promise<Running> {
   if (o.dataDir) importLegacy(o.dataDir, repo, vault, log.info);
 
   const scanner = new Scanner(repo, vault, log.info);
-  const auth = new Auth({
-    password: o.password,
-    insecureNoAuth: o.insecureNoAuth,
-    loopback: isLoopback(o.host),
-    trustProxy: o.trustProxy,
-    allowedHosts: o.allowedHosts,
-  });
+  const auth = new Auth(
+    {
+      insecureNoAuth: o.insecureNoAuth,
+      loopback: isLoopback(o.host),
+      trustProxy: o.trustProxy,
+      allowedHosts: o.allowedHosts,
+    },
+    repo.users,
+  );
   const updates =
     o.updateCheck === false
       ? undefined
@@ -93,6 +95,7 @@ export async function start(o: StartOptions): Promise<Running> {
         repo,
         vault,
         scanner,
+        auth,
         close: () =>
           new Promise<void>((done) => {
             stopScheduler();

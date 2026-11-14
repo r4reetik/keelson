@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Breaking: users and roles replace the shared admin password.** Everyone signs in with their own username and password, and the first person to open Keelson creates the admin account. `KEELSON_PASSWORD` and `--password-file` are no longer read, and Keelson no longer starts without sign-in on your own machine. After upgrading, open Keelson and create the admin; from anywhere but the machine it runs on (which includes a browser outside the container), that asks for the setup code Keelson prints when it starts: `docker logs keelson`. Your accounts, findings and triage are kept. `KEELSON_AUTH=none` still turns sign-in off behind an authenticating proxy.
+- **Users page.** Admins add people with one of four roles: Viewer (reads everything and exports), Analyst (also triages findings and runs scans), Manager (also connects accounts, edits entities and alerts, and tunes checks) and Admin (also users and Settings). A new person gets a one-time password, shown once, and chooses their own when they first sign in. Admins change roles, reset passwords and remove people; a change applies at once, even to someone already signed in, and Keelson always keeps one admin. Controls a role can't use are hidden or shown read-only.
+- The menu under your name in the top bar shows your role, changes your password (which signs you out everywhere else) and signs you out.
+- Triage changes record who made them, so each finding's timeline shows the username instead of "admin".
+- Someone locked out, the last admin included, gets a one-time password with `docker exec keelson node dist/bin.js --reset-password <username>`.
+
 ## 0.10.0
 
 - **Breaking: Edgewatch is now Keelson, and starts fresh.** Keelson reads nothing that Edgewatch left: not `EDGEWATCH_*` variables, the `~/.edgewatch` folder or `edgewatch.db`, and the `edgewatch` image and npm package are no longer published. Start Keelson with the image `ghcr.io/r4reetik/keelson`, set `KEELSON_*` variables, and add your accounts again. To keep your Edgewatch data instead, rename the database to `keelson.db` (with its `-wal` and `-shm` files) in a folder you mount at `/data`.

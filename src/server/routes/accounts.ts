@@ -6,6 +6,7 @@ import type { AppContext } from "../env.ts";
 import type { Provider } from "../../providers/types.ts";
 import type { Routes } from "../router.ts";
 import { PROVIDER } from "../../providers/index.ts";
+import { requirePermission } from "../middleware.ts";
 import { publicAccount, publicEntity } from "../present.ts";
 import { ACCOUNT_ID_PATTERN } from "../../shared/providers.ts";
 import { accountIds, bool, cleanName, direction, param, providerId, readJson, requireJson, token } from "../validate.ts";
@@ -16,6 +17,7 @@ import type { AccountRow, AccountsResponse, AddAccountsResponse, TemplateRespons
 const PROBE_LIMIT = 10;
 
 export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
+  const manage = r.with(requirePermission("accounts"));
   const account = (id: string) =>
     repo.accounts.get(id) ??
     (() => {
@@ -32,7 +34,7 @@ export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
     return c.json({ url: help.templateUrl ?? help.url, readAllUrl: help.url, template: !!help.templateUrl } satisfies TemplateResponse);
   });
 
-  r.post("/api/accounts/verify", async (c) => {
+  manage.post("/api/accounts/verify", async (c) => {
     const body = await requireJson(c);
     const p = PROVIDER[providerId(body.provider)];
     const t = token(body.token, p.info.id);
@@ -50,7 +52,7 @@ export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
     } satisfies VerifyResponse);
   });
 
-  r.post("/api/accounts", async (c) => {
+  manage.post("/api/accounts", async (c) => {
     const body = await requireJson(c);
     const p = PROVIDER[providerId(body.provider)];
     const t = token(body.token, p.info.id);
@@ -118,7 +120,7 @@ export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
     } satisfies AccountsResponse);
   });
 
-  r.patch("/api/accounts/:id", async (c) => {
+  manage.patch("/api/accounts/:id", async (c) => {
     const a = account(param(c, "id"));
     const body = await requireJson(c);
     // Validate everything first, so a rejected request changes nothing.
@@ -136,7 +138,7 @@ export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
     return c.json({ ok: true, account: publicAccount(vault, repo.accounts.get(a.id)!) });
   });
 
-  r.put("/api/accounts/:id/token", async (c) => {
+  manage.put("/api/accounts/:id/token", async (c) => {
     const a = account(param(c, "id"));
     const p = PROVIDER[a.provider];
     const t = token((await readJson(c))?.token, a.provider);
@@ -149,7 +151,7 @@ export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
     return c.json({ ok: true });
   });
 
-  r.delete("/api/accounts/:id", (c) => {
+  manage.delete("/api/accounts/:id", (c) => {
     const a = account(param(c, "id"));
     if (scanner.isBusy(a.id)) throw conflict("Wait for this account's scan to finish.");
     repo.accounts.remove(a.id);

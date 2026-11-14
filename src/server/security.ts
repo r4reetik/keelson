@@ -1,19 +1,25 @@
 // Authentication and request hardening.
 //
-// - Loopback without a password: no login, but the Host header must be a
+// - Users sign in with a username and password (src/store/users.ts). Sessions
+//   are HttpOnly SameSite=Strict cookies, kept in memory and checked against the
+//   user on every request, so a removed user or a changed role applies at once.
+// - Until the first admin exists, anyone who can reach Keelson could create it.
+//   Off this machine that needs the setup code printed in Keelson's log.
+// - KEELSON_AUTH=none turns sign-in off: a proxy in front decides who gets in,
+//   and everyone acts as an admin. On loopback the Host header must then be a
 //   loopback name, which blocks DNS-rebinding attacks from web pages.
-// - Password mode: scrypt-verified login, HttpOnly SameSite=Strict session
-//   cookie, login rate limits per IP and overall.
+// - Sign-in and setup attempts are rate-limited per address and overall.
 // - Every state-changing request must be JSON and same-origin (CSRF).
 
-import { randomBytes, scrypt, scryptSync, timingSafeEqual } from "node:crypto";
-import { promisify } from "node:util";
+import { randomBytes } from "node:crypto";
 import type { Context, MiddlewareHandler } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
+import type { UserRepo, User } from "../store/users.ts";
+import type { SessionUser } from "../shared/api.ts";
+import { hashPassword, sameCode, setupCode, verifyPassword } from "./passwords.ts";
 
 export interface AuthOptions {
-  password: string | null;
-  /** Explicitly run without a password on a non-loopback address (behind an authenticating proxy). */
+  /** No sign-in (KEELSON_AUTH=none): an authenticating proxy in front decides who gets in. */
   insecureNoAuth: boolean;
   loopback: boolean;
   trustProxy: boolean;
@@ -31,44 +37,80 @@ const LOGIN_TRACKED_IPS = 10_000;
 /** A session's cookie is re-issued once it has slid this far, so active users stay signed in. */
 const SESSION_REFRESH_MS = 3600_000;
 
-const scryptAsync = promisify(scrypt) as (password: string, salt: Buffer, keylen: number) => Promise<Buffer>;
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+
+/** Who everyone is when sign-in is off: the proxy has already decided they may get in. */
+const PROXY_USER: SessionUser = { id: 0, username: "", name: null, role: "admin", mustChangePassword: false };
+
+export const sessionUser = (u: User): SessionUser => ({ id: u.id, username: u.username, name: u.name, role: u.role, mustChangePassword: u.mustChangePassword });
+
+export interface NewAdmin {
+  username: string;
+  name: string | null;
+  password: string;
+  code: string;
+}
 
 export class Auth {
   readonly required: boolean;
   readonly #opts: AuthOptions;
-  readonly #hash: { salt: Buffer; key: Buffer } | null;
-  readonly #sessions = new Map<string, number>();
+  readonly #users: UserRepo;
+  readonly #sessions = new Map<string, { userId: number; exp: number }>();
   readonly #attempts = new Map<string, number[]>();
   #failures: number[] = [];
+  /** Needed to create the first admin from anywhere but this machine; printed at startup. Null once someone exists. */
+  #setupCode: string | null;
 
-  constructor(opts: AuthOptions) {
+  constructor(opts: AuthOptions, users: UserRepo) {
     this.#opts = opts;
-    this.required = !!opts.password;
-    if (opts.password) {
-      const salt = randomBytes(16);
-      this.#hash = { salt, key: scryptSync(opts.password, salt, 64) };
-    } else {
-      this.#hash = null;
-    }
+    this.#users = users;
+    this.required = !opts.insecureNoAuth;
+    this.#setupCode = this.required && users.count() === 0 ? setupCode() : null;
   }
 
-  isAuthenticated(c: Context): boolean {
-    if (!this.required) return true;
+  /** The setup code to print, while the first admin hasn't been created. */
+  get setupCode(): string | null {
+    return this.setupRequired ? this.#setupCode : null;
+  }
+
+  /** Nobody can sign in yet. */
+  get setupRequired(): boolean {
+    if (!this.#setupCode) return false;
+    if (this.#users.count() > 0) this.#setupCode = null;
+    return !!this.#setupCode;
+  }
+
+  /**
+   * Whether creating the admin from this request needs the setup code: always, unless Keelson listens
+   * on loopback and the request names this machine (so a web page can't rebind its name to it).
+   */
+  setupCodeRequired(c: Context): boolean {
+    return !(this.#opts.loopback && this.#localHost(c));
+  }
+
+  #localHost(c: Context): boolean {
+    const hostname = (c.req.header("host") || "").toLowerCase().replace(/:\d+$/, "");
+    return LOOPBACK_HOSTS.has(hostname) || this.#opts.allowedHosts.includes(hostname);
+  }
+
+  /** The signed-in user, or null. Read from the database on every request, so changes apply at once. */
+  user(c: Context): SessionUser | null {
+    if (!this.required) return PROXY_USER;
     const id = getCookie(c, SESSION_COOKIE);
-    if (!id) return false;
-    const exp = this.#sessions.get(id);
+    if (!id) return null;
+    const s = this.#sessions.get(id);
     const now = Date.now();
-    if (!exp || exp < now) {
+    const user = s && s.exp >= now ? this.#users.get(s.userId) : null;
+    if (!s || !user) {
       this.#sessions.delete(id);
-      return false;
+      return null;
     }
     // Sliding expiry: the cookie is renewed with it, or the browser would drop it 12 hours after sign-in.
-    if (exp - now < SESSION_TTL_MS - SESSION_REFRESH_MS) {
-      this.#sessions.set(id, now + SESSION_TTL_MS);
+    if (s.exp - now < SESSION_TTL_MS - SESSION_REFRESH_MS) {
+      s.exp = now + SESSION_TTL_MS;
       this.#setCookie(c, id);
     }
-    return true;
+    return sessionUser(user);
   }
 
   #setCookie(c: Context, id: string): void {
@@ -81,29 +123,90 @@ export class Auth {
     });
   }
 
-  /** Returns null on success, or an error message. Hashing runs off the event loop, so guesses can't stall the server. */
-  async login(c: Context, password: string): Promise<string | null> {
-    if (!this.#hash) return null;
+  /** Starts a session for a user and returns its ID (the cookie's value). */
+  startSession(userId: number): string {
+    const now = Date.now();
+    for (const [sid, s] of this.#sessions) if (s.exp < now) this.#sessions.delete(sid);
+    const id = randomBytes(32).toString("base64url");
+    this.#sessions.set(id, { userId, exp: now + SESSION_TTL_MS });
+    return id;
+  }
+
+  #signIn(c: Context, user: User): void {
+    this.#setCookie(c, this.startSession(user.id));
+    this.#users.signedIn(user.id);
+  }
+
+  /** Signs a user out everywhere, except the session making the request when `keep` is given. */
+  endSessions(userId: number, keep?: Context): void {
+    const current = keep ? getCookie(keep, SESSION_COOKIE) : undefined;
+    for (const [sid, s] of this.#sessions) if (s.userId === userId && sid !== current) this.#sessions.delete(sid);
+  }
+
+  /** "Too many attempts" while this address, or everyone together, has failed too often recently. */
+  #limited(c: Context): string | null {
+    const since = Date.now() - LOGIN_WINDOW_MS;
+    const recent = (this.#attempts.get(clientIp(c, this.#opts.trustProxy)) || []).filter((t) => t > since);
+    this.#failures = this.#failures.filter((t) => t > since);
+    return recent.length >= LOGIN_MAX_ATTEMPTS || this.#failures.length >= LOGIN_MAX_FAILURES_TOTAL ? "Too many attempts. Try again in a few minutes." : null;
+  }
+
+  #failed(c: Context): void {
     const ip = clientIp(c, this.#opts.trustProxy);
     const now = Date.now();
-    const since = now - LOGIN_WINDOW_MS;
-    const recent = (this.#attempts.get(ip) || []).filter((t) => t > since);
-    this.#failures = this.#failures.filter((t) => t > since);
-    if (recent.length >= LOGIN_MAX_ATTEMPTS || this.#failures.length >= LOGIN_MAX_FAILURES_TOTAL) return "Too many attempts. Try again in a few minutes.";
-    const key = await scryptAsync(String(password || ""), this.#hash.salt, 64);
-    if (!timingSafeEqual(key, this.#hash.key)) {
-      this.#attempts.delete(ip); // re-insert, so the map stays in least-recent order
-      this.#attempts.set(ip, [...recent, now]);
-      if (this.#attempts.size > LOGIN_TRACKED_IPS) this.#attempts.delete(this.#attempts.keys().next().value as string);
-      this.#failures.push(now);
-      return "Incorrect password.";
+    const recent = (this.#attempts.get(ip) || []).filter((t) => t > now - LOGIN_WINDOW_MS);
+    this.#attempts.delete(ip); // re-insert, so the map stays in least-recent order
+    this.#attempts.set(ip, [...recent, now]);
+    if (this.#attempts.size > LOGIN_TRACKED_IPS) this.#attempts.delete(this.#attempts.keys().next().value as string);
+    this.#failures.push(now);
+  }
+
+  /** Returns null on success, or an error message. An unknown username takes as long as a wrong password. */
+  async login(c: Context, username: string, password: string): Promise<string | null> {
+    if (!this.required) return null;
+    const limited = this.#limited(c);
+    if (limited) return limited;
+    const user = this.#users.byUsername(username);
+    const ok = await verifyPassword(password, user ? this.#users.passwordHash(user.id) : null);
+    if (!user || !ok) {
+      this.#failed(c);
+      return "Incorrect username or password.";
     }
-    this.#attempts.delete(ip);
-    for (const [sid, exp] of this.#sessions) if (exp < now) this.#sessions.delete(sid);
-    const id = randomBytes(32).toString("base64url");
-    this.#sessions.set(id, now + SESSION_TTL_MS);
-    this.#setCookie(c, id);
+    this.#attempts.delete(clientIp(c, this.#opts.trustProxy));
+    this.#signIn(c, user);
     return null;
+  }
+
+  /** Creates the first admin and signs them in. Returns null on success, or an error message. */
+  async setup(c: Context, admin: NewAdmin): Promise<string | null> {
+    if (!this.setupRequired) return "An admin account already exists. Sign in instead.";
+    const limited = this.#limited(c);
+    if (limited) return limited;
+    if (this.setupCodeRequired(c) && !sameCode(admin.code, this.#setupCode!)) {
+      this.#failed(c);
+      return admin.code.trim() ? "That setup code isn't right. Copy it from Keelson's log." : "Enter the setup code from Keelson's log.";
+    }
+    const user = this.#users.createFirst({
+      username: admin.username,
+      name: admin.name,
+      role: "admin",
+      passwordHash: await hashPassword(admin.password),
+      mustChangePassword: false,
+      createdBy: null,
+    });
+    if (!user) return "An admin account already exists. Sign in instead.";
+    this.#setupCode = null;
+    this.#signIn(c, user);
+    return null;
+  }
+
+  /** Checks the signed-in user's current password before it's changed, under the same limits as signing in. */
+  async checkPassword(c: Context, userId: number, password: string): Promise<string | null> {
+    const limited = this.#limited(c);
+    if (limited) return limited;
+    if (await verifyPassword(password, this.#users.passwordHash(userId))) return null;
+    this.#failed(c);
+    return "Your current password isn't right.";
   }
 
   logout(c: Context): void {
@@ -112,12 +215,11 @@ export class Auth {
     deleteCookie(c, SESSION_COOKIE, { path: "/" });
   }
 
-  /** Host-header allowlist (loopback mode) and CSRF protection for state-changing requests. */
+  /** Host-header allowlist (sign-in off on loopback) and CSRF protection for state-changing requests. */
   guard(): MiddlewareHandler {
     return async (c, next) => {
       const host = (c.req.header("host") || "").toLowerCase();
-      const hostname = host.replace(/:\d+$/, "");
-      if (this.#opts.loopback && !this.required && !LOOPBACK_HOSTS.has(hostname) && !this.#opts.allowedHosts.includes(hostname)) {
+      if (this.#opts.loopback && !this.required && !this.#localHost(c)) {
         return c.text("Forbidden host", 403);
       }
       if (!["GET", "HEAD", "OPTIONS"].includes(c.req.method)) {

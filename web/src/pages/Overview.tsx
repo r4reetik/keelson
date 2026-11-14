@@ -48,7 +48,7 @@ import { TrendCharts } from "../components/charts.tsx";
 const TITLE = "Overview";
 
 export function OverviewPage() {
-  const { startScan, status, multi, view, setScope } = useShell();
+  const { startScan, status, multi, view, setScope, can } = useShell();
   const { data, error, loading, reload } = useScopedApi<Overview>("/api/overview");
   const [since, setSince] = useState<"new" | "resolved">("new");
   const description = multi
@@ -71,7 +71,9 @@ export function OverviewPage() {
             : undefined
         }
         emptyAction={
-          status?.running && status.inScope ? undefined : (
+          status?.running && status.inScope ? undefined : !can("scan") ? (
+            <span className="text-sm text-kumo-subtle">The first scan hasn't run yet. An analyst, manager or admin can start it.</span>
+          ) : (
             <Button variant="primary" icon={<ArrowsClockwiseIcon />} loading={status?.running} onClick={() => startScan()}>
               Run first scan
             </Button>

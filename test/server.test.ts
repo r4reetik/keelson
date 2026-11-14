@@ -11,7 +11,7 @@ import { installMockCloudflare, MOCK_ACCOUNT, MOCK_ACCOUNT_2, MOCK_ACCOUNT_3, MO
 
 import { makeApp, PASSWORD } from "./helpers/app.ts";
 
-describe("loopback mode (no password)", () => {
+describe("the API", () => {
   let restore: () => void;
   before(() => {
     restore = installMockCloudflare();
@@ -20,17 +20,12 @@ describe("loopback mode (no password)", () => {
 
   test("health and session are public; setup state is reported", async () => {
     const { call, cleanup } = makeApp();
-    assert.equal((await call("/api/health")).status, 200);
-    const s = (await (await call("/api/session")).json()) as any;
+    assert.equal((await call("/api/health", { anonymous: true })).status, 200);
+    const s = (await (await call("/api/session", { anonymous: true })).json()) as any;
     assert.equal(s.configured, false);
-    assert.equal(s.authRequired, false);
-    cleanup();
-  });
-
-  test("rejects non-loopback Host headers (DNS rebinding)", async () => {
-    const { call, cleanup } = makeApp();
-    assert.equal((await call("/api/session", { host: "evil.example:4317" })).status, 403);
-    assert.equal((await call("/api/session", { host: "localhost:4317" })).status, 200);
+    assert.equal(s.authRequired, true);
+    assert.equal(s.authenticated, false);
+    assert.equal(s.setupRequired, false, "an admin exists");
     cleanup();
   });
 
@@ -336,26 +331,37 @@ describe("upgrade from a single-account install", () => {
   });
 });
 
-describe("password mode", () => {
-  test("requires login, rate-limits guesses, and issues a strict session cookie", async () => {
-    const { call, cleanup } = makeApp({ password: PASSWORD, configured: true });
-    assert.equal((await call("/api/overview")).status, 401);
-    const s = (await (await call("/api/session")).json()) as any;
+describe("signing in", () => {
+  test("requires sign-in, rate-limits guesses, and issues a strict session cookie", async () => {
+    const { call, cleanup } = makeApp({ configured: true });
+    const anon = (path: string, init: RequestInit = {}) => call(path, { ...init, anonymous: true });
+    assert.equal((await anon("/api/overview")).status, 401);
+    const s = (await (await anon("/api/session")).json()) as any;
     assert.equal(s.authRequired, true);
-    assert.equal(s.accounts, undefined, "no account details before login");
+    assert.equal(s.accounts, undefined, "no account details before signing in");
+    assert.equal(s.user, undefined);
 
-    const wrong = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "nope" }) });
+    const login = (username: string, password: string) => anon("/api/login", { method: "POST", body: JSON.stringify({ username, password }) });
+    const wrong = await login("admin", "nope");
     assert.equal(wrong.status, 401);
-    const right = await call("/api/login", { method: "POST", body: JSON.stringify({ password: PASSWORD }) });
-    assert.equal(right.status, 200);
+    const unknown = (await (await login("nobody", PASSWORD)).json()) as any;
+    assert.equal(unknown.error, "Incorrect username or password.", "an unknown username reads like a wrong password");
+    const right = await login("ADMIN", PASSWORD);
+    assert.equal(right.status, 200, "usernames ignore case");
     const cookie = right.headers.get("set-cookie") || "";
     assert.match(cookie, /HttpOnly/);
     assert.match(cookie, /SameSite=Strict/);
     const session = cookie.split(";")[0];
-    assert.equal((await call("/api/overview", { headers: { cookie: session } })).status, 200);
+    assert.equal((await anon("/api/overview", { headers: { cookie: session } })).status, 200);
+    const me = (await (await anon("/api/session", { headers: { cookie: session } })).json()) as any;
+    assert.equal(me.user.username, "admin");
+    assert.equal(me.user.role, "admin");
 
-    for (let i = 0; i < 10; i++) await call("/api/login", { method: "POST", body: JSON.stringify({ password: "x" }) });
-    const limited = (await (await call("/api/login", { method: "POST", body: JSON.stringify({ password: PASSWORD }) })).json()) as any;
+    assert.equal((await anon("/api/logout", { method: "POST", body: "{}", headers: { cookie: session } })).status, 200);
+    assert.equal((await anon("/api/overview", { headers: { cookie: session } })).status, 401, "signing out ends the session");
+
+    for (let i = 0; i < 10; i++) await login("admin", "x");
+    const limited = (await (await login("admin", PASSWORD)).json()) as any;
     assert.match(limited.error, /Too many/);
     cleanup();
   });

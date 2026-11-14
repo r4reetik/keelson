@@ -3,9 +3,10 @@
 
 import { useState } from "react";
 import { Banner, Button, Input, Link, Select, Switch, useKumoToastManager } from "@cloudflare/kumo";
-import { ArrowCircleUpIcon, CheckCircleIcon, WarningIcon } from "@phosphor-icons/react";
-import { ago, api, link, SCORED_SEVERITIES, SEVERITY_LABEL, useApi, type Settings, type UpdateStatus } from "../lib.ts";
+import { ArrowCircleUpIcon, CheckCircleIcon, InfoIcon, WarningIcon } from "@phosphor-icons/react";
+import { ago, api, link, ROLE_INFO, SCORED_SEVERITIES, SEVERITY_LABEL, useApi, type Settings, type UpdateStatus } from "../lib.ts";
 import { Card, FormGrid, Page, PageState, SettingRow, SettingRows } from "../components/ui.tsx";
+import { useShell } from "../shell.tsx";
 
 const TITLE = "Settings";
 const DESCRIPTION = "Scan schedule, history, how findings are tracked, and updates. These apply to every account.";
@@ -16,6 +17,8 @@ type Save = (patch: Record<string, unknown>, label: string) => Promise<boolean>;
 export function SettingsPage() {
   const { data, error, loading, reload, setData } = useApi<Settings>("/api/settings");
   const toasts = useKumoToastManager();
+  const { can, session } = useShell();
+  const editable = can("settings");
 
   if (error || !data) return <PageState title={TITLE} description={DESCRIPTION} error={error} loading={loading} empty={false} retry={reload} />;
 
@@ -33,10 +36,20 @@ export function SettingsPage() {
 
   return (
     <Page title={TITLE} description={DESCRIPTION}>
-      <ScansCard s={data} save={save} />
-      <PolicyCard s={data} save={save} />
-      <LinksCard s={data} save={save} />
-      <UpdatesCard s={data} save={save} />
+      {!editable && (
+        <Banner
+          variant="default"
+          icon={<InfoIcon weight="fill" />}
+          title={`Only admins can change these settings. Your role (${ROLE_INFO[session.user?.role ?? "viewer"].label}) can see them.`}
+        />
+      )}
+      {/* A disabled fieldset disables every control inside it, so a role that can't save sees the values without editing them. */}
+      <fieldset disabled={!editable} className="contents">
+        <ScansCard s={data} save={save} locked={!editable} />
+        <PolicyCard s={data} save={save} />
+        <LinksCard s={data} save={save} />
+        <UpdatesCard s={data} save={save} locked={!editable} />
+      </fieldset>
     </Page>
   );
 }
@@ -85,7 +98,8 @@ function NumberField({
   );
 }
 
-function ScansCard({ s, save }: { s: Settings; save: Save }) {
+/** `locked`: the fieldset already disables everything; switches also need it passed to look disabled. */
+function ScansCard({ s, save, locked }: { s: Settings; save: Save; locked: boolean }) {
   return (
     <Card title="Scans">
       <SettingRows>
@@ -97,6 +111,7 @@ function ScansCard({ s, save }: { s: Settings; save: Save }) {
           <Switch
             aria-label="Daily scan"
             checked={s.schedule.enabled}
+            disabled={locked}
             onCheckedChange={(v: boolean) => save({ schedule: { enabled: v } }, v ? "Daily scan on" : "Daily scan off")}
           />
         </SettingRow>
@@ -106,7 +121,7 @@ function ScansCard({ s, save }: { s: Settings; save: Save }) {
             className="w-full"
             value={String(s.schedule.hourUtc)}
             items={HOURS}
-            disabled={!s.schedule.enabled}
+            disabled={!s.schedule.enabled || locked}
             onValueChange={(v) => save({ schedule: { hourUtc: Number(v), minuteUtc: 0 } }, "Scan time")}
           />
         </SettingRow>
@@ -118,6 +133,7 @@ function ScansCard({ s, save }: { s: Settings; save: Save }) {
           <Switch
             aria-label="Confirm subdomain takeovers"
             checked={s.probes.takeover}
+            disabled={locked}
             onCheckedChange={(v: boolean) => save({ probes: { takeover: v } }, v ? "Takeover checks on" : "Takeover checks off")}
           />
         </SettingRow>
@@ -241,7 +257,7 @@ function upgradeSteps(u: UpdateStatus, version: string): { text: string; command
   };
 }
 
-function UpdatesCard({ s, save }: { s: Settings; save: Save }) {
+function UpdatesCard({ s, save, locked }: { s: Settings; save: Save; locked: boolean }) {
   const { data: u, reload, setData } = useApi<UpdateStatus>("/api/updates", s.updates.check);
   const [checking, setChecking] = useState(false);
   const checkNow = async () => {
@@ -271,7 +287,7 @@ function UpdatesCard({ s, save }: { s: Settings; save: Save }) {
             <Switch
               aria-label="Check for updates"
               checked={s.updates.check && !u?.lockedOff}
-              disabled={u?.lockedOff}
+              disabled={u?.lockedOff || locked}
               onCheckedChange={(v: boolean) => save({ updates: { check: v } }, v ? "Update checks on" : "Update checks off")}
             />
           </SettingRow>

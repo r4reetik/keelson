@@ -2,6 +2,8 @@
 // three Cloudflare accounts, a Vercel team and an AWS account in two entities,
 // plus a Vercel-only entity with a personal account. Everything is scanned twice,
 // so trends, "new since last scan" and the checks that span providers have data.
+// One mock user per role signs in with MOCK_PASSWORD; with --signup there are none,
+// so Keelson starts at creating the admin.
 // Run with `npm run dev -- --mock` (or `node dev/mock/server.ts`).
 
 import "../../src/warnings.ts";
@@ -11,6 +13,11 @@ import { installMockVercel } from "./vercel.ts";
 import { installMockAws, mockAws } from "./aws.ts";
 import { seedAccount, seedAws, seedTriageHistory, seedVercel } from "./accounts.ts";
 import { providerList } from "../../src/shared/providers.ts";
+import { ROLES, ROLE_INFO } from "../../src/shared/roles.ts";
+import { hashPasswordSync } from "../../src/server/passwords.ts";
+
+/** Every mock user's password. Mock users exist only in this in-memory server. */
+export const MOCK_PASSWORD = "mock-password";
 
 installMockCloudflare();
 installMockVercel();
@@ -20,7 +27,6 @@ const running = await start({
   host: "127.0.0.1",
   port,
   dataDir: null,
-  password: null,
   insecureNoAuth: false,
   trustProxy: false,
   allowedHosts: [],
@@ -28,6 +34,12 @@ const running = await start({
   updateCheck: false,
 });
 const { repo, vault, scanner } = running;
+const signup = process.argv.includes("--signup");
+if (!signup) {
+  const passwordHash = hashPasswordSync(MOCK_PASSWORD);
+  for (const role of ROLES)
+    repo.users.create({ username: role, name: `Mock ${ROLE_INFO[role].label}`, role, passwordHash, mustChangePassword: false, createdBy: null });
+}
 repo.settings.save({ ...repo.settings.get(), probes: { takeover: false } });
 seedAccount(repo, vault, { entity: "Mock Group" });
 seedAccount(repo, vault, { id: MOCK_ACCOUNT_3, name: "Mock Co Staging", entity: "Mock Group" });
@@ -42,4 +54,5 @@ await scanner.start("manual").done;
 // Once more for Cloudflare, which was scanned before AWS noticed the address was gone.
 await scanner.start("manual", [MOCK_ACCOUNT]).done;
 seedTriageHistory(repo, MOCK_ACCOUNT);
-console.log(`\n  Keelson (mock ${providerList()} data)\n\n  Open:  ${running.url}\n`);
+console.log(`\n  Keelson (mock ${providerList()} data)\n\n  Open:  ${running.url}`);
+console.log(signup ? "  Users: none yet, so it starts at creating the admin.\n" : `  Users: ${ROLES.join(", ")} (one per role), password ${MOCK_PASSWORD}\n`);

@@ -1,5 +1,6 @@
-// The app shell: session gate, sidebar, top bar with the scope switcher and
-// scan progress, and the router. Pages are listed in routes.tsx.
+// The app shell: session gate (create the admin, sign in, replace a one-time
+// password, connect a first account), sidebar, top bar with the scope switcher,
+// scan progress and the user menu, and the router. Pages are listed in routes.tsx.
 
 import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Breadcrumbs, Button, ButtonGroup, DropdownMenu, Sidebar, Toasty, Tooltip, TooltipProvider, useKumoToastManager } from "@cloudflare/kumo";
@@ -12,6 +13,9 @@ import {
   CheckSquareIcon,
   GearIcon,
   GlobeIcon,
+  KeyIcon,
+  SignOutIcon,
+  UserCircleIcon,
   MinusSquareIcon,
   MoonIcon,
   SquareIcon,
@@ -22,6 +26,8 @@ import {
 } from "@phosphor-icons/react";
 import {
   adoptScope,
+  can as roleCan,
+  ROLE_INFO,
   useScrollToHash,
   api,
   ago,
@@ -39,6 +45,7 @@ import {
   useMode,
   useScopeKey,
   withScope,
+  type Permission,
   type ScanRequest,
   type ScanStatus,
   type Session,
@@ -47,8 +54,8 @@ import { ShellContext, useShell, type Shell } from "./shell.tsx";
 import { NAV_GROUPS, ROUTES, ReportPage, matchRoute } from "./routes.tsx";
 import { Loading, NoRows, Page, ProviderIcon } from "./components/ui.tsx";
 import { Wordmark } from "./components/brand.tsx";
-import { SetupPage } from "./pages/Setup.tsx";
-import { LoginPage } from "./pages/Login.tsx";
+import { NotConnectedPage, SetupPage } from "./pages/Setup.tsx";
+import { ChangePasswordDialog, ChangePasswordPage, LoginPage, SignupPage } from "./pages/Login.tsx";
 
 export function App() {
   return (
@@ -90,8 +97,11 @@ function Root() {
     );
   }
   if (!session) return <Loading />;
-  if (session.authRequired && !session.authenticated) return <LoginPage onDone={refreshSession} />;
-  if (!session.configured) return <SetupPage onDone={refreshSession} />;
+  if (session.setupRequired) return <SignupPage codeRequired={session.setupCodeRequired} onDone={refreshSession} />;
+  if (!session.user) return <LoginPage onDone={refreshSession} />;
+  if (session.user.mustChangePassword) return <ChangePasswordPage user={session.user} onDone={refreshSession} />;
+  if (!session.configured)
+    return roleCan(session.user.role, "accounts") ? <SetupPage onDone={refreshSession} /> : <NotConnectedPage session={session} onRefresh={refreshSession} />;
   return <AppShell session={session} refreshSession={refreshSession} standalone={path === "/report"} />;
 }
 
@@ -156,7 +166,9 @@ function AppShell({ session, refreshSession, standalone }: { session: Session; r
     [poll, toasts, scope],
   );
 
-  const shell: Shell = { session, refreshSession, status, dataVersion, startScan, view, setScope, scoped, multi: view.accounts.length > 1 };
+  const role = session.user?.role ?? "viewer";
+  const can = useCallback((p: Permission) => roleCan(role, p), [role]);
+  const shell: Shell = { session, refreshSession, status, dataVersion, startScan, view, setScope, scoped, multi: view.accounts.length > 1, can };
   if (standalone)
     return (
       <ShellContext.Provider value={shell}>
@@ -185,6 +197,7 @@ function AppShell({ session, refreshSession, standalone }: { session: Session; r
 
 function Router() {
   const { path } = useLocation();
+  const { can } = useShell();
   const m = matchRoute(path);
   // Name the tab and history entry after the page.
   const label = m?.route.label;
@@ -197,6 +210,12 @@ function Router() {
         <NoRows>There's nothing at this address.</NoRows>
       </Page>
     );
+  if (m.route.permission && !can(m.route.permission))
+    return (
+      <Page title={m.route.label}>
+        <NoRows>Your role can't open this page. Ask an admin if you need it.</NoRows>
+      </Page>
+    );
   const P = m.route.page;
   return <P params={m.params} />;
 }
@@ -205,11 +224,12 @@ const isActive = (path: string, to: string) => (to === "/" ? path === "/" : path
 
 function Nav() {
   const { path } = useLocation();
-  const { session, view } = useShell();
+  const { session, view, can } = useShell();
   const current = matchRoute(path)?.route;
   // Pages for one provider only show when the view has an account on it (all accounts before any are connected).
   const inView = new Set(view.accounts.map((a) => a.provider));
-  const shown = (r: (typeof ROUTES)[number]) => !r.hidden && (!r.providers || !inView.size || r.providers.some((p) => inView.has(p)));
+  const shown = (r: (typeof ROUTES)[number]) =>
+    !r.hidden && (!r.permission || can(r.permission)) && (!r.providers || !inView.size || r.providers.some((p) => inView.has(p)));
   return (
     <Sidebar>
       <Sidebar.Header className="flex h-14 items-center border-b border-kumo-hairline">
@@ -333,6 +353,7 @@ function TopBar() {
             }
           />
           <ScanButton />
+          <UserMenu />
         </div>
       </div>
       {/* Below lg the progress line has no room in the bar; a thin strip shows it while scanning. */}
@@ -351,8 +372,9 @@ function TopBar() {
  * account in every entity (including entities kept out of "All accounts").
  */
 function ScanButton() {
-  const { session, status, startScan, view } = useShell();
+  const { session, status, startScan, view, can } = useShell();
   const accounts = session.accounts || [];
+  if (!can("scan")) return null;
   const busy = !!status?.running && !!status?.inScope;
   const entityAccounts = view.entity ? accounts.filter((a) => a.entityId === view.entity!.id) : [];
   const entityCount = new Set(accounts.map((a) => a.entityId)).size;
@@ -410,6 +432,51 @@ function ScanButton() {
         </DropdownMenu.Content>
       </DropdownMenu>
     </ButtonGroup>
+  );
+}
+
+/** Who is signed in, with their role, changing their password and signing out. Not shown when a proxy does sign-in. */
+function UserMenu() {
+  const { session, refreshSession } = useShell();
+  const [changing, setChanging] = useState(false);
+  const user = session.user;
+  if (!session.authRequired || !user) return null;
+  const signOut = async () => {
+    await api("/api/logout", { method: "POST", body: {} }).catch(() => {});
+    await refreshSession();
+  };
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenu.Trigger
+          render={
+            <Button variant="ghost" size="sm" icon={<UserCircleIcon />} aria-label={`Signed in as ${user.username}`}>
+              {/* On phones the icon alone, like Run scan, so the view picker keeps its room. */}
+              <span className="hidden max-w-32 truncate md:inline">{user.username}</span>
+            </Button>
+          }
+        />
+        <DropdownMenu.Content align="end" className="min-w-60">
+          <DropdownMenu.Group>
+            <DropdownMenu.Label>
+              <span className="block truncate font-medium text-kumo-default">{user.name || user.username}</span>
+              <span className="block truncate font-normal text-kumo-subtle">
+                {user.name ? `${user.username} · ` : ""}
+                {ROLE_INFO[user.role].label}
+              </span>
+            </DropdownMenu.Label>
+          </DropdownMenu.Group>
+          <DropdownMenu.Separator />
+          <DropdownMenu.Item icon={<KeyIcon />} onClick={() => setChanging(true)}>
+            Change password
+          </DropdownMenu.Item>
+          <DropdownMenu.Item icon={<SignOutIcon />} onClick={() => void signOut()}>
+            Sign out
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu>
+      {changing && <ChangePasswordDialog onClose={() => setChanging(false)} />}
+    </>
   );
 }
 

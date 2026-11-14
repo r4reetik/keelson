@@ -230,6 +230,7 @@ function OwnerInput({
 /** Saves triage for one finding; `onSaved` gets the new triage. */
 export function TriagePanel({ f, onSaved, onSaveNext }: { f: Finding; onSaved: (t: Triage) => void; onSaveNext?: () => void }) {
   const toasts = useKumoToastManager();
+  const { can } = useShell();
   const [busy, setBusy] = useState(false);
   const save = async (t: Editable, next: boolean) => {
     setBusy(true);
@@ -244,6 +245,47 @@ export function TriagePanel({ f, onSaved, onSaveNext }: { f: Finding; onSaved: (
       setBusy(false);
     }
   };
+  const updated = f.triage?.updatedAt && (
+    <p className="mt-3 text-xs text-kumo-subtle">
+      Updated {dateTime(f.triage.updatedAt)}
+      {f.triage.updatedBy ? ` by ${f.triage.updatedBy}` : ""}
+    </p>
+  );
+  // A role that can't triage sees where the finding stands, without a form it can't save.
+  if (!can("triage"))
+    return (
+      <div className="rounded-lg bg-kumo-elevated p-4 ring ring-kumo-line">
+        <div className="mb-3 font-medium text-kumo-default">Triage</div>
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
+          <dt className="text-kumo-subtle">Status</dt>
+          <dd className="m-0">
+            <StatusBadge status={f.triage?.status || "open"} />
+          </dd>
+          <dt className="text-kumo-subtle">Owner</dt>
+          <dd className="m-0 truncate text-kumo-default">{f.triage?.owner || "Nobody"}</dd>
+          {f.triage?.dueDate && (
+            <>
+              <dt className="text-kumo-subtle">Due</dt>
+              <dd className="m-0 text-kumo-default">{dateOnly(f.triage.dueDate)}</dd>
+            </>
+          )}
+          {f.triage?.acceptUntil && (
+            <>
+              <dt className="text-kumo-subtle">Accepted until</dt>
+              <dd className="m-0 text-kumo-default">{dateOnly(f.triage.acceptUntil)}</dd>
+            </>
+          )}
+          {f.triage?.note && (
+            <>
+              <dt className="text-kumo-subtle">Note</dt>
+              <dd className="m-0 whitespace-pre-wrap text-kumo-default">{f.triage.note}</dd>
+            </>
+          )}
+        </dl>
+        {updated}
+        <p className="mt-3 text-xs text-kumo-subtle">Your role can't triage findings. An analyst, manager or admin can.</p>
+      </div>
+    );
   return (
     // A container: the fields sit side by side only when the panel itself is wide enough.
     <div className="@container rounded-lg bg-kumo-elevated p-4 ring ring-kumo-line">
@@ -256,12 +298,7 @@ export function TriagePanel({ f, onSaved, onSaveNext }: { f: Finding; onSaved: (
         onSubmit={(t) => save(t, false)}
         onSubmitNext={onSaveNext ? (t) => save(t, true) : undefined}
       />
-      {f.triage?.updatedAt && (
-        <p className="mt-3 text-xs text-kumo-subtle">
-          Updated {dateTime(f.triage.updatedAt)}
-          {f.triage.updatedBy ? ` by ${f.triage.updatedBy}` : ""}
-        </p>
-      )}
+      {updated}
     </div>
   );
 }

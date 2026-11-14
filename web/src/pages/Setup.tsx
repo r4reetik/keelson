@@ -1,13 +1,14 @@
-// First run: pick the platform, create its credential there, then choose the
-// accounts to scan. Someone who uses one platform sees only that one's steps.
+// First run, once the admin exists: pick the platform, create its credential
+// there, then choose the accounts to scan. Someone who uses one platform sees
+// only that one's steps. A role that can't connect accounts is told to wait.
 
 import { useState } from "react";
-import { LayerCard } from "@cloudflare/kumo";
+import { Button, LayerCard } from "@cloudflare/kumo";
 import { EyeIcon, HardDrivesIcon, LockKeyIcon } from "@phosphor-icons/react";
 import { Wordmark } from "../components/brand.tsx";
 import { ConnectForm, ProviderPicker, TokenHelp } from "../components/connect.tsx";
 import { Card } from "../components/ui.tsx";
-import { PROVIDER_INFO, PROVIDERS, providerList, withArticle, type ProviderId } from "../lib.ts";
+import { api, PROVIDER_INFO, PROVIDERS, providerList, ROLE_INFO, withArticle, type ProviderId, type Session } from "../lib.ts";
 
 export function SetupPage({ onDone }: { onDone: () => void }) {
   const [provider, setProvider] = useState<ProviderId>(PROVIDERS[0]);
@@ -63,5 +64,37 @@ function Assurance({ icon, title, text }: { icon: React.ReactNode; title: string
       </div>
       <p className="text-sm text-kumo-subtle">{text}</p>
     </LayerCard>
+  );
+}
+
+/** Signed in, but no account is connected and this role can't connect one. */
+export function NotConnectedPage({ session, onRefresh }: { session: Session; onRefresh: () => void }) {
+  const signOut = async () => {
+    await api("/api/logout", { method: "POST", body: {} }).catch(() => {});
+    onRefresh();
+  };
+  return (
+    <div className="min-h-full bg-kumo-canvas">
+      <div className="flex h-14 items-center border-b border-kumo-hairline bg-kumo-base px-6">
+        <Wordmark />
+      </div>
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-6 md:p-8 lg:py-9">
+        <header>
+          <h1 className="m-0 text-3xl font-semibold text-kumo-default">No accounts yet</h1>
+          <p className="mt-1.5 text-lg leading-normal text-pretty text-kumo-subtle">
+            Nobody has connected an account to Keelson yet. An admin or a manager connects them; you're signed in as {session.user?.username} (
+            {ROLE_INFO[session.user?.role ?? "viewer"].label}), which can't.
+          </p>
+        </header>
+        <div className="flex gap-2">
+          <Button variant="primary" onClick={onRefresh}>
+            Check again
+          </Button>
+          <Button variant="secondary" onClick={() => void signOut()}>
+            Sign out
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }

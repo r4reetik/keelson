@@ -3,6 +3,7 @@ import type { Scanner } from "../scanner.ts";
 import type { TokenVault } from "../config.ts";
 import type { Auth } from "./security.ts";
 import type { UpdateChecker } from "../updates.ts";
+import type { SessionUser } from "../shared/api.ts";
 
 export interface AppContext {
   repo: Repo;
@@ -15,7 +16,7 @@ export interface AppContext {
   updates?: UpdateChecker;
 }
 
-/** Hono environment: `withScope` sets `scope` for dashboard routes. */
+/** Hono environment: `requireSession` sets `user`; `withScope` sets `scope` for dashboard routes. */
 export interface AppEnv {
-  Variables: { scope: Scope };
+  Variables: { scope: Scope; user: SessionUser };
 }

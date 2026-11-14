@@ -2,6 +2,7 @@
 
 import { lazy, type ComponentType } from "react";
 import type { ProviderId } from "../../src/shared/providers.ts";
+import type { Permission } from "../../src/shared/roles.ts";
 import {
   ArrowsClockwiseIcon,
   MapPinIcon,
@@ -14,13 +15,14 @@ import {
   ListChecksIcon,
   StackIcon,
   ShieldWarningIcon,
+  UsersIcon,
   WalletIcon,
 } from "@phosphor-icons/react";
 
 /**
  * The sidebar's sections, in order. Posture is what's wrong and what's being done about it, for every platform.
  * Inventory is what each platform has (one page per platform). Insights are what a platform reports besides
- * its configuration. Manage is Keelson itself: what it scans, with which checks, and when.
+ * its configuration. Manage is Keelson itself: what it scans, with which checks, when, and who can sign in.
  */
 export type NavGroup = "Posture" | "Inventory" | "Insights" | "Manage";
 export const NAV_GROUPS: NavGroup[] = ["Posture", "Inventory", "Insights", "Manage"];
@@ -40,6 +42,8 @@ export interface RouteDef {
   parent?: string;
   /** Only for these providers: hidden from the sidebar when no account in view is on one of them, and marked with their icon. */
   providers?: ProviderId[];
+  /** Only for roles with this permission: hidden from the sidebar for everyone else. */
+  permission?: Permission;
 }
 
 // Pages load on demand so the first paint doesn't wait for the chart library.
@@ -109,6 +113,15 @@ export const ROUTES: RouteDef[] = [
   },
   { path: "/checks", label: "Checks", group: "Manage", icon: ListChecksIcon, page: page(() => import("./pages/Checks.tsx"), "ChecksPage") },
   { path: "/scans", label: "Scans", group: "Manage", icon: ArrowsClockwiseIcon, page: page(() => import("./pages/Scans.tsx"), "ScansPage") },
+  {
+    path: "/users",
+    label: "Users",
+    group: "Manage",
+    icon: UsersIcon,
+    global: true,
+    permission: "users",
+    page: page(() => import("./pages/Users.tsx"), "UsersPage"),
+  },
   { path: "/settings", label: "Settings", group: "Manage", icon: GearIcon, global: true, page: page(() => import("./pages/Settings.tsx"), "SettingsPage") },
 ];
 

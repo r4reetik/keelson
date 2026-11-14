@@ -5,6 +5,7 @@ import type { Severity, SeverityCounts } from "./severity.ts";
 import type { Triage, TriageStatus, SlaDays } from "./triage.ts";
 import type { ScopeKind } from "./scope.ts";
 import type { ProviderId } from "./providers.ts";
+import type { Role } from "./roles.ts";
 
 export type Confidence = "confirmed" | "likely";
 export type FindingSource = "custom" | "security_center";
@@ -155,11 +156,44 @@ export interface SessionEntity {
   includeInAll: boolean;
 }
 
+/** The signed-in person. With sign-in turned off (KEELSON_AUTH=none) everyone is an admin with id 0. */
+export interface SessionUser {
+  id: number;
+  username: string;
+  name: string | null;
+  role: Role;
+  /** Signed in with a one-time password, which must be replaced before anything else. */
+  mustChangePassword: boolean;
+}
+
+/** A user as the Users page lists them. */
+export interface UserRow extends SessionUser {
+  createdAt: string;
+  createdBy: string | null;
+  lastLoginAt: string | null;
+}
+
+export interface UsersResponse {
+  users: UserRow[];
+}
+
+/** A new user, or a reset password: the one-time password is shown once and never stored. */
+export interface OneTimePasswordResponse {
+  user: UserRow;
+  password: string;
+}
+
 export interface Session {
   version: string;
+  /** False only with KEELSON_AUTH=none, when a proxy in front decides who gets in. */
   authRequired: boolean;
   authenticated: boolean;
+  /** Nobody can sign in yet: the first person to open Keelson creates the admin account. */
+  setupRequired: boolean;
+  /** Creating the admin from here needs the setup code from Keelson's log (it isn't opened on this machine). */
+  setupCodeRequired: boolean;
   configured: boolean;
+  user?: SessionUser;
   accounts?: SessionAccount[];
   entities?: SessionEntity[];
   /** Whether a newer release is out (signed-in users only). */
@@ -730,5 +764,6 @@ export interface ProjectsResponse {
 /** Error bodies: `code` tells the web app what to do about it. */
 export interface ApiError {
   error: string;
-  code?: "setup" | "scope" | "auth";
+  /** setup: no account connected; scope: unknown view; auth: sign in; password: replace a one-time password first; role: the role can't do this. */
+  code?: "setup" | "scope" | "auth" | "password" | "role";
 }

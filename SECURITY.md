@@ -50,13 +50,13 @@ AWS access keys), and a database describing accounts' configuration, including m
     upgrades (`<data-dir>/backups/`, the newest three) keep older data until they're replaced.
   - Webhook URLs are treated as secrets as well.
 - **Resist browser-based attacks.**
-  - Host-header allowlisting stops DNS rebinding in local mode.
+  - Host-header allowlisting stops DNS rebinding when sign-in is off on loopback, and the setup code stops a rebound page from creating the first admin.
   - Same-origin JSON is required for state changes (CSRF).
   - A strict Content-Security-Policy, framing denied.
   - CSV exports are protected against formula injection.
-- **Require authentication when exposed.**
-  - Binding to a non-loopback address requires an admin password, unless an authenticating proxy is explicitly declared with `KEELSON_AUTH=none`.
+- **Require authentication.**
+  - Everyone signs in with their own account, and the server checks their role (viewer, analyst, manager, admin) on every change. Creating the first admin from anywhere but the machine Keelson runs on needs the one-time setup code from its log. Sign-in can only be turned off by declaring an authenticating proxy with `KEELSON_AUTH=none`.
   - Sessions are HttpOnly, SameSite=Strict cookies.
-  - Login attempts are rate-limited per IP.
+  - Passwords are stored as scrypt hashes. Sign-in and setup-code attempts are rate-limited per IP and overall.
 
 Out of scope: an attacker who can already read the data directory or run code as the same user.

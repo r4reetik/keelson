@@ -11,13 +11,13 @@ Settings: your own hostnames that point at cloud providers (the takeover check, 
 ```bash
 docker run -d --name keelson -p 127.0.0.1:4317:4317 \
   -v keelson-data:/data \
-  -e KEELSON_PASSWORD='a-long-admin-password' \
   ghcr.io/r4reetik/keelson:0.10
+docker logs keelson
 ```
 
-Open http://localhost:4317 and sign in with the password. Publishing the port on `127.0.0.1` keeps Keelson
-reachable from this machine only. It still asks for a password, because inside the container it listens on every
-interface and can't tell how the port was published.
+Open http://localhost:4317 and create the admin account. It asks for the setup code that `docker logs keelson`
+shows: inside the container Keelson listens on every interface and can't tell that your browser is on the same
+machine. Publishing the port on `127.0.0.1` keeps Keelson reachable from this machine only.
 
 To keep your data in a folder rather than a Docker volume, mount the folder and run as your own user, so the files
 stay yours: `--user "$(id -u):$(id -g)" -v ~/.keelson:/data`.
@@ -33,8 +33,6 @@ services:
     restart: unless-stopped
     ports:
       - "4317:4317"
-    environment:
-      KEELSON_PASSWORD: ${KEELSON_PASSWORD:?set a password of at least 12 characters}
     volumes:
       - keelson-data:/data
 
@@ -43,17 +41,31 @@ volumes:
 ```
 
 ```bash
-KEELSON_PASSWORD='a-long-admin-password' docker compose up -d
+docker compose up -d
+docker compose logs keelson
 ```
 
 The image runs as an unprivileged user, stores everything in `/data`, and has a health check on `/api/health`.
-It listens on all interfaces, so it refuses to start without a password unless you declare an authenticating
-proxy (below).
+
+### The first admin, and everyone else
+
+Until someone has an account, Keelson shows a page to create the admin. From any machine but the one Keelson runs
+on, that page asks for the setup code Keelson prints when it starts (`docker compose logs keelson`), so whoever
+reaches the address first can't take it over. The code works once; a restart before the admin exists prints a new
+one. Create the admin before you share the address.
+
+The admin then adds people on the **Users** page, choosing a role for each (viewer, analyst, manager or admin; the
+[README](../README.md#users-and-roles) says what each can do). Keelson gives each new person a one-time password,
+shown once, for the admin to hand over; the person chooses their own password when they first sign in. Resetting a
+password works the same way and signs that person out everywhere. Keelson always keeps at least one admin.
 
 ## Behind Cloudflare Access
 
 If you already use Cloudflare Zero Trust, put Keelson behind a Cloudflare Tunnel and an Access application,
 and let Access do the sign-in:
+
+You can keep Keelson's own sign-in on behind Access, so each person still has a role. Or let Access be the only
+sign-in:
 
 1. Run Keelson with `KEELSON_AUTH=none` and `KEELSON_TRUST_PROXY=1`, reachable only from the tunnel
    (for example `ports: ["127.0.0.1:4317:4317"]`, or no published port and `cloudflared` on the same network).
@@ -61,16 +73,17 @@ and let Access do the sign-in:
 3. Create an Access application for that hostname, with a policy that allows only the people who should see
    your security findings.
 
-`KEELSON_AUTH=none` turns off Keelson's own password, so never expose the port anywhere else.
+`KEELSON_AUTH=none` turns off Keelson's own sign-in: there are no users, everyone Access lets through is an admin,
+and triage changes aren't recorded under anyone's name. Never expose the port anywhere else.
 
-If Keelson itself listens on `127.0.0.1` (`KEELSON_HOST=127.0.0.1` with host networking, or running from a clone) and
-has no password, it only answers requests addressed to `localhost`, which blocks DNS-rebinding attacks. Add the
-public hostname with `KEELSON_ALLOWED_HOSTS=keelson.example.com`, or set a password.
+If Keelson itself listens on `127.0.0.1` (`KEELSON_HOST=127.0.0.1` with host networking, or running from a clone)
+with sign-in off, it only answers requests addressed to `localhost`, which blocks DNS-rebinding attacks. Add the
+public hostname with `KEELSON_ALLOWED_HOSTS=keelson.example.com`.
 
 ## Behind another reverse proxy
 
-Terminate TLS at the proxy, keep the password on, and set `KEELSON_TRUST_PROXY=1` so session cookies are
-marked `Secure` and login rate limits apply to the client's address. Keelson takes that address from the last
+Terminate TLS at the proxy and set `KEELSON_TRUST_PROXY=1` so session cookies are marked `Secure` and sign-in rate
+limits apply to the client's address. Keelson takes that address from the last
 `X-Forwarded-For` entry, the one your proxy adds, so the proxy must append to the header (Caddy, nginx's
 `$proxy_add_x_forwarded_for` and most others do). With Caddy:
 
@@ -85,28 +98,28 @@ keelson.example.com {
 | Flag | Environment | Default | |
 |---|---|---|---|
 | `--port` | `KEELSON_PORT` | `4317` | Port to listen on |
-| `--host` | `KEELSON_HOST` | `0.0.0.0` (`127.0.0.1` from a clone) | Address to bind. Anything but loopback requires a password |
+| `--host` | `KEELSON_HOST` | `0.0.0.0` (`127.0.0.1` from a clone) | Address to bind. Off loopback, creating the first admin needs the setup code |
 | `--data-dir` | `KEELSON_DATA_DIR` | `/data` (`~/.keelson` from a clone) | Database and stored tokens |
-| `--password-file` | `KEELSON_PASSWORD` | none | Admin password, at least 12 characters |
 | `--trust-proxy` | `KEELSON_TRUST_PROXY=1` | off | Trust `X-Forwarded-*` from your reverse proxy |
 | `--no-open` | | | Don't open a browser (the image always passes it) |
-| | `KEELSON_AUTH=none` | | Allow no password on a network address (only behind an authenticating proxy) |
-| | `KEELSON_ALLOWED_HOSTS` | | Extra hostnames accepted in local mode, comma-separated |
+| `--reset-password <user>` | | | Give a user a one-time password and exit, without starting the server |
+| | `KEELSON_AUTH=none` | | No sign-in: an authenticating proxy decides who gets in, and everyone is an admin |
+| | `KEELSON_ALLOWED_HOSTS` | | Extra names for this machine when Keelson listens on loopback, comma-separated |
 | | `KEELSON_LOG=json` | text | Log one JSON object per line, for log collectors |
 | | `KEELSON_UPDATE_CHECK=off` | on | Never check GitHub for new releases, whatever Settings say |
 
-Flags are for the command, so in a container they mean replacing it: for a password kept in a Docker secret, run
-the image with the command `node dist/bin.js --no-open --password-file /run/secrets/keelson_password`.
+Flags are for the command, so in a container they mean running it there: `docker exec keelson node dist/bin.js
+--reset-password <username>`.
 
-Everything else (scan schedule, retention, SLAs, the takeover probe, accounts, entities and alert destinations)
-is set in the web app and stored in the database.
+Everything else (users and their roles, scan schedule, retention, SLAs, the takeover probe, accounts, entities and
+alert destinations) is set in the web app and stored in the database.
 
 ## Data, backups and upgrades
 
 The data directory holds:
 
-- `keelson.db`, with `keelson.db-wal` and `keelson.db-shm` next to it while it runs: accounts, scans,
-  findings, triage and settings (SQLite).
+- `keelson.db`, with `keelson.db-wal` and `keelson.db-shm` next to it while it runs: users (with scrypt hashes of
+  their passwords, never the passwords), accounts, scans, findings, triage and settings (SQLite).
 - `credentials.json`: the tokens and access keys. The database only holds a reference to each.
 - `backups/`: copies of the database from before each upgrade that changed it, the newest three.
 
@@ -120,8 +133,9 @@ migrating it. Release lines, automatic updates and rolling back are covered in [
 ## Operating it
 
 - **Logs** go to standard output (warnings and errors to standard error): `docker logs keelson`. `KEELSON_LOG=json` writes one JSON object per line.
-- **Changing the password:** Keelson doesn't store it. Change `KEELSON_PASSWORD` (or the password file)
-  and restart. Sessions are kept in memory, so a restart signs everyone out.
+- **Passwords:** each person changes their own from the menu under their name; an admin resets anyone else's from
+  the Users page. If nobody can sign in as an admin, `docker exec keelson node dist/bin.js --reset-password
+  <username>` prints a one-time password. Sessions are kept in memory, so a restart signs everyone out.
 - **Removing an account** (Accounts → the account's menu → Remove) deletes its scans, findings and triage.
   Older copies remain in `backups/` until newer upgrades replace them.
 - **Uninstalling:** remove the container and its volume (`docker rm -f keelson && docker volume rm
@@ -131,5 +145,5 @@ migrating it. Release lines, automatic updates and rolling back are covered in [
 ## Running from a clone
 
 For working on Keelson itself, see [CONTRIBUTING.md](../CONTRIBUTING.md). `npm ci && npm run build && npm start` runs the
-same server on Node.js 26 LTS, listening on `127.0.0.1` with its data in `~/.keelson`, and on loopback it needs no
-password. That is for development; the image is the supported way to run Keelson, and the only one released.
+same server on Node.js 26 LTS, listening on `127.0.0.1` with its data in `~/.keelson`; on loopback, creating the
+admin needs no setup code. That is for development; the image is the supported way to run Keelson, and the only one released.

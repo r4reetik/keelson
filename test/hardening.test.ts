@@ -9,8 +9,6 @@ import { makeApp } from "./helpers/app.ts";
 import { Store } from "../src/store/db.ts";
 import { Repo } from "../src/store/repo.ts";
 import { deleteOrphans } from "../src/store/findings.ts";
-
-const PASSWORD = "correct horse battery staple";
 let restore: () => void;
 before(() => {
   restore = installMockCloudflare();
@@ -19,9 +17,10 @@ after(() => restore());
 
 describe("requests", () => {
   test("oversized bodies are refused before they're parsed, even unauthenticated", async () => {
-    const { call, cleanup } = makeApp({ password: PASSWORD });
+    const { call, cleanup } = makeApp({ user: null });
     const big = JSON.stringify({ password: "x".repeat(10_000) });
     assert.equal((await call("/api/login", { method: "POST", body: big })).status, 413);
+    assert.equal((await call("/api/setup", { method: "POST", body: big })).status, 413);
     const huge = JSON.stringify({ name: "x".repeat(1_100_000) });
     assert.equal((await call("/api/entities", { method: "POST", body: huge })).status, 413);
     cleanup();
@@ -37,9 +36,14 @@ describe("requests", () => {
 
 describe("login behind a proxy", () => {
   test("the limit applies to the address the proxy saw, not one the client wrote into X-Forwarded-For", async () => {
-    const { call, cleanup } = makeApp({ password: PASSWORD, trustProxy: true });
+    const { call, cleanup } = makeApp({ trustProxy: true });
     const login = (forged: string) =>
-      call("/api/login", { method: "POST", body: JSON.stringify({ password: "wrong" }), headers: { "x-forwarded-for": `${forged}, 203.0.113.9` } });
+      call("/api/login", {
+        method: "POST",
+        anonymous: true,
+        body: JSON.stringify({ username: "admin", password: "wrong" }),
+        headers: { "x-forwarded-for": `${forged}, 203.0.113.9` },
+      });
     for (let i = 0; i < 10; i++) assert.equal((await login(`198.51.100.${i}`)).status, 401);
     const limited = (await (await login("198.51.100.99")).json()) as { error: string };
     assert.match(limited.error, /Too many attempts/);

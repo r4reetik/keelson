@@ -146,6 +146,20 @@ export const MIGRATIONS: string[] = [
   -- The platform an account is on. Accounts added before Vercel support are Cloudflare's.
   ALTER TABLE accounts ADD COLUMN provider TEXT NOT NULL DEFAULT 'cloudflare';
   `,
+  `
+  -- The people who sign in. The first one, created when Keelson is first opened, is an admin.
+  CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,       -- lowercase
+    name TEXT,
+    role TEXT NOT NULL,                  -- viewer | analyst | manager | admin (src/shared/roles.ts)
+    password_hash TEXT NOT NULL,         -- scrypt with its salt (src/server/passwords.ts), never the password
+    must_change_password INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    created_by TEXT,
+    last_login_at TEXT
+  );
+  `,
 ];
 
 export class Store {

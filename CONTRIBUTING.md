@@ -62,6 +62,7 @@ Rules worth knowing:
 - **Secret values are never read.** Vercel environment variables are listed without `decrypt`, and values, drain headers and URL paths are dropped as the inventory is built. AWS policy documents and Lambda environment variables are dropped the same way.
 - **`src/shared` is portable**: no `node:` imports, no DOM. The server returns its DTOs (`satisfies`), the web imports them as types.
 - **Routes carry their guards** (`router.ts`): `routes(app).with(requireSession(auth))`. Moving a route never changes who can reach it.
+- **A route that changes something names its permission** (`requirePermission("triage")` and the rest, from `src/shared/roles.ts`), or `anyone` for signing in. Registering a change without one throws, so a new write route can't be open to every role. When you add a kind of change, decide which role it belongs to in `PERMISSION_ROLE`, and hide the control for other roles in the web (`useShell().can`).
 
 ## Adding a check
 

@@ -6,6 +6,7 @@ export * from "../../src/shared/triage.ts";
 export * from "../../src/shared/filters.ts";
 export { displayName, scopeKey as scopeKeyFor, splitScopeKey, withProvider } from "../../src/shared/scope.ts";
 export * from "../../src/shared/providers.ts";
+export * from "../../src/shared/roles.ts";
 export * from "./lib/api.ts";
 export * from "./lib/router.ts";
 export * from "./lib/scope.ts";

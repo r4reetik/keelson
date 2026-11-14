@@ -108,7 +108,21 @@ count against it.
 Triage (status, owner, due date, note, accepted-until) belongs to the fingerprint, not to a scan, so it
 survives rescans. Every change is recorded in `triage_events`; together with which scans reported the
 finding, that gives each finding its timeline and draws the lanes on the **Triaged** page. Accepted risk
-reads as open again after its expiry date.
+reads as open again after its expiry date. Each change is recorded with the username of whoever made it.
+
+## Users and roles
+
+People sign in with a username and password (`src/store/users.ts`; scrypt hashes from
+`src/server/passwords.ts`). Sessions are kept in memory and resolved to the user on every request
+(`Auth.user` in `src/server/security.ts`), so a role change or a removed user applies at once. Until the first
+admin exists, `/api/setup` creates it; off loopback, that needs the setup code printed at startup.
+
+A role is one of `ROLES` in `src/shared/roles.ts`, each including everything the one before it can do. Reading
+only needs a signed-in user. Every change carries `requirePermission(<permission>)` (`src/server/middleware.ts`),
+and `PERMISSION_ROLE` says which role a permission starts at. `routes()` in `src/server/router.ts` throws when a
+route that isn't GET has no such guard (or `anyone`, for signing in), so no change can be registered open to every
+role. The web reads the same table through `useShell().can` to hide what a role can't do; the server's check is the
+one that counts.
 
 ## Code layout
 

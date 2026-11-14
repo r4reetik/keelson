@@ -82,7 +82,7 @@ const sorters: Record<SortKey, (a: Finding, b: Finding) => number> = {
 };
 
 export function FindingsPage() {
-  const { multi, view } = useShell();
+  const { multi, view, can } = useShell();
   const zoneLabel = zoneWord(view.accounts.map((a) => a.provider));
   const mixed = new Set(view.accounts.map((a) => a.provider)).size > 1;
   const { data, error, loading, reload, setData } = useScopedApi<FindingsResponse>("/api/findings");
@@ -245,9 +245,11 @@ export function FindingsPage() {
         <span className="px-1 text-sm font-medium text-kumo-default">
           {plural(selected.size, "finding")} selected{hiddenSelected ? ` (${num(hiddenSelected)} hidden by filters)` : ""}
         </span>
-        <Button variant="primary" onClick={() => setBulk(true)}>
-          Triage selected
-        </Button>
+        {can("triage") && (
+          <Button variant="primary" onClick={() => setBulk(true)}>
+            Triage selected
+          </Button>
+        )}
         <DropdownMenu>
           <DropdownMenu.Trigger
             render={

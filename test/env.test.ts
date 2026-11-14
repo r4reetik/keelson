@@ -63,12 +63,13 @@ describe("the image, the only way Keelson ships", () => {
   });
 });
 
-test("the old name is gone, except where history keeps it", () => {
-  // Released changelog sections, the decision log and a shipped migration can't change.
-  const history = new Set(["CHANGELOG.md", "AGENTS.md", "src/store/db.ts"]);
+test("the former name is gone, except where history keeps it", () => {
+  // Released changelog sections must match what each release shipped, and a shipped migration can't change.
+  const name = ["edge", "watch"].join("");
+  const history = new Set(["CHANGELOG.md", "src/store/db.ts"]);
   let files: string[] = [];
   try {
-    files = execFileSync("git", ["grep", "-I", "-l", "-i", ["edge", "watch"].join("")], { cwd: new URL("..", import.meta.url), encoding: "utf8" })
+    files = execFileSync("git", ["grep", "-I", "-l", "-i", name], { cwd: new URL("..", import.meta.url), encoding: "utf8" })
       .split("\n")
       .filter(Boolean);
   } catch (e) {
@@ -78,4 +79,7 @@ test("the old name is gone, except where history keeps it", () => {
     files.filter((f) => !history.has(f)),
     [],
   );
+  const changelog = read("CHANGELOG.md");
+  const unreleased = changelog.slice(changelog.indexOf("## Unreleased"), changelog.indexOf("\n## ", changelog.indexOf("## Unreleased") + 1));
+  assert.doesNotMatch(unreleased, new RegExp(name, "i"), "new changelog notes say Keelson");
 });
