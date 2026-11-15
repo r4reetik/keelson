@@ -117,10 +117,11 @@ attach AWS's managed **SecurityAudit** policy, and create an access key under **
 SecurityAudit reads configuration only: it can't change anything, and it can't read the objects in your buckets or the rows in your
 databases. Temporary keys (the ones that start with ASIA) aren't accepted, because they expire within hours.
 
-Keelson signs every request itself and only ever sends GET requests to AWS (`test/aws.test.ts` fails on anything else). Services
-that can only be read with POST requests, such as CloudTrail, KMS and Config, aren't read yet. It never stores a policy document, a
-Lambda environment variable or an instance's start-up script (the script is scanned for credentials in memory, and only the kind found
-is kept), and keeps only the last four characters of an access key ID. To recognise DNS records that point at AWS addresses it also
+Keelson signs every request itself. It sends GET requests, and to services whose APIs only accept POST (CloudTrail, KMS, ECS and
+others) only the read actions listed below; the client refuses any other action before sending it, and `test/aws.test.ts` fails on
+anything else. It never asks for a secret's value, never stores a policy document, and scans environment variables and start-up
+scripts for credentials in memory, keeping only the variable's name and the kind found. It keeps only the last four characters of an
+access key ID. To recognise DNS records that point at AWS addresses it also
 reads AWS's public address-range file, without the access key.
 
 Regional sources are read in every region enabled for the account. A region that refuses the access key (a service control policy,
@@ -132,7 +133,7 @@ for example) is skipped and shown as not readable on the Regions page: nothing t
 | IAM account summary (root user) | `iam:GetAccountSummary` | AID-001, AID-002 |
 | IAM password policy | `iam:GetAccountPasswordPolicy` | AID-007 |
 | IAM users, their access keys and MFA devices | `iam:ListUsers`, `iam:ListAccessKeys`, `iam:GetAccessKeyLastUsed`, `iam:ListMFADevices`, `iam:GetLoginProfile` | AID-003, AID-004, AID-005, AID-006, AID-007, AID-008 |
-| IAM roles, groups and policies | `iam:GetAccountAuthorizationDetails` | AID-008, AID-009, AID-010, AID-011, AEC-007, AID-012, XP-010, XP-011 |
+| IAM roles, groups and policies | `iam:GetAccountAuthorizationDetails` | AID-008, AID-009, AID-010, AID-011, AID-013, AEC-007, AID-012, XP-010, XP-011 |
 | S3 Block Public Access for the account | `s3:GetAccountPublicAccessBlock` | AS3-001, AS3-002, AS3-003 |
 | S3 buckets | `s3:ListAllMyBuckets`, `s3:GetBucketLocation` | AS3-001, AS3-002, AS3-003, ADN-001 |
 | S3 bucket access settings | `s3:GetBucketPublicAccessBlock`, `s3:GetBucketPolicyStatus`, `s3:GetBucketAcl` | AS3-002, AS3-003 |
@@ -140,18 +141,50 @@ for example) is skipped and shown as not readable on the Regions page: nothing t
 | Security groups (every enabled region) | `ec2:DescribeSecurityGroups` | ANW-001, ANW-002, ANW-003, AEC-007, ADB-001, XP-006 |
 | Managed prefix lists that security groups admit web traffic from (every enabled region) | `ec2:GetManagedPrefixListEntries` | Supporting data for other checks |
 | Network interfaces and Elastic IPs (every enabled region) | `ec2:DescribeNetworkInterfaces`, `ec2:DescribeAddresses` | ANW-001, ANW-002, ANW-003, ADN-002, ADN-003, XP-006 |
-| EC2 instances (every enabled region) | `ec2:DescribeInstances` | AEC-001, AEC-002, AEC-007, AEC-008, AMO-001, AMO-002 |
+| EC2 instances (every enabled region) | `ec2:DescribeInstances` | AEC-001, AEC-002, AEC-007, AEC-008, AMO-001, AMO-002, AMO-006 |
 | EBS encryption, public snapshots and public images (every enabled region) | `ec2:GetEbsEncryptionByDefault`, `ec2:DescribeSnapshots`, `ec2:DescribeImages` | AEC-002, AEC-003, AEC-004 |
 | VPCs and flow logs (every enabled region) | `ec2:DescribeVpcs`, `ec2:DescribeFlowLogs` | AMO-002 |
-| RDS databases (every enabled region) | `rds:DescribeDBInstances` | ADB-001, ADB-002, ADB-003, AMO-001, AMO-002 |
-| Load balancers and listeners (every enabled region) | `elasticloadbalancing:DescribeLoadBalancers`, `elasticloadbalancing:DescribeListeners`, `elasticloadbalancing:DescribeLoadBalancerAttributes` | AED-005, AED-006, ADN-001, AMO-001, AMO-002, AMO-003, XP-006 |
-| Lambda functions and function URLs (every enabled region) | `lambda:ListFunctions`, `lambda:ListFunctionUrlConfigs` | AEC-005, AEC-006, AMO-001 |
+| RDS databases (every enabled region) | `rds:DescribeDBInstances` | ADB-001, ADB-002, ADB-003, ADB-005, AMO-001, AMO-002, AMO-006 |
+| Load balancers and listeners (every enabled region) | `elasticloadbalancing:DescribeLoadBalancers`, `elasticloadbalancing:DescribeListeners`, `elasticloadbalancing:DescribeLoadBalancerAttributes` | AED-005, AED-006, AED-007, AED-009, ADN-001, AMO-001, AMO-002, AMO-003, AMO-006, XP-006 |
+| Lambda functions and function URLs (every enabled region) | `lambda:ListFunctions`, `lambda:ListFunctionUrlConfigs` | AEC-005, AEC-006, AEC-013, AEC-014, AMO-001, AMO-006 |
 | Instance start-up scripts (scanned for credentials, never stored) (every enabled region) | `ec2:DescribeInstanceAttribute` | AEC-008 |
 | API Gateway custom domain names (every enabled region) | `apigateway:GET` | Supporting data for other checks |
 | GuardDuty detectors (every enabled region) | `guardduty:ListDetectors`, `guardduty:GetDetector` | AMO-001 |
-| CloudFront distributions | `cloudfront:ListDistributions` | AED-001, AED-002, AED-003, AED-004, ADN-001 |
+| CloudFront distributions | `cloudfront:ListDistributions` | AED-001, AED-002, AED-003, AED-004, AED-007, AED-010, ADN-001 |
 | Route 53 hosted zones and records | `route53:ListHostedZones`, `route53:ListResourceRecordSets` | ADN-001, ADN-002, ADN-003, XP-005 |
 | AWS's published address ranges (ip-ranges.amazonaws.com) | `None: a public file`, `read without the access key` | ADN-003 |
+| IAM server certificates | `iam:ListServerCertificates` | AED-012 |
+| S3 bucket policies (reduced to the accounts they allow, never stored) | `s3:GetBucketPolicy` | AS3-004 |
+| Lambda function policies (every enabled region) | `lambda:GetPolicy` | AEC-013 |
+| EC2 launch templates (start-up scripts scanned for credentials, never stored) (every enabled region) | `ec2:DescribeLaunchTemplateVersions` | AEC-009, AEC-010 |
+| EBS volumes (every enabled region) | `ec2:DescribeVolumes` | AEC-011 |
+| Blocks on sharing snapshots and images publicly (every enabled region) | `ec2:GetSnapshotBlockPublicAccessState`, `ec2:GetImageBlockPublicAccessState` | AEC-012 |
+| Transit gateways (every enabled region) | `ec2:DescribeTransitGateways` | ANW-004 |
+| RDS manual snapshots and who may restore them (every enabled region) | `rds:DescribeDBSnapshots`, `rds:DescribeDBSnapshotAttributes`, `rds:DescribeDBClusterSnapshots`, `rds:DescribeDBClusterSnapshotAttributes` | ADB-004 |
+| RDS parameters that require TLS (every enabled region) | `rds:DescribeDBParameters`, `rds:DescribeDBClusters`, `rds:DescribeDBClusterParameters` | ADB-005 |
+| CloudTrail trails (every enabled region) | `cloudtrail:DescribeTrails`, `cloudtrail:GetTrailStatus` | AMO-004, AMO-005 |
+| AWS Config recorders (every enabled region) | `config:DescribeConfigurationRecorderStatus` | AMO-006 |
+| KMS keys, their rotation and key policies (every enabled region) | `kms:ListKeys`, `kms:DescribeKey`, `kms:GetKeyRotationStatus`, `kms:GetKeyPolicy` | ASC-004, ASC-005, ASC-006 |
+| ACM certificates (every enabled region) | `acm:ListCertificates` | AED-011 |
+| Secrets Manager secrets (names and dates, never values) and their resource policies (every enabled region) | `secretsmanager:ListSecrets`, `secretsmanager:GetResourcePolicy` | ASC-001, ASC-002, ASC-003 |
+| ECR repositories, their policies and image scanning (every enabled region) | `ecr:DescribeRepositories`, `ecr:GetRepositoryPolicy`, `ecr:GetRegistryScanningConfiguration` | ACN-006, ACN-007, ACN-008 |
+| ECS services and their task definitions (environment variables scanned for credentials, never stored) (every enabled region) | `ecs:ListClusters`, `ecs:ListServices`, `ecs:DescribeServices`, `ecs:DescribeTaskDefinition` | ACN-004, ACN-005 |
+| EKS clusters (every enabled region) | `eks:ListClusters`, `eks:DescribeCluster`, `eks:DescribeClusterVersions` | ACN-001, ACN-002, ACN-003 |
+| DynamoDB tables and point-in-time recovery (every enabled region) | `dynamodb:ListTables`, `dynamodb:DescribeContinuousBackups` | ADB-013 |
+| Cognito user pools and identity pools (every enabled region) | `cognito-idp:ListUserPools`, `cognito-idp:DescribeUserPool`, `cognito-identity:ListIdentityPools`, `cognito-identity:DescribeIdentityPool`, `cognito-identity:GetIdentityPoolRoles` | AID-014, AID-015 |
+| WAF web ACLs, their logging and what they protect (every enabled region) | `wafv2:ListWebACLs`, `wafv2:GetWebACL`, `wafv2:GetLoggingConfiguration`, `wafv2:ListResourcesForWebACL` | AED-007, AED-008, AMO-007 |
+| Systems Manager documents and who they're shared with (every enabled region) | `ssm:ListDocuments`, `ssm:DescribeDocumentPermission` | ASC-007 |
+| CodeBuild projects (environment variables scanned for credentials, never stored) (every enabled region) | `codebuild:ListProjects`, `codebuild:BatchGetProjects` | ASC-008, ASC-009 |
+| EventBridge event buses (every enabled region) | `events:ListEventBuses` | AMQ-006 |
+| SageMaker notebook instances (every enabled region) | `sagemaker:ListNotebookInstances`, `sagemaker:DescribeNotebookInstance` | AEC-015 |
+| OpenSearch domains (every enabled region) | `es:ListDomainNames`, `es:DescribeDomain` | ADB-006, ADB-007, ADB-008 |
+| ElastiCache clusters (every enabled region) | `elasticache:DescribeReplicationGroups`, `elasticache:DescribeCacheClusters` | ADB-009, ADB-010 |
+| Redshift clusters (every enabled region) | `redshift:DescribeClusters` | ADB-011, ADB-012 |
+| SNS topics, their policies and subscriptions (every enabled region) | `sns:ListTopics`, `sns:GetTopicAttributes`, `sns:ListSubscriptions` | AMQ-001, AMQ-002 |
+| SQS queues and their policies (every enabled region) | `sqs:ListQueues`, `sqs:GetQueueAttributes` | AMQ-003 |
+| Amazon MQ brokers (every enabled region) | `mq:ListBrokers`, `mq:DescribeBroker` | AMQ-004 |
+| MSK (Kafka) clusters (every enabled region) | `kafka:ListClustersV2` | AMQ-005 |
+| EFS file systems (every enabled region) | `elasticfilesystem:DescribeFileSystems` | ADB-014 |
 
 ## GitHub
 
@@ -167,18 +200,23 @@ without the secret's value, and only the scheme and host of webhook URLs are kep
 
 | Source | App permission | Checks that read it |
 |---|---|---|
-| Organization settings | Organization permissions → Administration: Read-only | GID-001, GID-002, GID-003, GID-005 |
+| Organization settings | Organization permissions → Administration: Read-only | GID-001, GID-002, GID-003, GID-005, GID-006, GID-007 |
 | Organization owners | Organization permissions → Members: Read-only | GID-004 |
 | Actions permissions | Organization permissions → Administration: Read-only | GAC-001, GAC-002, GAC-003 |
 | Organization webhooks | Organization permissions → Webhooks: Read-only | GHK-001, GHK-002 |
 | Installed GitHub Apps | Organization permissions → Administration: Read-only | GHK-004 |
+| Workflow policy for fork pull requests | Organization permissions → Administration: Read-only | GAC-004 |
+| Self-hosted runners and runner groups | Organization permissions → Self-hosted runners: Read-only | GAC-005 |
 | Repositories | Repository permissions → Metadata: Read-only (always granted) | Supporting data for other checks |
 | Code security settings | Repository permissions → Administration: Read-only | GSC-001, GSC-002, GSC-006 |
-| Branch protection | Repository permissions → Administration: Read-only | GBR-001, GBR-002, GBR-003 |
-| Rulesets that apply to default branches | Repository permissions → Metadata: Read-only (always granted) | GBR-001, GBR-002, GBR-003 |
+| Branch protection | Repository permissions → Administration: Read-only | GBR-001, GBR-002, GBR-004, GBR-003 |
+| Rulesets that apply to default branches | Repository permissions → Metadata: Read-only (always granted) | GBR-001, GBR-002, GBR-004, GBR-003 |
 | Deploy keys | Repository permissions → Administration: Read-only | GHK-003 |
 | Repository webhooks | Repository permissions → Webhooks: Read-only | GHK-001, GHK-002 |
 | GitHub Pages sites | Repository permissions → Pages: Read-only | GPG-001 |
+| Public repositories' own self-hosted runners | Repository permissions → Administration: Read-only | GAC-005 |
+| Whether public repositories publish releases | None: a public repository's releases are public | GRL-001 |
+| Whether releases are immutable | Repository permissions → Administration: Read-only | GRL-001 |
 | Whether Dependabot alerts are on | Repository permissions → Administration: Read-only | GSC-004, GSC-007 |
 | Whether code scanning has run | Repository permissions → Code scanning alerts: Read-only | GSC-005, GSC-008 |
 | Dependabot alerts | Repository permissions → Dependabot alerts: Read-only | GSC-004, GSC-006 |

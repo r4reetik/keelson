@@ -14,12 +14,22 @@ const VPC = "vpc-1";
 /** The instance's address, inside the fixture's "EC2 range". */
 const IP = "198.51.100.9";
 const LB_DNS = `alb-1.${R}.elb.amazonaws.com`;
+const LB_ARN = `arn:aws:elasticloadbalancing:${R}:111122223333:loadbalancer/app/alb/1`;
+const TRAIL = `arn:aws:cloudtrail:${R}:111122223333:trail/main`;
 
 const blocked: PublicAccessBlock = { blockPublicAcls: true, ignorePublicAcls: true, blockPublicPolicy: true, restrictPublicBuckets: true };
 const unblocked: PublicAccessBlock = { blockPublicAcls: false, ignorePublicAcls: false, blockPublicPolicy: false, restrictPublicBuckets: false };
 const openTo = (protocol: string, port: number | null): AwsSecurityGroup["open"] => [{ protocol, from: port, to: port, cidr: "0.0.0.0/0" }];
 const sg = (id: string, open: AwsSecurityGroup["open"] = []): AwsSecurityGroup => ({ id, name: id, vpcId: VPC, open });
-const bucket = (extra: Partial<AwsBucket> = {}): AwsBucket => ({ name: "assets", region: R, block: blocked, policyPublic: null, aclPublic: [], ...extra });
+const bucket = (extra: Partial<AwsBucket> = {}): AwsBucket => ({
+  name: "assets",
+  region: R,
+  block: blocked,
+  policyPublic: null,
+  aclPublic: [],
+  policy: { otherAccounts: [], deniesHttp: true },
+  ...extra,
+});
 
 export function region(extra: Partial<AwsRegion> = {}): AwsRegion {
   return {
@@ -39,11 +49,25 @@ export function region(extra: Partial<AwsRegion> = {}): AwsRegion {
     publicImages: [],
     vpcs: [{ id: VPC, isDefault: false, flowLogs: true }],
     databases: [
-      { id: "db", engine: "postgres", public: false, encrypted: true, backupDays: 7, replica: false, vpcId: VPC, securityGroups: ["sg-db"], port: 5432 },
+      {
+        id: "db",
+        engine: "postgres",
+        public: false,
+        encrypted: true,
+        backupDays: 7,
+        replica: false,
+        vpcId: VPC,
+        securityGroups: ["sg-db"],
+        port: 5432,
+        tlsRequired: true,
+        parameterGroup: "pg",
+      },
     ],
     loadBalancers: [
       {
         name: "alb",
+        arn: LB_ARN,
+        desync: "defensive",
         dnsName: LB_DNS,
         type: "application",
         internetFacing: true,
@@ -56,8 +80,44 @@ export function region(extra: Partial<AwsRegion> = {}): AwsRegion {
         ],
       },
     ],
-    functions: [{ name: "fn", runtime: "nodejs22.x", role: "app", urls: [{ authType: "AWS_IAM" }] }],
+    functions: [{ name: "fn", runtime: "nodejs22.x", role: "app", urls: [{ authType: "AWS_IAM" }], publicPolicy: false, envSecret: null }],
     guardDuty: true,
+    trails: [{ arn: TRAIL, name: "main", homeRegion: R, multiRegion: true, organization: false, own: true, logging: true, validation: true }],
+    configRecording: true,
+    keys: [{ id: "key-1", description: "app data", enabled: true, rotatable: true, rotation: true, deletionDate: null, publicPolicy: false }],
+    certificates: [{ id: "cert-1", domain: "www.example.com", type: "IMPORTED", inUse: true, notAfter: days(200), renews: false }],
+    secrets: [{ name: "db-password", createdAt: days(-400), changedAt: days(-30), accessedAt: days(-1), rotation: true, publicPolicy: false }],
+    repositories: [{ name: "app", scanned: true, immutableTags: true, publicPolicy: false }],
+    taskDefinitions: [{ name: "app:3", services: ["app"], privileged: [], hostNamespaces: [], secret: null }],
+    kubernetes: [
+      { name: "prod", version: "1.33", publicEndpoint: true, openToAll: false, secretsEncrypted: true, auditLogs: true, versionStatus: "STANDARD_SUPPORT" },
+    ],
+    tables: [{ name: "orders", pitr: true }],
+    userPools: [{ id: "pool-1", name: "customers", mfa: "OPTIONAL" }],
+    identityPools: [{ id: "idp-1", name: "app", guest: false, guestRole: null }],
+    webAcls: [
+      { name: "web", arn: "arn:aws:wafv2:eu-west-1:111122223333:regional/webacl/web/1", scope: "REGIONAL", rules: 3, logging: true, loadBalancers: [LB_ARN] },
+    ],
+    documents: [{ name: "patch-hosts", public: false }],
+    buildProjects: [{ name: "build", public: false, secret: null }],
+    eventBuses: [{ name: "default", public: false }],
+    notebooks: [{ name: "research", internet: false }],
+    searchDomains: [
+      { name: "logs", vpc: true, openPolicy: false, fineGrained: true, encryptedAtRest: true, nodeToNode: true, enforceHttps: true, tls12: true },
+    ],
+    caches: [{ id: "sessions", engine: "redis", transit: true, atRest: true }],
+    warehouses: [{ id: "analytics", public: false, encrypted: true }],
+    topics: [{ name: "alerts", public: false }],
+    httpSubscriptions: [],
+    queues: [{ name: "jobs", public: false }],
+    brokers: [{ name: "events", engine: "RABBITMQ", public: false }],
+    kafka: [{ name: "stream", public: false, unauthenticated: false, plaintext: false }],
+    fileSystems: [{ id: "fs-1", name: "shared", encrypted: true }],
+    launchTemplates: [{ id: "lt-1", name: "web", imdsV2: true, userDataSecret: null }],
+    unencryptedVolumes: [],
+    sharingBlocks: { snapshots: "block-all-sharing", images: "block-new-sharing" },
+    transitGateways: [{ id: "tgw-1", autoAccept: false }],
+    dbSnapshots: [{ id: "before-migration", cluster: false, public: false }],
     ...extra,
   };
 }
@@ -71,7 +131,10 @@ const distribution = (extra: Partial<AwsDistribution> = {}): AwsDistribution => 
   minTls: "TLSv1.2_2021",
   defaultCertificate: false,
   waf: true,
-  origins: [{ domain: "origin.example.com", protocolPolicy: "https-only", s3: false, restricted: false }],
+  origins: [
+    { domain: "origin.example.com", protocolPolicy: "https-only", s3: false, restricted: false },
+    { domain: "assets.s3.amazonaws.com", protocolPolicy: null, s3: true, restricted: true, missingBucket: false },
+  ],
   ...extra,
 });
 
@@ -108,6 +171,8 @@ export function awsInventory(extra: Partial<AwsInventory> = {}): AwsInventory {
     admins: [{ user: "dana", via: "the group Admins" }],
     roles: [role()],
     policies: [{ name: "deploy-policy", fullAdmin: false, attachments: 1 }],
+    escalations: [],
+    serverCertificates: [{ name: "legacy-cert", expiresAt: days(100) }],
     s3Block: blocked,
     buckets: [bucket()],
     regions: [region()],
@@ -204,6 +269,72 @@ export const AWS_CASES: Record<AwsCheckId, () => AwsInventory> = {
   "AMO-001": () => withRegion({ guardDuty: false }),
   "AMO-002": () => withRegion({ vpcs: [{ id: VPC, isDefault: false, flowLogs: false }] }),
   "AMO-003": () => withRegion({ loadBalancers: [{ ...region().loadBalancers![0], accessLogs: false }] }),
+
+  "AID-013": () => awsInventory({ escalations: [{ kind: "role", name: "ci", via: "the policy deploy-tools", paths: ["iam:PassRole with ec2:RunInstances"] }] }),
+  "AID-014": () => withRegion({ identityPools: [{ id: "idp-1", name: "app", guest: true, guestRole: "app" }] }),
+  "AID-015": () => withRegion({ userPools: [{ id: "pool-1", name: "customers", mfa: "OFF" }] }),
+  "AS3-004": () => awsInventory({ buckets: [bucket({ policy: { otherAccounts: ["999988887777"], deniesHttp: true } })] }),
+  "ANW-004": () => withRegion({ transitGateways: [{ id: "tgw-1", autoAccept: true }] }),
+
+  "AEC-009": () => withRegion({ launchTemplates: [{ id: "lt-1", name: "web", imdsV2: false, userDataSecret: null }] }),
+  "AEC-010": () => withRegion({ launchTemplates: [{ id: "lt-1", name: "web", imdsV2: true, userDataSecret: "an AWS access key" }] }),
+  "AEC-011": () => withRegion({ unencryptedVolumes: [{ id: "vol-1", instance: "i-1" }] }),
+  "AEC-012": () => withRegion({ sharingBlocks: { snapshots: "unblocked", images: "block-new-sharing" } }),
+  "AEC-013": () => withRegion({ functions: [{ ...region().functions![0], publicPolicy: true }] }),
+  "AEC-014": () => withRegion({ functions: [{ ...region().functions![0], envSecret: { where: "STRIPE_KEY", kind: "a Stripe secret key", likely: false } }] }),
+  "AEC-015": () => withRegion({ notebooks: [{ name: "research", internet: true }] }),
+
+  "ACN-001": () => withRegion({ kubernetes: [{ ...region().kubernetes![0], openToAll: true }] }),
+  "ACN-002": () => withRegion({ kubernetes: [{ ...region().kubernetes![0], auditLogs: false }] }),
+  "ACN-003": () => withRegion({ kubernetes: [{ ...region().kubernetes![0], version: "1.29", versionStatus: "EXTENDED_SUPPORT" }] }),
+  "ACN-004": () => withRegion({ taskDefinitions: [{ ...region().taskDefinitions![0], privileged: ["agent"] }] }),
+  "ACN-005": () =>
+    withRegion({ taskDefinitions: [{ ...region().taskDefinitions![0], secret: { where: "app: GITHUB_TOKEN", kind: "a GitHub token", likely: false } }] }),
+  "ACN-006": () => withRegion({ repositories: [{ ...region().repositories![0], publicPolicy: true }] }),
+  "ACN-007": () => withRegion({ repositories: [{ ...region().repositories![0], scanned: false }] }),
+  "ACN-008": () => withRegion({ repositories: [{ ...region().repositories![0], immutableTags: false }] }),
+
+  "ADB-004": () => withRegion({ dbSnapshots: [{ id: "before-migration", cluster: false, public: true }] }),
+  "ADB-005": () => withDb({ tlsRequired: false }),
+  "ADB-006": () => withRegion({ searchDomains: [{ ...region().searchDomains![0], vpc: false, openPolicy: true }] }),
+  "ADB-007": () => withRegion({ searchDomains: [{ ...region().searchDomains![0], nodeToNode: false }] }),
+  "ADB-008": () => withRegion({ searchDomains: [{ ...region().searchDomains![0], enforceHttps: false }] }),
+  "ADB-009": () => withRegion({ caches: [{ id: "sessions", engine: "redis", transit: false, atRest: true }] }),
+  "ADB-010": () => withRegion({ caches: [{ id: "sessions", engine: "redis", transit: true, atRest: false }] }),
+  "ADB-011": () => withRegion({ warehouses: [{ id: "analytics", public: true, encrypted: true }] }),
+  "ADB-012": () => withRegion({ warehouses: [{ id: "analytics", public: false, encrypted: false }] }),
+  "ADB-013": () => withRegion({ tables: [{ name: "orders", pitr: false }] }),
+  "ADB-014": () => withRegion({ fileSystems: [{ id: "fs-1", name: "shared", encrypted: false }] }),
+
+  "ASC-001": () => withRegion({ secrets: [{ ...region().secrets![0], publicPolicy: true }] }),
+  "ASC-002": () => withRegion({ secrets: [{ ...region().secrets![0], rotation: false, changedAt: days(-500) }] }),
+  "ASC-003": () => withRegion({ secrets: [{ ...region().secrets![0], accessedAt: days(-200) }] }),
+  "ASC-004": () => withRegion({ keys: [{ ...region().keys![0], publicPolicy: true }] }),
+  "ASC-005": () => withRegion({ keys: [{ ...region().keys![0], rotation: false }] }),
+  "ASC-006": () => withRegion({ keys: [{ ...region().keys![0], enabled: false, deletionDate: days(7) }] }),
+  "ASC-007": () => withRegion({ documents: [{ name: "patch-hosts", public: true }] }),
+  "ASC-008": () =>
+    withRegion({ buildProjects: [{ name: "build", public: false, secret: { where: "NPM_TOKEN", kind: "a secret-looking value", likely: true } }] }),
+  "ASC-009": () => withRegion({ buildProjects: [{ name: "build", public: true, secret: null }] }),
+
+  "AMQ-001": () => withRegion({ topics: [{ name: "alerts", public: true }] }),
+  "AMQ-002": () => withRegion({ httpSubscriptions: [{ topic: "alerts", host: "hooks.example.com" }] }),
+  "AMQ-003": () => withRegion({ queues: [{ name: "jobs", public: true }] }),
+  "AMQ-004": () => withRegion({ brokers: [{ name: "events", engine: "RABBITMQ", public: true }] }),
+  "AMQ-005": () => withRegion({ kafka: [{ name: "stream", public: true, unauthenticated: true, plaintext: false }] }),
+  "AMQ-006": () => withRegion({ eventBuses: [{ name: "default", public: true }] }),
+
+  "AMO-004": () => withRegion({ trails: [] }),
+  "AMO-005": () => withRegion({ trails: [{ ...region().trails![0], validation: false }] }),
+  "AMO-006": () => withRegion({ configRecording: false }),
+  "AMO-007": () => withRegion({ webAcls: [{ ...region().webAcls![0], logging: false }] }),
+
+  "AED-007": () => withRegion({ webAcls: [{ ...region().webAcls![0], loadBalancers: [] }] }),
+  "AED-008": () => withRegion({ webAcls: [{ ...region().webAcls![0], rules: 0 }] }),
+  "AED-009": () => withRegion({ loadBalancers: [{ ...region().loadBalancers![0], desync: "monitor" }] }),
+  "AED-010": () => withDist({ origins: [{ domain: "gone-assets.s3.amazonaws.com", protocolPolicy: null, s3: true, restricted: true, missingBucket: true }] }),
+  "AED-011": () => withRegion({ certificates: [{ ...region().certificates![0], notAfter: days(10) }] }),
+  "AED-012": () => awsInventory({ serverCertificates: [{ name: "legacy-cert", expiresAt: days(-10) }] }),
 };
 
 /** Engine options a case needs beyond the defaults: checks that span providers read the entity's other accounts. */

@@ -1,7 +1,10 @@
-// One GitHub scan's reads: the organization's settings, owners, Actions policy,
-// webhooks and other installed Apps; every repository the App reaches, with its
-// default branch's protection and rulesets, deploy keys, webhooks and Pages site;
-// and the organization's open Dependabot, code scanning and secret scanning alerts.
+// One GitHub scan's reads: the organization's settings, owners, Actions policy
+// (with what fork pull requests may run, and the self-hosted runners and their
+// groups), webhooks and other installed Apps; every repository the App reaches,
+// with its default branch's protection and rulesets, deploy keys, webhooks and
+// Pages site, and for public repositories their own runners and whether their
+// releases can change; and the organization's open Dependabot, code scanning and
+// secret scanning alerts.
 //
 // Secrets never enter the inventory: secret scanning alerts are read with
 // hide_secret and their value field is dropped regardless, only the scheme and
@@ -17,9 +20,12 @@ import type {
   GithubHook,
   GithubInventory,
   GithubOrg,
+  ForkPrPolicy,
   GithubRepo,
   OtherApp,
+  RunnerGroup,
   SecretAlert,
+  SelfHostedRunner,
 } from "./types.ts";
 import type { ProgressEvent } from "../../core/types.ts";
 
@@ -29,7 +35,7 @@ const MAX_ALERTS = 5000;
 export async function collectGithub(client: GithubClient, accountId: string, onProgress: (p: ProgressEvent) => void = () => {}): Promise<GithubInventory> {
   const org = client.org;
   onProgress({ phase: "Reading the organization" });
-  const [orgBody, owners, actions, workflow, hooks, apps] = await Promise.all([
+  const [orgBody, owners, actions, workflow, hooks, apps, forkPrs, runnerGroups, runners] = await Promise.all([
     client.orgSettings().then(
       (b) => {
         client.note("orgSettings", true);
@@ -45,6 +51,9 @@ export async function collectGithub(client: GithubClient, accountId: string, onP
     client.get("actions", `/orgs/${org}/actions/permissions/workflow`),
     client.list<Json>("orgHooks", `/orgs/${org}/hooks`),
     client.list<Json>("installations", `/orgs/${org}/installations`, { key: "installations" }),
+    readForkPrs(client),
+    readRunnerGroups(client),
+    client.list<Json>("runners", `/orgs/${org}/actions/runners`, { key: "runners" }),
   ]);
 
   onProgress({ phase: "Reading repositories" });
@@ -78,6 +87,9 @@ export async function collectGithub(client: GithubClient, accountId: string, onP
     actions: actions && workflow ? toActions(actions, workflow) : null,
     hooks: hooks ? hooks.map(toHook) : null,
     apps: apps ? apps.map(toApp) : null,
+    forkPrs,
+    runnerGroups,
+    runners: runners ? runners.map(toRunner) : null,
     repos,
     dependabot: dependabot ? dependabot.map(toDependabot) : null,
     codeScanning: codeScanning ? codeScanning.map(toCodeScanning) : null,
@@ -94,7 +106,8 @@ async function readRepo(client: GithubClient, listed: Json): Promise<GithubRepo>
   const base = toRepo(listed);
   if (base.archived) return base;
   const branch = encodeURIComponent(base.defaultBranch);
-  const [detail, protection, rules, keys, hooks, pages, dependabotAlerts, codeScanning] = await Promise.all([
+  const isPublic = base.visibility === "public";
+  const [detail, protection, rules, keys, hooks, pages, dependabotAlerts, codeScanning, runners, releases] = await Promise.all([
     client.raw(path).catch(() => null),
     base.empty ? Promise.resolve(null) : client.getOptional("protection", `${path}/branches/${branch}/protection`),
     base.empty ? Promise.resolve([]) : client.get<Json[]>("rules", `${path}/rules/branches/${branch}`),
@@ -103,7 +116,12 @@ async function readRepo(client: GithubClient, listed: Json): Promise<GithubRepo>
     base.hasPages ? client.getOptional("pages", `${path}/pages`) : Promise.resolve(null),
     dependabotEnabled(client, path),
     base.empty ? Promise.resolve(null) : codeScanningRan(client, path),
+    isPublic ? client.list<Json>("repoRunners", `${path}/actions/runners`, { key: "runners" }) : Promise.resolve(null),
+    isPublic && !base.empty && !base.fork ? client.get<Json[]>("releases", `${path}/releases?per_page=1`) : Promise.resolve(null),
   ]);
+  const published = Array.isArray(releases) ? releases.length > 0 : null;
+  // GitHub answers 404 when releases aren't immutable.
+  const immutable = published ? await client.getOptional<Json>("immutableReleases", `${path}/immutable-releases`) : null;
   const sa = detail?.security_and_analysis;
   // GitHub leaves the security settings out when the App can't administer the repository.
   if (detail && !sa) client.note("codeSecurity", false, Object.assign(new Error("GitHub didn't include the repository's security settings."), { status: 403 }));
@@ -124,7 +142,60 @@ async function readRepo(client: GithubClient, listed: Json): Promise<GithubRepo>
     dependabotAlerts,
     codeScanning,
     pages: pages === undefined ? undefined : pages ? { cname: str(pages.cname)?.toLowerCase() ?? null, httpsEnforced: bool(pages.https_enforced) } : null,
+    runners: runners ? runners.map(toRunner) : null,
+    releases: published,
+    immutableReleases: !published || immutable === undefined ? null : immutable?.enabled === true,
   };
+}
+
+/**
+ * Whose fork pull requests wait for approval on public repositories, and what fork pull requests get on private ones.
+ * A 404 means the organization's plan doesn't offer the setting: nothing to judge, not a coverage gap.
+ */
+async function readForkPrs(client: GithubClient): Promise<ForkPrPolicy | null> {
+  const base = `/orgs/${client.org}/actions/permissions`;
+  const [approval, priv] = await Promise.all([
+    client.getOptional("forkPrs", `${base}/fork-pr-contributor-approval`),
+    client.getOptional("forkPrs", `${base}/fork-pr-workflows-private-repos`),
+  ]);
+  if (approval === undefined || priv === undefined) return null;
+  return {
+    approval: str(approval?.approval_policy),
+    private:
+      priv && typeof priv.run_workflows_from_fork_pull_requests === "boolean"
+        ? {
+            runs: priv.run_workflows_from_fork_pull_requests,
+            secrets: priv.send_secrets_and_variables === true,
+            writeTokens: priv.send_write_tokens_to_workflows === true,
+            needsApproval: priv.require_approval_for_fork_pr_workflows === true,
+          }
+        : null,
+  };
+}
+
+/** Runner groups, with the repositories of each group that only some repositories may use. */
+async function readRunnerGroups(client: GithubClient): Promise<RunnerGroup[] | null> {
+  const groups = await client.list<Json>("runners", `/orgs/${client.org}/actions/runner-groups`, { key: "runner_groups" });
+  if (!groups) return null;
+  return Promise.all(
+    groups.map(async (g): Promise<RunnerGroup> => {
+      const visibility = String(g.visibility ?? "");
+      const allowsPublic = g.inherited ? g.inherited_allows_public_repositories === true : g.allows_public_repositories === true;
+      // Only a group that public repositories may use needs its list: the checks look for public repositories in it.
+      const repos =
+        visibility === "selected" && allowsPublic
+          ? await client.list<Json>("runners", `/orgs/${client.org}/actions/runner-groups/${Number(g.id)}/repositories`, { key: "repositories" })
+          : null;
+      return {
+        id: Number(g.id),
+        name: String(g.name ?? ""),
+        visibility,
+        allowsPublic,
+        restrictedToWorkflows: g.restricted_to_workflows === true,
+        repos: repos ? repos.map((r) => String(r.name ?? "")) : null,
+      };
+    }),
+  );
 }
 
 /** GitHub answers 204 when Dependabot alerts are on and 404 when they're off. */
@@ -181,6 +252,8 @@ function toOrg(o: Json): GithubOrg {
     defaultRepoPermission: str(o.default_repository_permission),
     membersCanCreatePublicRepos: bool(o.members_can_create_public_repositories),
     membersCanForkPrivateRepos: bool(o.members_can_fork_private_repositories),
+    membersCanDeleteRepos: bool(o.members_can_delete_repositories),
+    membersCanChangeVisibility: bool(o.members_can_change_repo_visibility),
   };
 }
 
@@ -203,6 +276,18 @@ function toRepo(r: Json): GithubRepo {
     dependabotAlerts: null,
     codeScanning: null,
     pages: null,
+    runners: null,
+    releases: null,
+    immutableReleases: null,
+  };
+}
+
+function toRunner(r: Json): SelfHostedRunner {
+  return {
+    name: String(r.name ?? ""),
+    os: String(r.os ?? ""),
+    ephemeral: r.ephemeral === true,
+    groupId: typeof r.runner_group_id === "number" ? r.runner_group_id : null,
   };
 }
 
@@ -213,12 +298,19 @@ function toProtection(p: Json): BranchProtection {
     enforceAdmins: !!p.enforce_admins?.enabled,
     allowForcePushes: !!p.allow_force_pushes?.enabled,
     allowDeletions: !!p.allow_deletions?.enabled,
+    dismissStale: pr?.dismiss_stale_reviews === true,
+    lastPushApproval: pr?.require_last_push_approval === true,
   };
 }
 
 function toRule(r: Json): BranchRule {
   const n = r.parameters?.required_approving_review_count;
-  return { type: String(r.type ?? ""), reviews: typeof n === "number" ? n : null };
+  const rule: BranchRule = { type: String(r.type ?? ""), reviews: typeof n === "number" ? n : null };
+  if (rule.type === "pull_request") {
+    rule.dismissStale = r.parameters?.dismiss_stale_reviews_on_push === true;
+    rule.lastPushApproval = r.parameters?.require_last_push_approval === true;
+  }
+  return rule;
 }
 
 /** "https://hooks.example.com/x?token=…" -> "https://hooks.example.com". */

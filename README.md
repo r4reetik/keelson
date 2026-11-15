@@ -101,19 +101,20 @@ never their values.
 ### AWS
 
 One account per access key, read in every enabled region. Keelson reads configuration only: never the
-objects in a bucket, the rows in a database, a policy document's text or a Lambda environment variable.
+objects in a bucket, the rows in a database, a secret's value or a policy document's text. Environment
+variables of Lambda functions, ECS tasks and CodeBuild projects, and start-up scripts, are scanned for
+credentials in memory, and only the variable's name and the kind found are kept.
 
 | Area | Examples |
 |---|---|
-| Identity & access | Root user without MFA or with access keys, console users without MFA (critical when they are administrators), access keys that are old or unused, a missing or weak password policy, administrators holding long-lived keys, roles any AWS account or any GitHub repository can assume, roles that trust an AWS account outside the entity without an external ID, customer managed policies that allow everything, internet-facing instances that run with administrator access |
-| Attack surface | Public S3 buckets (policy or ACL, after the bucket's and the account's Block Public Access, and whether CloudFront serves them), security groups open to the internet on SSH, RDP, database ports or everything, rated by what they are attached to (something with a public address, something private, or nothing), publicly accessible databases, public EBS snapshots and machine images, Lambda function URLs without authentication |
-| Secrets | Credentials written into an instance's start-up script (user data): access keys, tokens, private keys, passwords in URLs. Only the kind is reported; the script is never stored |
-| TLS, HTTPS & WAF | CloudFront distributions and load balancers that serve plain HTTP or accept TLS 1.0 and 1.1, CloudFront reaching its origin over HTTP, distributions without a web ACL |
-| DNS | Route 53 records that still point at a CloudFront distribution or S3 bucket the entity no longer has (anyone can claim those), at a deleted load balancer (dead, but not claimable), at an address Keelson saw leave the entity's accounts (AWS gives it to another customer), or at an AWS address nobody in the entity holds |
-| Platform & monitoring | Instances that still allow IMDSv1, EBS volumes not encrypted by default, unencrypted databases and databases without backups, deprecated Lambda runtimes, GuardDuty off and VPCs without flow logs where workloads run, internet-facing load balancers without access logs |
+| Identity & access | Root user without MFA or with access keys, console users without MFA (critical when they are administrators), access keys that are old or unused, a missing or weak password policy, administrators holding long-lived keys, users, groups and roles whose own policies let them make themselves administrators, roles any AWS account or any GitHub repository can assume, roles and bucket policies that let in an AWS account outside the entity, customer managed policies that allow everything, internet-facing instances that run with administrator access, Cognito identity pools that hand AWS credentials to anyone, user pools without MFA |
+| Attack surface | Public S3 buckets (policy or ACL, after the bucket's and the account's Block Public Access, and whether CloudFront serves them), security groups open to the internet on SSH, RDP, database ports or everything, rated by what they are attached to (something with a public address, something private, or nothing), publicly accessible databases, Redshift clusters, MQ brokers and OpenSearch domains, public database snapshots, EBS snapshots and machine images, resource policies that let anyone in (Lambda functions, ECR repositories, SNS topics, SQS queues, EventBridge buses, KMS keys, secrets), Systems Manager documents and CodeBuild builds shared with everyone, EKS API endpoints open to the internet, Kafka clusters that accept unauthenticated clients, Lambda function URLs without authentication, transit gateways that join shared VPCs on their own |
+| Secrets | Credentials written into start-up scripts (instances and launch templates), Lambda, ECS task and CodeBuild environment variables, and CodeBuild source URLs. Only the kind is reported. Secrets Manager secrets that haven't changed in a year or aren't used, KMS keys without rotation or scheduled for deletion |
+| TLS, HTTPS & WAF | CloudFront distributions and load balancers that serve plain HTTP or accept TLS 1.0 and 1.1, CloudFront reaching its origin over HTTP, distributions and internet-facing application load balancers without a web ACL, web ACLs with no rules, databases, caches and OpenSearch domains that accept connections without TLS, SNS deliveries over plain HTTP, certificates in use that won't renew before they expire, expired IAM server certificates |
+| DNS & origins | Route 53 records that still point at a CloudFront distribution or S3 bucket the entity no longer has (anyone can claim those), at a deleted load balancer (dead, but not claimable), at an address Keelson saw leave the entity's accounts (AWS gives it to another customer), or at an AWS address nobody in the entity holds; CloudFront origins whose S3 bucket no longer exists |
+| Platform & monitoring | Instances and launch templates that still allow IMDSv1, unencrypted EBS volumes and volumes not encrypted by default, unencrypted databases, caches, warehouses, OpenSearch domains and file systems, databases without backups, DynamoDB tables without point-in-time recovery, deprecated Lambda runtimes, EKS versions past standard support, privileged ECS containers, ECR images that aren't scanned or whose tags can be overwritten, CloudTrail not recording every region, log files without validation, GuardDuty and AWS Config off and VPCs without flow logs where workloads run, internet-facing load balancers without access logs, EKS clusters and web ACLs that keep no logs |
 
 Per-region settings are only judged where something runs, so an empty region doesn't fill the list.
-CloudTrail, KMS and Config aren't read yet: their APIs only answer POST requests, and Keelson only sends GET.
 
 ### GitHub
 
@@ -123,11 +124,11 @@ leaked secret's value.
 
 | Area | Examples |
 |---|---|
-| Identity & access | Two-factor authentication not required, a base permission that lets every member write to every repository, members who can create public repositories or fork private ones, too many owners, deploy keys that can push, other GitHub Apps that can change every repository |
-| Change risk | Default branches that take changes without a pull request, that allow force pushes or deletion, or whose review rule administrators can skip. Classic branch protection and rulesets, the repository's and the organization's, count alike |
+| Identity & access | Two-factor authentication not required, a base permission that lets every member write to every repository, members who can create public repositories, fork private ones, make private repositories public, or delete and transfer repositories, too many owners, deploy keys that can push, other GitHub Apps that can change every repository |
+| Change risk | Default branches that take changes without a pull request, that keep an approval after new commits are pushed, that allow force pushes or deletion, or whose review rule administrators can skip. Classic branch protection and rulesets, the repository's and the organization's, count alike. Public repositories whose published releases and tags can still be changed |
 | Secrets | Leaked secrets GitHub found and nobody resolved (critical while GitHub says the secret still works), public repositories without secret scanning, push protection off |
 | Platform | Open critical and high Dependabot and code scanning alerts, Dependabot alerts off, public repositories code scanning has never analysed, Dependabot security updates off where Dependabot has found something |
-| Deployments | Workflows whose GITHUB_TOKEN can write by default, workflows that can approve pull requests, any third-party action allowed to run |
+| Deployments | Public repositories that can run jobs on your self-hosted runners (critical when a runner keeps state between jobs and outside contributors' pull requests run without approval), pull requests from forks of private repositories that get secrets or a write token, workflows whose GITHUB_TOKEN can write by default, workflows that can approve pull requests, any third-party action allowed to run |
 | TLS & HTTPS | Webhooks that skip certificate checks or send over plain HTTP, Pages sites that don't enforce HTTPS |
 
 ### Across providers
@@ -335,7 +336,7 @@ history, email domains and alert destinations.
 
 ## Security and privacy
 
-- **Read-only.** The scanner only sends GET requests to every provider, GraphQL analytics queries to Cloudflare (GraphQL is POST by design, and query-only), and to GitHub one request for an installation token limited to read permissions. Tests run full scans of each provider and fail if any request is anything else. GitHub secret scanning alerts are read without the secret's value, and GitHub webhook URLs are stored without their paths. Vercel environment variables are listed without their values, drain and webhook URLs are stored without their paths or secrets, and AWS policy documents, Lambda environment variables and instance start-up scripts are never stored (start-up scripts are scanned for credentials in memory, and only the kind found is kept).
+- **Read-only.** The scanner only sends GET requests to every provider, GraphQL analytics queries to Cloudflare (GraphQL is POST by design, and query-only), to GitHub one request for an installation token limited to read permissions, and to AWS services whose APIs only accept POST (CloudTrail, KMS, ECS and others) the read actions Keelson names: Describe, List and Get calls, refused by the client before they're sent if they aren't on its list. Tests run full scans of each provider and fail if any request is anything else. GitHub secret scanning alerts are read without the secret's value, and GitHub webhook URLs are stored without their paths. Vercel environment variables are listed without their values, drain and webhook URLs are stored without their paths or secrets, and AWS policy documents, secrets' values, environment variables and start-up scripts are never stored (Keelson never asks for a secret's value; environment variables and start-up scripts are scanned for credentials in memory, and only the kind found is kept).
 - **Local.** Findings and tokens stay in the data directory. The database, tokens and backups are readable by your user only, and so is the directory when Keelson creates it.
   Tokens live in `credentials.json`, apart from the database, which only holds a reference to each one.
 - **Contained.**
@@ -368,8 +369,8 @@ than roughly 20–30. Confirm with the record's owner before deleting anything.
 ## FAQ
 
 **Can Keelson change anything in my account?** No. The scanner only sends GET requests (and, to Cloudflare,
-GraphQL queries; to GitHub, one request for a read-only token), and tests that run full scans fail the build if it
-ever sends anything else. Give Cloudflare a read-only token, AWS a user with only the SecurityAudit policy and
+GraphQL queries; to GitHub, one request for a read-only token; to AWS services that only accept POST, their
+named read actions), and tests that run full scans fail the build if it ever sends anything else. Give Cloudflare a read-only token, AWS a user with only the SecurityAudit policy and
 GitHub an App with read-only permissions; Vercel has no read-only tokens, so its token can do what its user's role
 allows, and Keelson still only reads.
 

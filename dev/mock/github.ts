@@ -47,6 +47,7 @@ const GRANTED = {
   organization_administration: "read",
   members: "read",
   organization_hooks: "read",
+  organization_self_hosted_runners: "read",
   contents: "write",
 };
 
@@ -78,7 +79,36 @@ const org = {
   default_repository_permission: "write",
   members_can_create_public_repositories: true,
   members_can_fork_private_repositories: true,
+  members_can_change_repo_visibility: true,
+  members_can_delete_repositories: true,
 };
+
+// Fork pull requests: on public repositories only accounts new to GitHub wait for approval (GitHub's default);
+// on private ones they run workflows with secrets and no approval.
+const FORK_PR_APPROVAL = { approval_policy: "first_time_contributors_new_to_github" };
+const FORK_PR_PRIVATE = {
+  run_workflows_from_fork_pull_requests: true,
+  send_write_tokens_to_workflows: false,
+  send_secrets_and_variables: true,
+  require_approval_for_fork_pr_workflows: false,
+};
+
+// The default group is closed to public repositories; "build-farm" is open to "web", and its runner keeps state between jobs.
+const RUNNER_GROUPS = [
+  { id: 1, name: "Default", visibility: "all", default: true, inherited: false, allows_public_repositories: false, restricted_to_workflows: false },
+  { id: 2, name: "build-farm", visibility: "selected", default: false, inherited: false, allows_public_repositories: true, restricted_to_workflows: false },
+];
+const GROUP_REPOS: Record<number, string[]> = { 2: ["web", "api"] };
+const RUNNERS = [
+  { id: 1, name: "mock-build-1", os: "Linux", status: "online", busy: false, ephemeral: false, runner_group_id: 2, labels: [] },
+  { id: 2, name: "mock-deploy-1", os: "Linux", status: "online", busy: false, ephemeral: false, runner_group_id: 1, labels: [] },
+];
+// "handbook" has an ephemeral runner of its own.
+const REPO_RUNNERS: Record<string, unknown[]> = {
+  handbook: [{ id: 3, name: "mock-docs-1", os: "Linux", status: "online", busy: false, ephemeral: true, labels: [] }],
+};
+// "handbook" publishes releases, and they can still change; "web" publishes none.
+const RELEASES: Record<string, unknown[]> = { handbook: [{ id: 1, tag_name: "v1.0.0", draft: false, prerelease: false }] };
 
 const repo = (name: string, o: Record<string, unknown> = {}) => ({
   id: name.length * 1000,
@@ -115,14 +145,15 @@ const REPOS = [
 ];
 
 const PROTECTION: Record<string, unknown> = {
+  // An approval survives new commits.
   infra: {
-    required_pull_request_reviews: { required_approving_review_count: 1 },
+    required_pull_request_reviews: { required_approving_review_count: 1, dismiss_stale_reviews: false, require_last_push_approval: false },
     enforce_admins: { enabled: false },
     allow_force_pushes: { enabled: true },
     allow_deletions: { enabled: false },
   },
   handbook: {
-    required_pull_request_reviews: { required_approving_review_count: 1 },
+    required_pull_request_reviews: { required_approving_review_count: 1, dismiss_stale_reviews: true, require_last_push_approval: false },
     enforce_admins: { enabled: true },
     allow_force_pushes: { enabled: false },
     allow_deletions: { enabled: false },
@@ -131,7 +162,12 @@ const PROTECTION: Record<string, unknown> = {
 
 const RULES: Record<string, unknown[]> = {
   api: [
-    { type: "pull_request", parameters: { required_approving_review_count: 2 }, ruleset_source_type: "Organization", ruleset_id: 7 },
+    {
+      type: "pull_request",
+      parameters: { required_approving_review_count: 2, dismiss_stale_reviews_on_push: true, require_last_push_approval: true },
+      ruleset_source_type: "Organization",
+      ruleset_id: 7,
+    },
     { type: "non_fast_forward", ruleset_source_type: "Organization", ruleset_id: 7 },
     { type: "deletion", ruleset_source_type: "Organization", ruleset_id: 7 },
   ],
@@ -299,6 +335,17 @@ export function installMockGithub(o: MockOptions = {}): () => void {
     if (path === "/orgs/mock-org/members") return paged(url, url.searchParams.get("role") === "admin" ? OWNERS : [...OWNERS, { login: "dev-a", id: 6000 }]);
     if (path === "/orgs/mock-org/actions/permissions") return json({ enabled_repositories: "all", allowed_actions: "all" });
     if (path === "/orgs/mock-org/actions/permissions/workflow") return json({ default_workflow_permissions: "write", can_approve_pull_request_reviews: true });
+    if (path === "/orgs/mock-org/actions/permissions/fork-pr-contributor-approval") return json(FORK_PR_APPROVAL);
+    if (path === "/orgs/mock-org/actions/permissions/fork-pr-workflows-private-repos") return json(FORK_PR_PRIVATE);
+    if (path === "/orgs/mock-org/actions/runner-groups") return paged(url, RUNNER_GROUPS, "runner_groups");
+    const group = /^\/orgs\/mock-org\/actions\/runner-groups\/(\d+)\/repositories$/.exec(path);
+    if (group)
+      return paged(
+        url,
+        (GROUP_REPOS[Number(group[1])] ?? []).map((name) => REPOS.find((x) => x.name === name)),
+        "repositories",
+      );
+    if (path === "/orgs/mock-org/actions/runners") return paged(url, RUNNERS, "runners");
     if (path === "/orgs/mock-org/hooks") return paged(url, ORG_HOOKS);
     if (path === "/orgs/mock-org/installations") return paged(url, OTHER_APPS, "installations");
     if (path === "/orgs/mock-org/dependabot/alerts") return paged(url, DEPENDABOT);
@@ -320,6 +367,9 @@ export function installMockGithub(o: MockOptions = {}): () => void {
     if (rest === "/keys") return paged(url, KEYS[r.name] ?? []);
     if (rest === "/hooks") return paged(url, HOOKS[r.name] ?? []);
     if (rest === "/pages") return PAGES[r.name] ? json(PAGES[r.name]) : fail(404, "Not Found");
+    if (rest === "/actions/runners") return paged(url, REPO_RUNNERS[r.name] ?? [], "runners");
+    if (rest === "/releases") return paged(url, RELEASES[r.name] ?? []);
+    if (rest === "/immutable-releases") return fail(404, "Not Found");
     // Dependabot alerts are on everywhere but "web"; code scanning has run on "api" only, and private repositories without Code Security say so.
     if (rest === "/vulnerability-alerts") return r.name === "web" ? fail(404, "Vulnerability alerts are disabled.") : new Response(null, { status: 204 });
     if (rest === "/code-scanning/analyses") {

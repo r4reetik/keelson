@@ -1,5 +1,6 @@
-// AWS as a provider: one account per access key, scanned with signed GET requests
-// only. Give the key's user AWS's managed SecurityAudit policy; nothing more.
+// AWS as a provider: one account per access key, scanned with signed GET requests,
+// and POST only for the read actions client.ts names. Give the key's user AWS's
+// managed SecurityAudit policy; nothing more.
 
 import { collectAws } from "./inventory.ts";
 import { evaluateAws } from "./engine.ts";

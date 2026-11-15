@@ -41,11 +41,8 @@ export function dash(inv: Pick<VercelInventory, "slug" | "personal">) {
   };
 }
 
-/** Names that usually hold a secret. Public keys meant for browsers (publishable, anon, site keys) are left out. */
-const SECRET_NAME =
-  /(SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE|API_?KEY|ACCESS_?KEY|_KEY$|^KEY$|CREDENTIAL|DATABASE_URL|POSTGRES_URL|REDIS_URL|MONGODB_URI|_DSN$|CONNECTION_STRING|SIGNING|SALT)/i;
-const PUBLIC_NAME = /(PUBLISHABLE|ANON_KEY|SITE_KEY|PUBLIC_KEY|_ID$|_URL$(?<!DATABASE_URL|POSTGRES_URL|REDIS_URL))/i;
-export const looksSecret = (key: string): boolean => SECRET_NAME.test(key) && !PUBLIC_NAME.test(key);
+/** Names that usually hold a secret: shared with the other providers. */
+export { looksSecret } from "../../../core/secret-patterns.ts";
 
 /** Prefixes that frameworks inline into the JavaScript sent to browsers. */
 export const PUBLIC_PREFIX = /^(NEXT_PUBLIC_|VITE_|REACT_APP_|NUXT_PUBLIC_|NUXT_ENV_|PUBLIC_|EXPO_PUBLIC_|GATSBY_|VUE_APP_|STORYBOOK_|SANITY_STUDIO_)/;

@@ -1,7 +1,8 @@
-// AWS Signature Version 4 for GET requests, with node:crypto and nothing else.
-// Keelson only reads, so the body is always empty; there is no way to sign a
-// request with a payload here. test/aws.test.ts checks it against AWS's published
-// example signature.
+// AWS Signature Version 4, with node:crypto and nothing else. Keelson only reads:
+// GET for the APIs that take it, and a POST with a JSON body only for the read
+// actions of APIs that answer nothing but POST (the client names them; see
+// client.ts). test/aws.test.ts checks both against AWS's published example
+// signatures.
 
 import { createHash, createHmac } from "node:crypto";
 
@@ -39,12 +40,29 @@ export const canonicalQuery = (query: Record<string, string>) =>
 
 /** The headers of a signed GET, including Authorization. Host is implied by the URL. */
 export function signGet(creds: AwsCredentials, input: SignInput): Record<string, string> {
+  return sign(creds, input, "GET", "");
+}
+
+/** The headers of a signed request with a body (a read action of a POST-only API), including Authorization. */
+export function signPost(creds: AwsCredentials, input: SignInput, body: string): Record<string, string> {
+  return sign(creds, input, "POST", body);
+}
+
+function sign(creds: AwsCredentials, input: SignInput, method: "GET" | "POST", body: string): Record<string, string> {
   const amzDate = (input.now ?? new Date()).toISOString().replace(/[-:]|\.\d{3}/g, "");
   const date = amzDate.slice(0, 8);
   const headers: Record<string, string> = { host: input.host, "x-amz-date": amzDate };
   for (const [k, v] of Object.entries(input.headers ?? {})) headers[k.toLowerCase()] = v.trim();
   const names = Object.keys(headers).sort();
-  const canonical = ["GET", input.path, canonicalQuery(input.query), ...names.map((n) => `${n}:${headers[n]}`), "", names.join(";"), EMPTY_SHA256].join("\n");
+  const canonical = [
+    method,
+    input.path,
+    canonicalQuery(input.query),
+    ...names.map((n) => `${n}:${headers[n]}`),
+    "",
+    names.join(";"),
+    body ? sha256(body) : EMPTY_SHA256,
+  ].join("\n");
   const scope = `${date}/${input.region}/${input.service}/aws4_request`;
   const toSign = ["AWS4-HMAC-SHA256", amzDate, scope, sha256(canonical)].join("\n");
   const key = hmac(hmac(hmac(hmac(`AWS4${creds.secretAccessKey}`, date), input.region), input.service), "aws4_request");

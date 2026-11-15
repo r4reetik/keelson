@@ -1,5 +1,6 @@
 // AWS scans end to end against the mocked AWS APIs (dev/mock/aws.ts): requests
-// are signed GETs and nothing else, secrets never reach storage, a region that
+// are signed GETs, or signed POSTs for read actions named in READ_ACTIONS and
+// nothing else, secrets never reach storage, a region that
 // refuses is skipped without failing the rest, and checks that span providers
 // compare against the entity's Cloudflare and Vercel accounts.
 
@@ -8,11 +9,22 @@ import assert from "node:assert/strict";
 import { Scanner } from "../src/scanner.ts";
 import { installMockCloudflare, MOCK_ACCOUNT } from "../dev/mock/cloudflare.ts";
 import { installMockVercel } from "../dev/mock/vercel.ts";
-import { installMockAws, MOCK_AWS_ACCOUNT, MOCK_AWS_KEY_ID, MOCK_AWS_SECRET_VALUE, MOCK_AWS_TOKEN, MOCK_AWS_USER_DATA_KEY, mockAws } from "../dev/mock/aws.ts";
+import {
+  installMockAws,
+  MOCK_AWS_ACCOUNT,
+  MOCK_AWS_BUILD_PASSWORD,
+  MOCK_AWS_KEY_ID,
+  MOCK_AWS_SECRET_VALUE,
+  MOCK_AWS_SNS_SECRET,
+  MOCK_AWS_TASK_TOKEN,
+  MOCK_AWS_TOKEN,
+  MOCK_AWS_USER_DATA_KEY,
+  mockAws,
+} from "../dev/mock/aws.ts";
 import { seedAccount, seedAws, seedVercel, testRepo } from "../dev/mock/accounts.ts";
 import { AWS_CHECKS } from "../src/providers/aws/catalog.ts";
-import { parseCredentials } from "../src/providers/aws/client.ts";
-import { signGet } from "../src/providers/aws/sigv4.ts";
+import { parseCredentials, READ_ACTION, READ_ACTIONS } from "../src/providers/aws/client.ts";
+import { signGet, signPost } from "../src/providers/aws/sigv4.ts";
 import { parseXml, items, text, bool, find } from "../src/providers/aws/xml.ts";
 import { PROVIDER } from "../src/providers/index.ts";
 import { ACCOUNT_ID_PATTERN, PROVIDERS, PROVIDER_INFO, providerForId, providerList, providerOfUrl, zoneWord } from "../src/shared/providers.ts";
@@ -34,6 +46,8 @@ const findingsOf = (repo: ReturnType<typeof setup>["repo"], id = MOCK_AWS_ACCOUN
 
 describe("AWS scan against the mocked API", () => {
   const methods = new Set<string>();
+  /** POSTs that aren't a read action Keelson names: must stay empty. */
+  const writes: string[] = [];
   const unsigned: string[] = [];
   let restore: () => void;
   const install = (o: Parameters<typeof installMockAws>[0] = {}) => {
@@ -42,15 +56,23 @@ describe("AWS scan against the mocked API", () => {
     const a = installMockAws({
       ...o,
       onRequest: (u, init) => {
-        methods.add(init?.method || "GET");
-        if (init?.body != null) methods.add("BODY");
+        const method = init?.method || "GET";
+        methods.add(method);
+        const target = new Headers(init?.headers).get("x-amz-target") ?? "";
+        if (method === "POST") {
+          // A read of a POST-only API: its service's allowlisted read action, named in X-Amz-Target.
+          const service = u.hostname.replace(/^api\./, "").split(".")[0];
+          const action = target.split(".").pop() ?? "";
+          if (!READ_ACTIONS[service]?.includes(action) || !READ_ACTION.test(action)) writes.push(`${service} ${target}`);
+        } else if (init?.body != null || method !== "GET") writes.push(`${method} ${u.href}`);
         const auth = new Headers(init?.headers).get("authorization") ?? "";
         // AWS's address ranges are a public file: it must be read without the access key.
         if (u.hostname === "ip-ranges.amazonaws.com") {
           if (auth) unsigned.push(`credential sent to ${u.hostname}`);
           return;
         }
-        if (!/^AWS4-HMAC-SHA256 Credential=.+SignedHeaders=host;.*x-amz-date.*Signature=[0-9a-f]{64}$/.test(auth)) unsigned.push(u.href);
+        if (!/^AWS4-HMAC-SHA256 Credential=.+SignedHeaders=[a-z0-9;-]*host;[a-z0-9;-]*x-amz-date[a-z0-9;-]*, Signature=[0-9a-f]{64}$/.test(auth))
+          unsigned.push(u.href);
       },
     });
     restore = () => {
@@ -65,7 +87,8 @@ describe("AWS scan against the mocked API", () => {
   test("reads only, finds what the mock data holds, and stores no secret", async () => {
     const { repo, scanner } = setup();
     await scanner.start("test").done;
-    assert.deepEqual([...methods], ["GET"], "the AWS scanner must only send GET requests without a body");
+    assert.deepEqual(writes, [], "the AWS scanner sends GETs, and POSTs only for the read actions it names");
+    assert.deepEqual([...methods].sort(), ["GET", "POST"]);
     assert.deepEqual(unsigned, [], "every API request is signed, and the public address-range file is read without the key");
 
     const findings = findingsOf(repo);
@@ -86,6 +109,8 @@ describe("AWS scan against the mocked API", () => {
     assert.ok(!stored.includes("AKIAMOCKALEX00000A1B2"), "only the last characters of an access key ID are kept");
     assert.ok(!stored.includes(MOCK_AWS_USER_DATA_KEY) && !stored.includes("systemctl"), "a start-up script is scanned, never stored");
     assert.ok(!/Statement|sts%3AAssumeRole/.test(stored), "policy documents aren't stored");
+    for (const secret of [MOCK_AWS_TASK_TOKEN, MOCK_AWS_BUILD_PASSWORD, MOCK_AWS_SNS_SECRET])
+      assert.ok(!stored.includes(secret), `a credential found in configuration is reported by kind, never stored: ${secret}`);
     assert.equal(repo.accounts.get(MOCK_AWS_ACCOUNT)!.name, "mock-aws", "the account takes its alias as its name");
   });
 
@@ -407,6 +432,30 @@ test("requests are signed as AWS's published example is", () => {
     },
   );
   assert.match(q.Authorization, /Signature=b97d918cfa904a5beff61c982a1b6f458b799221646efd99d3219ec94cdf2500$/);
+  // The "post-vanilla" and "post-x-www-form-urlencoded" cases: the body's hash is signed.
+  const creds = { accessKeyId: "AKIDEXAMPLE", secretAccessKey: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY" };
+  const base = { host: "example.amazonaws.com", path: "/", query: {}, region: "us-east-1", service: "service", now: new Date("2015-08-30T12:36:00Z") };
+  assert.match(
+    signPost(creds, base, "").Authorization,
+    /SignedHeaders=host;x-amz-date, Signature=5da7c1a2acd57cee7505fc6676e4e544621c30862966e37dddb68e92efbe5d6b$/,
+  );
+  assert.match(
+    signPost(creds, { ...base, headers: { "content-type": "application/x-www-form-urlencoded" } }, "Param1=value1").Authorization,
+    /SignedHeaders=content-type;host;x-amz-date, Signature=ff11897932ad3f4e8b18135d722051e5ac45fc38421b1da7b9d196a0fe09473a$/,
+  );
+});
+
+test("the AWS client sends a POST only for a read action it names", async () => {
+  for (const [service, actions] of Object.entries(READ_ACTIONS)) for (const a of actions) assert.match(a, READ_ACTION, `${service}:${a} reads`);
+  const { AwsClient } = await import("../src/providers/aws/client.ts");
+  const client = new AwsClient(parseCredentials(MOCK_AWS_TOKEN)!);
+  for (const [service, action] of [
+    ["kms", "ScheduleKeyDeletion"],
+    ["ecs", "RunTask"],
+    ["cloudtrail", "StopLogging"],
+    ["unknown", "ListThings"],
+  ])
+    await assert.rejects(client.rpc(service, "us-east-1", action), /isn't a read action/, `${service}:${action} is refused before anything is sent`);
 });
 
 test("credentials: a long-lived key pair, and nothing else", () => {

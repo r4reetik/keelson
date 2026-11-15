@@ -89,9 +89,13 @@ describe("GitHub scan against the mocked API", () => {
       "GID-003",
       "GID-004",
       "GID-005",
+      "GID-006",
+      "GID-007",
       "GBR-001",
       "GBR-002",
       "GBR-003",
+      "GBR-004",
+      "GRL-001",
       "GSC-001",
       "GSC-002",
       "GSC-003",
@@ -103,6 +107,8 @@ describe("GitHub scan against the mocked API", () => {
       "GAC-001",
       "GAC-002",
       "GAC-003",
+      "GAC-004",
+      "GAC-005",
       "GHK-001",
       "GHK-002",
       "GHK-003",
@@ -115,6 +121,22 @@ describe("GitHub scan against the mocked API", () => {
     assert.equal(branch("api").length, 0, "an organization ruleset protects api");
     assert.equal(branch("old-site").length + branch("scratch").length, 0, "archived and empty repositories have no branch to protect");
     assert.ok(!findings.some((f) => f.checkId === "GHK-004" && f.resource.startsWith("keelson")), "Keelson's own App isn't reported");
+    assert.deepEqual(
+      findings.filter((f) => f.checkId === "GBR-004").map((f) => f.zone),
+      ["infra"],
+      "only the branch whose approvals survive new commits",
+    );
+    const runnerFindings = Object.fromEntries(findings.filter((f) => f.checkId === "GAC-005").map((f) => [f.zone, f.severity]));
+    assert.deepEqual(
+      runnerFindings,
+      { web: "critical", handbook: "high" },
+      "web reaches a group's runner that keeps state; handbook has an ephemeral runner of its own; private api isn't judged",
+    );
+    assert.deepEqual(
+      findings.filter((f) => f.checkId === "GRL-001").map((f) => f.zone),
+      ["handbook"],
+      "only the repository that publishes releases",
+    );
     assert.ok(!findings.some((f) => f.checkId === "GHK-004" && f.resource === "mock-linter"), "an App on selected repositories isn't reported");
 
     const scan = repo.scans.latest(MOCK_GITHUB_ACCOUNT)!;
@@ -158,6 +180,22 @@ describe("GitHub scan against the mocked API", () => {
     assert.equal(snap.checks["GHK-001"], undefined, "no pass is recorded for a skipped check");
     const ids = new Set(repo.findings.forScan(result.scanId, repo.settings.get().slaDays).map((f) => f.checkId));
     assert.ok(!ids.has("GHK-001") && !ids.has("GHK-002") && ids.has("GID-001"));
+    restore();
+    install();
+  });
+
+  test("an App registered before Keelson read self-hosted runners reports the missing permission and skips the runner check", async () => {
+    restore();
+    install([/\/actions\/runner/]);
+    const { repo, scanner } = setup();
+    const [result] = await scanner.start("test").done;
+    const snap = JSON.parse(repo.scans.latest(MOCK_GITHUB_ACCOUNT)!.snapshot as string);
+    const gap = snap.coverage.find((c: { key: string }) => c.key === "runners");
+    assert.equal(gap.ok, false);
+    assert.match(gap.permission, /Self-hosted runners: Read-only/);
+    assert.ok(gap.skippedChecks.includes("GAC-005"));
+    const ids = new Set(repo.findings.forScan(result.scanId, repo.settings.get().slaDays).map((f) => f.checkId));
+    assert.ok(!ids.has("GAC-005") && ids.has("GAC-004"), "the fork pull request policy is still read");
     restore();
     install();
   });

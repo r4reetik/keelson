@@ -61,13 +61,14 @@ test("GitHub checks use the shared categories, link GitHub's docs, and every mod
 });
 
 test("classic protection and rulesets each protect a branch, and their rules combine", () => {
-  const classic = { reviews: 2, enforceAdmins: false, allowForcePushes: false, allowDeletions: true };
+  const classic = { reviews: 2, enforceAdmins: false, allowForcePushes: false, allowDeletions: true, dismissStale: false, lastPushApproval: false };
   assert.deepEqual(branchGuard(repo({ rules: [], protection: null })), {
     protected: false,
     pullRequests: false,
     reviews: 0,
     blocksForcePush: false,
     blocksDeletion: false,
+    freshApproval: false,
     adminsBypass: false,
   });
   const both = branchGuard(repo({ protection: classic, rules: [{ type: "deletion", reviews: null }] }));
@@ -119,4 +120,67 @@ test("an alert check only passes where its scanner runs, and an idle repository'
   const open = evaluateGithub(idle, opts()).findings.find((f) => f.checkId === "GBR-001" && !f.pass);
   assert.equal(open?.severity, "low");
   assert.match(open?.detail ?? "", /last push 2024-01-01/);
+});
+
+test("a public repository's runners are rated by whether they keep state and who must approve outside pull requests", () => {
+  const sev = (inv: ReturnType<typeof githubInventory>, zone = "web") =>
+    evaluateGithub(inv, opts()).findings.find((f) => f.checkId === "GAC-005" && f.zone === zone && !f.pass)?.severity;
+  const persistent = [{ name: "box", os: "Linux", ephemeral: false, groupId: null }];
+  const base = githubInventory();
+  assert.equal(sev(githubInventory({ repos: [repo({ runners: persistent })] })), "high", "every outside contributor waits for approval");
+  assert.equal(
+    sev(githubInventory({ forkPrs: { ...base.forkPrs!, approval: "first_time_contributors" }, repos: [repo({ runners: persistent })] })),
+    "critical",
+    "a contributor with one merged pull request runs code on a machine that keeps state",
+  );
+
+  // An organization group open to public repositories reaches the repositories it lists, and only those.
+  const group = (extra: object) =>
+    githubInventory({
+      runnerGroups: [{ id: 2, name: "farm", visibility: "selected", allowsPublic: true, restrictedToWorkflows: false, repos: ["web"], ...extra }],
+      runners: [{ name: "farm-1", os: "Linux", ephemeral: true, groupId: 2 }],
+    });
+  assert.equal(sev(group({})), "high");
+  assert.match(evaluateGithub(group({}), opts()).findings.find((f) => f.checkId === "GAC-005")?.detail ?? "", /farm-1; group farm/);
+  assert.equal(sev(group({ restrictedToWorkflows: true })), "medium", "only named workflows may use the group");
+  assert.equal(sev(group({ repos: ["docs"] })), undefined, "a group that doesn't list the repository doesn't reach it");
+  assert.equal(sev(group({ allowsPublic: false, visibility: "all" })), undefined, "a group closed to public repositories doesn't reach it");
+  assert.ok(
+    !evaluateGithub(group({ repos: null }), opts()).results.some((r) => r.checkId === "GAC-005"),
+    "a group whose repositories couldn't be read leaves the check unjudged",
+  );
+  assert.ok(
+    !evaluateGithub(githubInventory({ repos: [repo({ private: true, visibility: "private", runners: null })] }), opts()).results.some(
+      (r) => r.checkId === "GAC-005",
+    ),
+    "private repositories aren't judged",
+  );
+});
+
+test("fork pull requests that need approval are rated lower; a fresh approval counts from either rule; releases are judged only where they exist", () => {
+  const base = githubInventory();
+  const fork = evaluateGithub(
+    githubInventory({ forkPrs: { ...base.forkPrs!, private: { runs: true, secrets: false, writeTokens: true, needsApproval: true } } }),
+    opts(),
+  ).findings.find((f) => f.checkId === "GAC-004" && !f.pass);
+  assert.equal(fork?.severity, "medium");
+  assert.match(fork?.detail ?? "", /a token that can write, after a maintainer approves/);
+
+  const stale = (rule: object) =>
+    evaluateGithub(githubInventory({ repos: [repo({ rules: [{ type: "pull_request", reviews: 1, ...rule }] })] }), opts()).findings.some(
+      (f) => f.checkId === "GBR-004" && !f.pass,
+    );
+  assert.equal(stale({ lastPushApproval: true }), false, "the last push must be approved by someone else");
+  assert.equal(stale({ dismissStale: true }), false);
+  assert.equal(stale({}), true);
+  assert.ok(
+    !evaluateGithub(githubInventory({ repos: [repo({ rules: [{ type: "pull_request", reviews: 0 }] })] }), opts()).results.some((r) => r.checkId === "GBR-004"),
+    "no required approval, nothing to go stale",
+  );
+  const classic = { reviews: 1, enforceAdmins: true, allowForcePushes: false, allowDeletions: false, dismissStale: true, lastPushApproval: false };
+  assert.equal(branchGuard(repo({ rules: [], protection: classic })).freshApproval, true);
+
+  assert.ok(
+    !evaluateGithub(githubInventory({ repos: [repo({ releases: false, immutableReleases: null })] }), opts()).results.some((r) => r.checkId === "GRL-001"),
+  );
 });

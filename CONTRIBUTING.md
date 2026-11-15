@@ -45,7 +45,7 @@ src/
   providers/            the Provider interface (types.ts), the registry (index.ts), every provider's checks (catalog.ts)
     cloudflare.ts       Cloudflare as a provider: an adapter over core/
     vercel/             Vercel: client.ts (GET only), sources.ts, inventory.ts, checks/, views.ts, permissions.ts
-    aws/                AWS: client.ts (signed GET only; sigv4.ts, xml.ts), sources.ts, inventory.ts, checks/, views.ts, permissions.ts
+    aws/                AWS: client.ts (signed GET, and POST only for named read actions; sigv4.ts, xml.ts), sources.ts, inventory.ts, services.ts, policy.ts, checks/, views.ts, permissions.ts
     github/             GitHub: client.ts (GitHub App JWT, one read-only token POST, then GET only), sources.ts, inventory.ts, checks/, views.ts, permissions.ts
   store/                SQLite: migrations (db.ts) and one repository per concern behind Repo
   server/               Hono app: routes/, guards in middleware.ts, validation, presentation

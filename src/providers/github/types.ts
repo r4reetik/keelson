@@ -18,6 +18,10 @@ export interface GithubOrg {
   defaultRepoPermission: string | null;
   membersCanCreatePublicRepos: boolean | null;
   membersCanForkPrivateRepos: boolean | null;
+  /** Whether members with admin access to a repository can delete or transfer it. */
+  membersCanDeleteRepos: boolean | null;
+  /** Whether members with admin access to a repository can change it between private and public. */
+  membersCanChangeVisibility: boolean | null;
 }
 
 export interface BranchProtection {
@@ -26,6 +30,10 @@ export interface BranchProtection {
   enforceAdmins: boolean;
   allowForcePushes: boolean;
   allowDeletions: boolean;
+  /** A new push dismisses earlier approvals. */
+  dismissStale: boolean;
+  /** The last push must be approved by someone other than whoever pushed it. */
+  lastPushApproval: boolean;
 }
 
 /** One rule of a ruleset that applies to the default branch. */
@@ -33,6 +41,42 @@ export interface BranchRule {
   type: string;
   /** For "pull_request": approving reviews required. */
   reviews: number | null;
+  /** For "pull_request": a new push dismisses earlier approvals. */
+  dismissStale?: boolean;
+  /** For "pull_request": the last push must be approved by someone other than whoever pushed it. */
+  lastPushApproval?: boolean;
+}
+
+/** A self-hosted runner: a machine of the organization's that runs workflow jobs. */
+export interface SelfHostedRunner {
+  name: string;
+  os: string;
+  /** Takes one job and is then removed, so a job can't leave anything behind for the next. */
+  ephemeral: boolean;
+  /** The organization runner group it belongs to; null for a repository's own runner. */
+  groupId: number | null;
+}
+
+/** An organization's runner group: which repositories may send jobs to its runners. */
+export interface RunnerGroup {
+  id: number;
+  name: string;
+  /** "all", "selected" or "private" repositories. */
+  visibility: string;
+  /** Public repositories may use it (an enterprise's group says so for its organizations). */
+  allowsPublic: boolean;
+  /** Only the workflows it names may use it. */
+  restrictedToWorkflows: boolean;
+  /** For "selected": the repositories' names; null when they couldn't be read. */
+  repos: string[] | null;
+}
+
+/** Whether pull requests from forks run workflows, and with what. */
+export interface ForkPrPolicy {
+  /** Public repositories: whose fork pull requests wait for a maintainer before workflows run. */
+  approval: string | null;
+  /** Private repositories: null when GitHub didn't answer (the plan doesn't offer it). */
+  private: { runs: boolean; secrets: boolean; writeTokens: boolean; needsApproval: boolean } | null;
 }
 
 export interface GithubHook {
@@ -68,6 +112,12 @@ export interface GithubRepo {
   codeScanning: boolean | null;
   /** The Pages site: null when there is none, undefined when it couldn't be read. */
   pages: { cname: string | null; httpsEnforced: boolean | null } | null | undefined;
+  /** Public repositories only: the repository's own self-hosted runners; null when not read. */
+  runners: SelfHostedRunner[] | null;
+  /** Public repositories only: whether it has published a release; null when not read. */
+  releases: boolean | null;
+  /** Where it publishes releases: whether they're immutable once published; null when not read. */
+  immutableReleases: boolean | null;
 }
 
 export interface GithubActions {
@@ -135,6 +185,10 @@ export interface GithubInventory {
   actions: GithubActions | null;
   hooks: GithubHook[] | null;
   apps: OtherApp[] | null;
+  forkPrs: ForkPrPolicy | null;
+  runnerGroups: RunnerGroup[] | null;
+  /** The organization's self-hosted runners. */
+  runners: SelfHostedRunner[] | null;
   repos: GithubRepo[];
   dependabot: DependabotAlert[] | null;
   codeScanning: CodeScanningAlert[] | null;

@@ -29,8 +29,9 @@ AWS access keys, GitHub App private keys), and a database describing accounts' c
   as POST, as Cloudflare requires, and only ever queries). Use a Cloudflare token with read permissions;
   Keelson never needs anything else. Vercel can't issue read-only tokens, so a Vercel token can do what its
   user's role allows: Keelson still only sends GET requests to Vercel, and tests fail on anything else.
-  For AWS, give the access key's user only the managed SecurityAudit policy; Keelson sends signed GET requests
-  and nothing else, so services whose APIs only answer POST (CloudTrail, KMS, Config) aren't read.
+  For AWS, give the access key's user only the managed SecurityAudit policy; Keelson sends signed GET requests,
+  and to services whose APIs only accept POST (CloudTrail, KMS, ECS and others) only the read actions it names
+  (Describe, List, Get). The client refuses any other action before sending it, and tests fail on anything else.
   For GitHub, register the App with read-only permissions. On each scan Keelson signs a short-lived JWT with the
   App's private key and sends one POST to GitHub, for an installation token limited to the read permissions it
   needs, so a token Keelson holds can't write even if the App can. Every other request is GET, and tests fail on

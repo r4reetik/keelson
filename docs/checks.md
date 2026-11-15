@@ -35,20 +35,21 @@ of those accounts, and are skipped when the entity has no scanned account on the
 | Vercel | [Platform](#vercel-platform) | 4 |
 | Vercel | [Monitoring](#vercel-monitoring) | 4 |
 | Vercel | [Change risk](#vercel-change-risk) | 1 |
-| AWS | [Attack surface](#aws-attack-surface) | 10 |
-| AWS | [Identity & access](#aws-identity--access) | 15 |
-| AWS | [Secrets](#aws-secrets) | 1 |
-| AWS | [TLS & HTTPS](#aws-tls--https) | 5 |
-| AWS | [WAF & bots](#aws-waf--bots) | 2 |
+| AWS | [Attack surface](#aws-attack-surface) | 28 |
+| AWS | [Identity & access](#aws-identity--access) | 19 |
+| AWS | [Secrets](#aws-secrets) | 10 |
+| AWS | [TLS & HTTPS](#aws-tls--https) | 11 |
+| AWS | [WAF & bots](#aws-waf--bots) | 4 |
 | AWS | [DNS](#aws-dns) | 4 |
-| AWS | [Platform](#aws-platform) | 5 |
-| AWS | [Monitoring](#aws-monitoring) | 3 |
-| GitHub | [Identity & access](#github-identity--access) | 7 |
-| GitHub | [Deployments](#github-deployments) | 3 |
+| AWS | [Platform](#aws-platform) | 15 |
+| AWS | [Monitoring](#aws-monitoring) | 8 |
+| AWS | [Change risk](#aws-change-risk) | 2 |
+| GitHub | [Identity & access](#github-identity--access) | 9 |
+| GitHub | [Deployments](#github-deployments) | 5 |
 | GitHub | [Secrets](#github-secrets) | 3 |
 | GitHub | [TLS & HTTPS](#github-tls--https) | 3 |
 | GitHub | [Platform](#github-platform) | 5 |
-| GitHub | [Change risk](#github-change-risk) | 3 |
+| GitHub | [Change risk](#github-change-risk) | 5 |
 
 ## Cloudflare
 
@@ -1864,6 +1865,16 @@ Connect the repository under Settings → Git, and deploy through pull requests.
 
 ### AWS: Attack surface
 
+#### ANW-004: Transit gateway joins shared VPCs without approval
+
+**Severity:** Medium · **Reads:** Transit gateways · [AWS docs](https://docs.aws.amazon.com/vpc/latest/tgw/tgw-transit-gateways.html#tgw-modifying)
+
+Any account the transit gateway is shared with can attach a VPC and reach the networks behind it, without anyone in this account accepting it.
+
+**How to fix**
+
+In VPC → Transit gateways → the gateway → Modify, untick Auto accept shared attachments, and accept each attachment by hand.
+
 #### AS3-001: S3 Block Public Access is off for the account
 
 **Severity:** Medium · **Reads:** S3 Block Public Access for the account, S3 buckets · [AWS docs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/configuring-block-public-access-account.html)
@@ -1958,6 +1969,56 @@ Anyone who finds the URL can invoke the function. Unless the function checks cal
 
 If the function isn't a public endpoint, set its function URL's auth type to AWS_IAM under Lambda → the function → Configuration → Function URL. If it is public on purpose and checks requests itself, mark this as accepted.
 
+#### AEC-012: Snapshots and machine images can still be made public
+
+**Severity:** Low · **Reads:** Blocks on sharing snapshots and images publicly · [AWS docs](https://docs.aws.amazon.com/ebs/latest/userguide/block-public-access-snapshots.html)
+
+Anyone in the account who can change a snapshot's or image's permissions can share it with everyone, and with it the data on its disks. A block on public sharing stops that for the whole region.
+
+**How to fix**
+
+In EC2 → Settings → Data protection and security, turn on Block public access for EBS snapshots (Block all public sharing) and for AMIs.
+
+#### AEC-013: Lambda function's policy lets anyone invoke it
+
+**Severity:** Critical · **Attack path** · **Reads:** Lambda functions and function URLs, Lambda function policies · [AWS docs](https://docs.aws.amazon.com/lambda/latest/dg/access-control-resource-based.html)
+
+Its resource policy allows any AWS account, or anyone, to call it without a condition. They can run it with whatever input they choose, as its role, and on your bill.
+
+**How to fix**
+
+In Lambda → the function → Configuration → Permissions → Resource-based policy statements, remove the statement for "*", or add a condition that names the source (aws:SourceArn or aws:SourceAccount).
+
+#### AEC-015: SageMaker notebook has direct internet access
+
+**Severity:** Medium · **Reads:** SageMaker notebook instances · [AWS docs](https://docs.aws.amazon.com/sagemaker/latest/dg/appendix-notebook-and-internet-access.html)
+
+The notebook can reach anywhere on the internet outside your VPC's controls, so code or data in it can leave without passing any firewall or log you run.
+
+**How to fix**
+
+Notebook instances can't change this in place: create a new one in a VPC subnet with Direct internet access disabled, give it a NAT gateway or VPC endpoints for what it needs, and move the work over.
+
+#### ACN-001: EKS API endpoint is open to the whole internet
+
+**Severity:** High · **Attack path** · **Reads:** EKS clusters · [AWS docs](https://docs.aws.amazon.com/eks/latest/userguide/cluster-endpoint.html)
+
+Anyone can reach the cluster's Kubernetes API. One leaked kubeconfig, token or API vulnerability is then enough to control the workloads, without being on your network.
+
+**How to fix**
+
+In EKS → the cluster → Networking → Manage endpoint access, turn on private access, and either turn public access off or limit it to your offices' and CI's address ranges.
+
+#### ACN-006: ECR repository is public
+
+**Severity:** Critical · **Attack path** · **Reads:** ECR repositories, their policies and image scanning · [AWS docs](https://docs.aws.amazon.com/AmazonECR/latest/userguide/repository-policies.html)
+
+Its repository policy lets anyone pull images, and with them any code, configuration or secrets built into them. If it also allows pushing, anyone can replace the images your services run.
+
+**How to fix**
+
+In ECR → the repository → Permissions, remove the statement for "*" or name the accounts and roles that need access. Use ECR Public for images meant to be public.
+
 #### ADB-001: Database is publicly accessible
 
 **Severity:** High · **Attack path** · **Reads:** RDS databases, Security groups · [AWS docs](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_VPC.WorkingWithRDSInstanceinaVPC.html#USER_VPC.Hiding)
@@ -1968,6 +2029,128 @@ The database has a public address. Only its security group and its password keep
 
 1. In RDS → the database → Modify → Connectivity → Additional configuration, choose Not publicly accessible.
 2. Reach it from inside the VPC, through a VPN, or with Session Manager port forwarding.
+
+#### ADB-004: Database snapshot is public
+
+**Severity:** Critical · **Attack path** · **Reads:** RDS manual snapshots and who may restore them · [AWS docs](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_ShareSnapshot.html)
+
+Any AWS account can restore the snapshot and read the whole database as it was, with no password and nothing in your logs.
+
+**How to fix**
+
+In RDS → Snapshots → Manual → the snapshot → Actions → Share snapshot, set DB snapshot visibility to Private. If it may already have been copied, treat its data and credentials as exposed.
+
+#### ADB-006: OpenSearch domain is open to anyone
+
+**Severity:** Critical · **Attack path** · **Reads:** OpenSearch domains · [AWS docs](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/ac.html)
+
+The domain has a public endpoint and an access policy that lets anyone in, so anyone who finds it can search, change and delete its indexes.
+
+**How to fix**
+
+1. Replace the access policy with one that names your IAM roles or address ranges.
+2. Turn on fine-grained access control.
+3. Better, move the domain into a VPC: create a new one with VPC access and restore a snapshot into it.
+
+#### ADB-011: Redshift cluster is publicly accessible
+
+**Severity:** High · **Attack path** · **Reads:** Redshift clusters · [AWS docs](https://docs.aws.amazon.com/redshift/latest/mgmt/managing-clusters-vpc.html)
+
+The data warehouse has a public address. Only its security group and passwords stand between the internet and your data.
+
+**How to fix**
+
+In Redshift → the cluster → Actions → Modify publicly accessible setting, turn it off, and reach the cluster from inside the VPC or through a VPN.
+
+#### ASC-007: Systems Manager document is shared with everyone
+
+**Severity:** High · **Reads:** Systems Manager documents and who they're shared with · [AWS docs](https://docs.aws.amazon.com/systems-manager/latest/userguide/documents-ssm-sharing.html)
+
+Any AWS account can read the document, and with it the commands, script paths, hostnames and sometimes credentials it holds.
+
+**How to fix**
+
+In Systems Manager → Documents → Owned by me → the document → Permissions, choose Private, and share with named accounts only. The account setting Block public sharing stops it happening again.
+
+#### ASC-009: CodeBuild project's builds are public
+
+**Severity:** Medium · **Reads:** CodeBuild projects (environment variables scanned for credentials, never stored) · [AWS docs](https://docs.aws.amazon.com/codebuild/latest/userguide/public-builds.html)
+
+Anyone on the internet can read the project's build logs and artifacts, which often show paths, versions, hostnames and the output of every command.
+
+**How to fix**
+
+In CodeBuild → the project → Edit → Project configuration, set Public build access off.
+
+#### AMQ-001: SNS topic lets anyone publish or subscribe
+
+**Severity:** High · **Reads:** SNS topics, their policies and subscriptions · [AWS docs](https://docs.aws.amazon.com/sns/latest/dg/sns-access-policy-use-cases.html)
+
+The topic policy allows "*" without a condition, so any AWS account can send messages to everything subscribed, or subscribe and receive what you publish.
+
+**How to fix**
+
+In SNS → the topic → Access policy, remove the statement for "*" or add a condition that names the source (aws:SourceAccount, aws:SourceArn) or your organization (aws:PrincipalOrgID).
+
+#### AMQ-003: SQS queue lets anyone send or read messages
+
+**Severity:** High · **Reads:** SQS queues and their policies · [AWS docs](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-basic-examples-of-sqs-policies.html)
+
+The queue policy allows "*" without a condition, so any AWS account can put messages your consumers will act on, or read and delete the ones meant for them.
+
+**How to fix**
+
+In SQS → the queue → Access policy, remove the statement for "*" or add a condition (aws:SourceArn for an SNS topic or S3 bucket, aws:PrincipalOrgID for your organization).
+
+#### AMQ-004: Amazon MQ broker is publicly accessible
+
+**Severity:** High · **Attack path** · **Reads:** Amazon MQ brokers · [AWS docs](https://docs.aws.amazon.com/amazon-mq/latest/developer-guide/amazon-mq-security.html)
+
+The broker and its web console have public addresses, so only its users' passwords keep the internet from your messages.
+
+**How to fix**
+
+Public accessibility can't be changed in place: create a private broker in your VPC, move producers and consumers to it, and delete the public one.
+
+#### AMQ-005: Kafka cluster accepts unauthenticated or unencrypted clients
+
+**Severity:** High · **Reads:** MSK (Kafka) clusters · [AWS docs](https://docs.aws.amazon.com/msk/latest/developerguide/msk-authentication.html)
+
+Clients can connect without proving who they are, or in plain text, so anyone who reaches the brokers can read and write every topic, or watch the traffic.
+
+**How to fix**
+
+In MSK → the cluster → Properties → Security settings, turn on IAM, SASL/SCRAM or TLS client authentication and turn off unauthenticated access; set encryption between clients and brokers to TLS only. Turn off public access unless clients outside AWS need it.
+
+#### AMQ-006: EventBridge event bus accepts events from any account
+
+**Severity:** High · **Reads:** EventBridge event buses · [AWS docs](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-event-bus-perms.html)
+
+The bus policy allows "*" without a condition, so any AWS account can put events that your rules then act on: start workflows, invoke functions, send notifications.
+
+**How to fix**
+
+In EventBridge → Event buses → the bus → Permissions, name the accounts that may send events, or add an aws:PrincipalOrgID condition for your organization.
+
+#### AED-009: Load balancer passes ambiguous HTTP requests to its targets
+
+**Severity:** Low · **Reads:** Load balancers and listeners · [AWS docs](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/application-load-balancers.html#desync-mitigation-mode)
+
+Desync mitigation is in monitor mode, so requests that the load balancer and the application could read differently are passed on. That is how HTTP request smuggling slips requests past the load balancer's rules.
+
+**How to fix**
+
+In EC2 → Load Balancers → the load balancer → Attributes → Edit, set Desync mitigation mode to Defensive (the default) or Strictest.
+
+#### AED-010: CloudFront serves from an S3 bucket that doesn't exist
+
+**Severity:** High · **Attack path** · **Reads:** CloudFront distributions · [AWS docs](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistS3AndCustomOrigins.html)
+
+The distribution's origin is a bucket nobody owns. Anyone can create a bucket with that name in their own account and serve their content on your distribution's hostnames.
+
+**How to fix**
+
+Create the bucket in this account now so the name is yours, then point the origin at the bucket that should serve the content, or remove the origin and its behaviours.
 
 ### AWS: Identity & access
 
@@ -2091,6 +2274,50 @@ Another company's AWS account can assume this role with nothing but its own perm
 3. If it is a vendor's, add a Condition that requires the external ID they gave you (sts:ExternalId).
 4. If nobody uses the role any more, delete it.
 
+#### AID-013: IAM identity can give itself more access
+
+**Severity:** High · **Attack path** · **Reads:** IAM roles, groups and policies · [AWS docs](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_manage-edit.html)
+
+Its policies aren't administrator access, but they let it get there: change or attach a policy, create keys or passwords for other users, or hand a stronger role to an instance or function it starts. Whoever holds its credentials can take over the account.
+
+**How to fix**
+
+1. Open the policy named in the finding.
+2. Remove the IAM actions listed, or limit them to named resources (Resource with an ARN, not "*").
+3. For iam:PassRole, name the roles it may pass and add an iam:PassedToService condition.
+
+#### AID-014: Cognito identity pool gives AWS credentials to anyone
+
+**Severity:** Medium · **Reads:** Cognito user pools and identity pools · [AWS docs](https://docs.aws.amazon.com/cognito/latest/developerguide/identity-pools.html#authenticated-and-unauthenticated-identities)
+
+Guest access is on, so anyone on the internet can get temporary AWS credentials for the pool's guest role, without signing in. Whatever that role may do, they can do.
+
+**How to fix**
+
+In Cognito → Identity pools → the pool → User access, turn off Guest access. If guests need it, give the guest role only the few actions they need, on named resources.
+
+#### AID-015: Cognito user pool doesn't offer multi-factor sign-in
+
+**Severity:** Low · **Reads:** Cognito user pools and identity pools · [AWS docs](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-mfa.html)
+
+Users can only sign in with a password, so a reused or phished password is enough to take over their account in your application.
+
+**How to fix**
+
+In Cognito → User pools → the pool → Authentication methods → Multi-factor authentication, choose Optional MFA (or Require MFA for staff-only pools) and turn on authenticator apps.
+
+#### AS3-004: Bucket policy lets an AWS account outside the entity in
+
+**Severity:** Medium · **Reads:** S3 bucket policies (reduced to the accounts they allow, never stored) · [AWS docs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/example-walkthroughs-managing-access-example2.html)
+
+Another AWS account can read or write the bucket with its own credentials. If it belongs to a former vendor or partner, or was never yours, it keeps that access, and you see none of its activity in your own logs.
+
+**How to fix**
+
+1. Open the bucket → Permissions → Bucket policy.
+2. If the account is one of yours, add it to this entity in Keelson.
+3. Otherwise remove the statement that names it, or narrow it to the objects and actions it needs.
+
 #### AEC-007: Internet-facing instance runs with administrator access
 
 **Severity:** High · **Attack path** · **Reads:** EC2 instances, Security groups, IAM roles, groups and policies · [AWS docs](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_switch-role-ec2.html)
@@ -2150,7 +2377,146 @@ User data isn't a secret store: anyone who can describe the instance can read it
 2. Move it to Secrets Manager or Systems Manager Parameter Store, and let the script read it at start-up with the instance's role.
 3. Replace the instance (or its launch template) so the old script is gone.
 
+#### AEC-010: Credential in a launch template's start-up script
+
+**Severity:** High · **Reads:** EC2 launch templates (start-up scripts scanned for credentials, never stored) · [AWS docs](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/user-data.html)
+
+Anyone who can describe launch templates or reach an instance's metadata can read the start-up script, and the credential written into it. It also lands on every instance started from the template.
+
+**How to fix**
+
+1. Rotate the credential.
+2. Create a new template version that reads it at start-up from Secrets Manager or Parameter Store through the instance role.
+3. Make that version the default and delete the old ones.
+
+#### AEC-014: Credential in a Lambda function's environment variables
+
+**Severity:** High · **Reads:** Lambda functions and function URLs · [AWS docs](https://docs.aws.amazon.com/lambda/latest/dg/configuration-envvars.html#configuration-envvars-encryption)
+
+Anyone who can read the function's configuration, including read-only roles and tools like this one, sees the value in clear text. It's also copied into every version of the function.
+
+**How to fix**
+
+1. Rotate the credential.
+2. Store it in Secrets Manager or Parameter Store and read it at start-up through the function's role.
+3. Remove the variable and publish a new version.
+
+#### ACN-005: Credential in an ECS task definition's environment variables
+
+**Severity:** High · **Reads:** ECS services and their task definitions (environment variables scanned for credentials, never stored) · [AWS docs](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/secrets-envvar-secrets-manager.html)
+
+Task definitions are readable by anyone who can describe them, in every revision ever registered, so the credential is in clear text for every read-only role and tool.
+
+**How to fix**
+
+1. Rotate the credential.
+2. Store it in Secrets Manager or Parameter Store.
+3. Register a revision that passes it under secrets (valueFrom) instead of environment, and deregister the old revisions.
+
+#### ASC-001: Secret's resource policy lets anyone read it
+
+**Severity:** Critical · **Attack path** · **Reads:** Secrets Manager secrets (names and dates, never values) and their resource policies · [AWS docs](https://docs.aws.amazon.com/secretsmanager/latest/userguide/auth-and-access_resource-policies.html)
+
+Its resource policy allows "*" without a condition, so any AWS account can read the secret's value.
+
+**How to fix**
+
+1. Rotate the secret now.
+2. In Secrets Manager → the secret → Resource permissions, remove the statement for "*", or name the accounts and roles that need it. Secrets Manager's Block public policy option refuses such statements in future.
+
+#### ASC-002: Secret hasn't changed in over a year
+
+**Severity:** Low · **Reads:** Secrets Manager secrets (names and dates, never values) and their resource policies · [AWS docs](https://docs.aws.amazon.com/secretsmanager/latest/userguide/rotating-secrets.html)
+
+The same value has been in use for more than a year, so anyone who copied it at any point in that time, a former employee or a leaked log, can still use it.
+
+**How to fix**
+
+Turn on rotation in Secrets Manager → the secret → Rotation, with a rotation function for databases and AWS services. For a third party's API key, issue a new key, store it, and revoke the old one.
+
+#### ASC-003: Secret unused for 90 days
+
+**Severity:** Low · **Reads:** Secrets Manager secrets (names and dates, never values) and their resource policies · [AWS docs](https://docs.aws.amazon.com/secretsmanager/latest/userguide/manage_delete-secret.html)
+
+Nothing has read the secret in three months, so it most likely guards something no longer in use, while the credential itself still works.
+
+**How to fix**
+
+Find out what it was for. Revoke the credential at its source, then delete the secret in Secrets Manager (it can be restored during the recovery window).
+
+#### ASC-004: KMS key policy lets anyone use the key
+
+**Severity:** High · **Attack path** · **Reads:** KMS keys, their rotation and key policies · [AWS docs](https://docs.aws.amazon.com/kms/latest/developerguide/key-policies.html)
+
+The key policy allows "*" without a condition, so other AWS accounts can decrypt data encrypted with it, or use it to encrypt yours.
+
+**How to fix**
+
+In KMS → the key → Key policy → Edit, replace the "*" principal with your account and the roles that use the key, or add a condition (aws:PrincipalOrgID, kms:CallerAccount).
+
+#### ASC-005: KMS key doesn't rotate automatically
+
+**Severity:** Low · **Reads:** KMS keys, their rotation and key policies · [AWS docs](https://docs.aws.amazon.com/kms/latest/developerguide/rotate-keys.html)
+
+The same key material encrypts everything for as long as the key exists. Yearly rotation limits how much data any one version of the key protects, at no cost to existing data.
+
+**How to fix**
+
+In KMS → the key → Key rotation, turn on Automatically rotate this KMS key (every 365 days, or a shorter period).
+
+#### ASC-008: Credential in a CodeBuild project
+
+**Severity:** High · **Reads:** CodeBuild projects (environment variables scanned for credentials, never stored) · [AWS docs](https://docs.aws.amazon.com/codebuild/latest/userguide/build-env-ref-env-vars.html)
+
+A plain-text environment variable or a source URL with a password in it is readable by anyone who can view the project, and shows in build logs.
+
+**How to fix**
+
+1. Rotate the credential.
+2. Store it in Secrets Manager or Parameter Store and reference it with the SECRETS_MANAGER or PARAMETER_STORE variable type.
+3. Connect the source with a CodeConnections connection instead of a URL with a password.
+
 ### AWS: TLS & HTTPS
+
+#### ADB-005: Database accepts connections without TLS
+
+**Severity:** Medium · **Reads:** RDS databases, RDS parameters that require TLS · [AWS docs](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html)
+
+Clients may connect in plain text, so passwords and query results cross the network unencrypted, and anyone on that path can read or change them.
+
+**How to fix**
+
+In the database's parameter group (its cluster parameter group for Aurora), set rds.force_ssl to 1 for PostgreSQL, or require_secure_transport to ON for MySQL and MariaDB, after checking that every client connects with TLS.
+
+#### ADB-008: OpenSearch domain accepts plain HTTP or TLS 1.0
+
+**Severity:** Medium · **Reads:** OpenSearch domains · [AWS docs](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/infrastructure-security.html)
+
+Clients can send queries and credentials in plain text or over an old TLS version that can be broken.
+
+**How to fix**
+
+In OpenSearch → the domain → Actions → Edit, under Encryption, turn on Require HTTPS for all traffic and choose a TLS security policy with TLS 1.2 as the minimum.
+
+#### ADB-009: Cache accepts unencrypted connections
+
+**Severity:** Medium · **Reads:** ElastiCache clusters · [AWS docs](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/in-transit-encryption.html)
+
+Whatever the cache holds (sessions, tokens, cached query results) crosses the network in plain text.
+
+**How to fix**
+
+Modify the cluster to turn on encryption in transit, first in preferred mode while clients move to TLS, then in required mode.
+
+#### AMQ-002: SNS delivers messages over plain HTTP
+
+**Severity:** Medium · **Reads:** SNS topics, their policies and subscriptions · [AWS docs](https://docs.aws.amazon.com/sns/latest/dg/sns-http-https-endpoint-as-subscriber.html)
+
+Messages, and any data in them, cross the internet unencrypted to the subscriber, where anyone on the path can read or change them.
+
+**How to fix**
+
+Subscribe the endpoint again with an https:// URL, confirm the new subscription, and delete the http one.
 
 #### AED-001: CloudFront distribution serves plain HTTP
 
@@ -2202,6 +2568,26 @@ The listener's security policy still negotiates TLS 1.0 or 1.1, which have known
 
 In EC2 → Load Balancers → the load balancer → Listeners, edit the HTTPS listener and choose the recommended policy, ELBSecurityPolicy-TLS13-1-2-2021-06 or newer.
 
+#### AED-011: Certificate in use won't renew and is about to expire
+
+**Severity:** Medium · **Reads:** ACM certificates · [AWS docs](https://docs.aws.amazon.com/acm/latest/userguide/check-certificate-renewal-status.html)
+
+The certificate is imported, or ACM can't renew it, so when it expires every load balancer, distribution or API that uses it stops working for visitors.
+
+**How to fix**
+
+For an imported certificate, get a new one from its issuer and reimport it under the same ARN. For an ACM certificate, fix what blocks renewal (usually the DNS validation record) in ACM → the certificate → Renewal status.
+
+#### AED-012: IAM server certificate has expired
+
+**Severity:** Medium · **Reads:** IAM server certificates · [AWS docs](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_server-certs.html)
+
+An expired certificate still attached to a load balancer or distribution breaks HTTPS for its visitors, and an old one left in IAM can be attached again by mistake.
+
+**How to fix**
+
+Move whatever uses it to a certificate from ACM, which renews itself, then delete it with aws iam delete-server-certificate.
+
 ### AWS: WAF & bots
 
 #### AED-003: CloudFront distribution has no web ACL
@@ -2213,6 +2599,26 @@ Requests reach the application behind the distribution without AWS WAF looking a
 **How to fix**
 
 In CloudFront → the distribution → Security, enable AWS WAF protections. Start with the core managed rules and a rate limit. If another WAF sits in front of this distribution (Cloudflare, for example), mark this as accepted.
+
+#### AED-007: Internet-facing application load balancer has no web ACL
+
+**Severity:** Medium · **Reads:** Load balancers and listeners, WAF web ACLs, their logging and what they protect, CloudFront distributions · [AWS docs](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-associating-aws-resource.html)
+
+Requests reach the application with nothing filtering common attacks, bad bots or floods from single addresses, and no way to block an address quickly during an incident.
+
+**How to fix**
+
+In WAF & Shield → Web ACLs, create a web ACL in the load balancer's region with AWS's managed core rule set and a rate-based rule, and associate it with the load balancer. A distribution with a web ACL in front of it, and the load balancer locked to CloudFront, also works.
+
+#### AED-008: WAF web ACL has no rules
+
+**Severity:** Medium · **Reads:** WAF web ACLs, their logging and what they protect · [AWS docs](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-editing.html)
+
+The web ACL is in place but has no rules, so it only applies its default action to everything: it looks like protection and filters nothing.
+
+**How to fix**
+
+In WAF & Shield → Web ACLs → the web ACL → Rules → Add rules, add AWS's managed core rule set and known bad inputs rule set, and a rate-based rule.
 
 #### XP-006: Origin behind Cloudflare accepts traffic from the whole internet
 
@@ -2311,6 +2717,56 @@ AWS has stopped patching this runtime, so vulnerabilities in the language and it
 
 Test the function on a supported runtime, then change it under Lambda → the function → Code → Runtime settings → Edit.
 
+#### AEC-009: Launch template allows IMDSv1
+
+**Severity:** Medium · **Reads:** EC2 launch templates (start-up scripts scanned for credentials, never stored) · [AWS docs](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-IMDS-new-instances.html)
+
+Every instance started from it, by an Auto Scaling group or by hand, answers the old metadata service, so a server-side request forgery in its software can read the instance role's credentials.
+
+**How to fix**
+
+Create a new version of the launch template with Metadata version set to V2 only (token required), make it the default, and start an instance refresh on the Auto Scaling groups that use it.
+
+#### AEC-011: EBS volume isn't encrypted
+
+**Severity:** Low · **Reads:** EBS volumes · [AWS docs](https://docs.aws.amazon.com/ebs/latest/userguide/ebs-encryption.html)
+
+The volume, and every snapshot taken of it, is stored in the clear. An unencrypted snapshot can be shared or copied to another account as it is.
+
+**How to fix**
+
+Volumes can't be encrypted in place. Snapshot the volume, copy the snapshot with encryption on, create a volume from the copy and swap it in. Turn on EBS encryption by default so new volumes are encrypted.
+
+#### ACN-003: EKS cluster runs a Kubernetes version past standard support
+
+**Severity:** Medium · **Reads:** EKS clusters · [AWS docs](https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html)
+
+The version gets security fixes only under extended support, which costs more per cluster hour and ends on a date, after which AWS upgrades the cluster for you. An unsupported version gets no fixes at all.
+
+**How to fix**
+
+Plan the upgrade: check deprecated APIs, upgrade the control plane one minor version at a time in EKS → the cluster → Upgrade version, then the node groups and add-ons.
+
+#### ACN-004: ECS task runs a privileged container or shares the host
+
+**Severity:** High · **Reads:** ECS services and their task definitions (environment variables scanned for credentials, never stored) · [AWS docs](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_definition_parameters.html#container_definition_security)
+
+A privileged container, or one in the host's network or process namespace, can reach the host it runs on and every other container there. A compromise of the application becomes a compromise of the host.
+
+**How to fix**
+
+Register a new revision of the task definition without Privileged, and with awsvpc or bridge networking and no host PID or IPC mode. Grant the specific Linux capabilities it needs instead, then update the service to the new revision.
+
+#### ACN-007: ECR images aren't scanned for vulnerabilities
+
+**Severity:** Medium · **Reads:** ECR repositories, their policies and image scanning · [AWS docs](https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-scanning.html)
+
+Images are pushed and run without anyone being told they contain packages with known vulnerabilities.
+
+**How to fix**
+
+In ECR → Private registry → Feature & Settings → Scanning, add a rule that scans on push for all repositories (filter *), or turn on enhanced scanning with Amazon Inspector.
+
 #### ADB-002: Database storage isn't encrypted
 
 **Severity:** Medium · **Reads:** RDS databases · [AWS docs](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Overview.Encryption.html)
@@ -2334,7 +2790,67 @@ With retention set to zero there are no daily backups and no point-in-time recov
 
 In RDS → the database → Modify → Backup, set the backup retention period to at least 7 days.
 
+#### ADB-007: OpenSearch domain doesn't encrypt its data
+
+**Severity:** Medium · **Reads:** OpenSearch domains · [AWS docs](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/encryption-at-rest.html)
+
+Its indexes are stored, or passed between its nodes, in the clear. Fine-grained access control also can't be turned on without both.
+
+**How to fix**
+
+In OpenSearch → the domain → Actions → Edit security configuration, turn on Encryption of data at rest and Node-to-node encryption (on older domains, create a new domain and restore a snapshot).
+
+#### ADB-010: Cache stores data unencrypted
+
+**Severity:** Low · **Reads:** ElastiCache clusters · [AWS docs](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/at-rest-encryption.html)
+
+Its disk and its backups are stored in the clear.
+
+**How to fix**
+
+Encryption at rest can't be turned on in place: take a backup, create a new cluster with encryption at rest from it, and switch clients over.
+
+#### ADB-012: Redshift cluster isn't encrypted
+
+**Severity:** Medium · **Reads:** Redshift clusters · [AWS docs](https://docs.aws.amazon.com/redshift/latest/mgmt/working-with-db-encryption.html)
+
+The warehouse's data and its snapshots are stored in the clear.
+
+**How to fix**
+
+In Redshift → the cluster → Properties → Database configurations → Edit encryption, choose AWS KMS. Redshift migrates the data in place.
+
+#### ADB-013: DynamoDB table can't be restored to a point in time
+
+**Severity:** Low · **Reads:** DynamoDB tables and point-in-time recovery · [AWS docs](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/PointInTimeRecovery.html)
+
+A bad deployment, a script that deletes the wrong items or a compromised credential can wipe the table, and there is nothing to restore it from.
+
+**How to fix**
+
+In DynamoDB → the table → Backups → Point-in-time recovery, choose Edit and turn it on.
+
+#### ADB-014: EFS file system isn't encrypted
+
+**Severity:** Low · **Reads:** EFS file systems · [AWS docs](https://docs.aws.amazon.com/efs/latest/ug/encryption.html)
+
+Its files and backups are stored in the clear.
+
+**How to fix**
+
+Encryption can't be turned on in place: create an encrypted file system, copy the data with AWS DataSync, and move the mount targets over.
+
 ### AWS: Monitoring
+
+#### ACN-002: EKS cluster keeps no audit log
+
+**Severity:** Low · **Reads:** EKS clusters · [AWS docs](https://docs.aws.amazon.com/eks/latest/userguide/control-plane-logs.html)
+
+There is no record of who called the Kubernetes API: who read a secret, started a pod or changed a role binding. After an incident you can't tell what happened.
+
+**How to fix**
+
+In EKS → the cluster → Observability → Control plane logging → Manage, turn on Audit (and Authenticator). The logs go to CloudWatch Logs; set a retention period on the log group.
 
 #### AMO-001: GuardDuty is off in a region that runs workloads
 
@@ -2365,6 +2881,68 @@ The load balancer is where the internet meets your application, and without acce
 **How to fix**
 
 In EC2 → Load Balancers → the load balancer → Attributes → Edit, turn on Access logs and choose an S3 bucket. Give the bucket a lifecycle rule so old logs expire.
+
+#### AMO-004: CloudTrail doesn't record every region
+
+**Severity:** High · **Reads:** CloudTrail trails · [AWS docs](https://docs.aws.amazon.com/awscloudtrail/latest/userguide/receive-cloudtrail-log-files-from-multiple-regions.html)
+
+API calls in the regions no trail covers aren't kept anywhere beyond 90 days of event history. Attackers often work in regions nobody uses, to start instances or create keys, precisely because nobody looks there.
+
+**How to fix**
+
+In CloudTrail → Trails → Create trail, create one trail that applies to all regions and logs management events, or an organization trail from the management account. Make sure it is logging.
+
+#### AMO-005: CloudTrail log files can't be checked for tampering
+
+**Severity:** Low · **Reads:** CloudTrail trails · [AWS docs](https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-log-file-validation-intro.html)
+
+Without log file validation, someone who reaches the log bucket can change or delete entries, and nothing shows that the record of their activity was altered.
+
+**How to fix**
+
+In CloudTrail → the trail → General details → Edit, turn on Log file validation.
+
+#### AMO-006: AWS Config isn't recording in a region that runs workloads
+
+**Severity:** Low · **Reads:** AWS Config recorders, EC2 instances, RDS databases, Load balancers and listeners, Lambda functions and function URLs · [AWS docs](https://docs.aws.amazon.com/config/latest/developerguide/gs-console.html)
+
+There is no history of how resources were configured. After an incident you can't tell when a security group opened, a bucket became public or a role changed.
+
+**How to fix**
+
+In AWS Config → Settings, turn on recording for the region (all resource types, or the ones you care about), or deploy it to every account and region with a conformance pack or Control Tower.
+
+#### AMO-007: WAF web ACL doesn't log requests
+
+**Severity:** Low · **Reads:** WAF web ACLs, their logging and what they protect · [AWS docs](https://docs.aws.amazon.com/waf/latest/developerguide/logging.html)
+
+There is no record of which requests the web ACL blocked or let through, so an attack it missed, or a rule that blocks real users, goes unnoticed.
+
+**How to fix**
+
+In WAF & Shield → Web ACLs → the web ACL → Logging and metrics, enable logging to CloudWatch Logs, S3 or Firehose. Redact headers that carry credentials.
+
+### AWS: Change risk
+
+#### ACN-008: ECR image tags can be overwritten
+
+**Severity:** Low · **Reads:** ECR repositories, their policies and image scanning · [AWS docs](https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-tag-mutability.html)
+
+Anyone who can push can replace the image behind a tag a service already runs, such as a release tag, and the next deployment or restart picks it up with no change anyone reviewed.
+
+**How to fix**
+
+In ECR → the repository → Edit, set Tag immutability to Immutable (with exclusions for tags like latest if you need them), and deploy by digest or by release tag.
+
+#### ASC-006: KMS key is scheduled for deletion
+
+**Severity:** Medium · **Reads:** KMS keys, their rotation and key policies · [AWS docs](https://docs.aws.amazon.com/kms/latest/developerguide/deleting-keys.html)
+
+When the waiting period ends, the key is gone and every piece of data encrypted with it (volumes, snapshots, objects, database storage) can never be decrypted again.
+
+**How to fix**
+
+If anything may still use the key, cancel the deletion in KMS → the key → Key actions → Cancel key deletion, and disable it instead while you check its CloudTrail usage.
 
 ## GitHub
 
@@ -2421,6 +2999,26 @@ A fork of a private repository can live in a personal account, outside the organ
 
 Under Settings → Member privileges, untick Allow forking of private repositories, or allow it only within the organization where your plan offers that.
 
+#### GID-006: Members can make private repositories public
+
+**Severity:** Medium · **Reads:** Organization settings · [GitHub docs](https://docs.github.com/en/organizations/managing-organization-settings/restricting-repository-visibility-changes-in-your-organization)
+
+A member with admin access to a repository can make it public in two clicks, publishing its code and its whole history, including any secret ever committed. Only owners should be able to do that.
+
+**How to fix**
+
+Under the organization's Settings → Member privileges → Repository visibility change, untick Allow members to change repository visibilities for this organization.
+
+#### GID-007: Members can delete or transfer repositories
+
+**Severity:** Low · **Reads:** Organization settings · [GitHub docs](https://docs.github.com/en/organizations/managing-organization-settings/setting-permissions-for-deleting-or-transferring-repositories)
+
+A member with admin access to a repository, or someone with their login, can delete it or transfer it to an account outside the organization, taking the code, issues and settings with it.
+
+**How to fix**
+
+Under the organization's Settings → Member privileges → Repository deletion and transfer, untick Allow members to delete or transfer repositories for this organization.
+
 #### GHK-003: Deploy key can push to the repository
 
 **Severity:** Medium · **Reads:** Deploy keys · [GitHub docs](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys#deploy-keys)
@@ -2472,6 +3070,28 @@ Workflows can use any action from any author. An action runs with the workflow's
 **How to fix**
 
 Under the organization's Settings → Actions → General → Policies, choose Allow enterprise, and select non-enterprise, actions and reusable workflows. Allow actions created by GitHub, verified creators and the ones you name.
+
+#### GAC-004: Pull requests from forks of private repositories get secrets or a write token
+
+**Severity:** High · **Attack path** · **Reads:** Workflow policy for fork pull requests · [GitHub docs](https://docs.github.com/en/organizations/managing-organization-settings/disabling-or-limiting-github-actions-for-your-organization#enabling-workflows-for-private-repository-forks)
+
+A workflow started by a pull request from a fork runs the fork's version of the workflow. Anyone who can fork a private repository can then read every secret the workflow can reach, or use its token to change the repository, before anyone reviews the change.
+
+**How to fix**
+
+Under the organization's Settings → Actions → General, in the section for forks of private repositories, untick Send write tokens to workflows from pull requests and Send secrets to workflows from pull requests. If fork pull requests must run workflows, also tick Require approval for fork pull request workflows.
+
+#### GAC-005: Public repository can run jobs on self-hosted runners
+
+**Severity:** High · **Attack path** · **Reads:** Self-hosted runners and runner groups, Public repositories' own self-hosted runners · [GitHub docs](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners#self-hosted-runner-security)
+
+A pull request to a public repository can change its workflows to run anything on your own machines, which sit inside your network with whatever credentials they hold. A runner that isn't ephemeral also keeps what the job left behind for the next job, including a backdoor.
+
+**How to fix**
+
+1. Move the runners into a runner group that public repositories can't use: under the organization's Settings → Actions → Runner groups, untick Allow public repositories.
+2. Remove runners added to the public repository itself, under its Settings → Actions → Runners.
+3. If a public repository needs them, use ephemeral runners, limit the group to named workflows, and under Settings → Actions → General choose Require approval for all external contributors.
 
 ### GitHub: Secrets
 
@@ -2614,6 +3234,16 @@ The branch is protected, but a force push or deletion is still allowed. That rew
 
 In the rule or ruleset that protects the default branch, turn on Block force pushes and Restrict deletions.
 
+#### GBR-004: An approved pull request can change before it merges
+
+**Severity:** Medium · **Reads:** Branch protection, Rulesets that apply to default branches · [GitHub docs](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-a-pull-request-before-merging)
+
+The default branch needs an approval, but the approval stays after new commits are pushed. Someone can get a harmless change approved, then push something else to the same pull request and merge it without anyone reviewing it.
+
+**How to fix**
+
+In the rule or ruleset that protects the default branch, turn on Dismiss stale pull request approvals when new commits are pushed. Also turn on Require approval of the most recent reviewable push, so a reviewer can't push to a pull request and approve their own change.
+
 #### GBR-003: Administrators can skip the default branch's review rule
 
 **Severity:** Low · **Reads:** Branch protection, Rulesets that apply to default branches · [GitHub docs](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#do-not-allow-bypassing-the-above-settings)
@@ -2623,3 +3253,13 @@ Branch protection requires a pull request, but repository administrators and own
 **How to fix**
 
 In the branch protection rule, tick Do not allow bypassing the above settings, or move the rule to a ruleset and list only who may bypass it.
+
+#### GRL-001: Published releases can be changed
+
+**Severity:** Medium · **Reads:** Whether public repositories publish releases, Whether releases are immutable · [GitHub docs](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes)
+
+Anyone with write access, or a stolen token that has it, can replace a published release's files or point its tag at other code. Everyone who downloads that release, or uses an action pinned to that tag, then runs the new code without any sign that it changed.
+
+**How to fix**
+
+In the repository's Settings, under Releases, select Enable release immutability. To enforce it everywhere, under the organization's Settings → Repository → General → Releases, choose All repositories. Only releases published afterwards are immutable, so publish a new one.

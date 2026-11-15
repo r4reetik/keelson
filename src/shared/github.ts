@@ -15,6 +15,7 @@ export const GITHUB_APP_PERMISSIONS = {
   organization_administration: "Organization administration",
   members: "Organization members",
   organization_hooks: "Organization webhooks",
+  organization_self_hosted_runners: "Self-hosted runners",
 } as const;
 
 export type GithubPermission = keyof typeof GITHUB_APP_PERMISSIONS;

@@ -47,6 +47,11 @@ export const dash = {
   lambda: (region: string, name: string) => regional(region, "lambda", `/functions/${encodeURIComponent(name)}?tab=configure`),
   guardDuty: (region: string) => regional(region, "guardduty", "/"),
   distribution: (id: string) => `https://console.aws.amazon.com/cloudfront/v4/home#/distributions/${id}`,
+  /** Any regional console page: `regional(region, "kms", "/kms/keys")`. */
+  console: (region: string, service: string, hash: string) => regional(region, service, hash),
+  group: (name: string) => iam(`groups/details/${encodeURIComponent(name)}?section=permissions`),
+  roleDetails: (name: string) => iam(`roles/details/${encodeURIComponent(name)}?section=permissions`),
+  serverCertificates: "https://console.aws.amazon.com/iam/home#/home",
   hostedZone: (id: string) => `https://console.aws.amazon.com/route53/v2/hostedzones#ListRecordSets/${id}`,
 };
 

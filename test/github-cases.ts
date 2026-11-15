@@ -24,7 +24,7 @@ export function repo(extra: Partial<GithubRepo> = {}): GithubRepo {
     security: { secretScanning: true, pushProtection: true, dependabotUpdates: true },
     protection: null,
     rules: [
-      { type: "pull_request", reviews: 1 },
+      { type: "pull_request", reviews: 1, dismissStale: true, lastPushApproval: true },
       { type: "non_fast_forward", reviews: null },
       { type: "deletion", reviews: null },
     ],
@@ -33,6 +33,9 @@ export function repo(extra: Partial<GithubRepo> = {}): GithubRepo {
     dependabotAlerts: true,
     codeScanning: true,
     pages: { cname: "docs.example.com", httpsEnforced: true },
+    runners: [],
+    releases: true,
+    immutableReleases: true,
     ...extra,
   };
 }
@@ -54,6 +57,8 @@ export function githubInventory(extra: Partial<GithubInventory> = {}): GithubInv
       defaultRepoPermission: "read",
       membersCanCreatePublicRepos: false,
       membersCanForkPrivateRepos: false,
+      membersCanDeleteRepos: false,
+      membersCanChangeVisibility: false,
     },
     owners: ["owner-a", "owner-b"],
     actions: { enabledRepos: "all", allowedActions: "selected", defaultWorkflowPermissions: "read", canApprovePullRequests: false },
@@ -61,6 +66,15 @@ export function githubInventory(extra: Partial<GithubInventory> = {}): GithubInv
     apps: [
       { slug: "keelson", appId: 42, selection: "all", writes: [] },
       { slug: "linter", appId: 7, selection: "selected", writes: ["contents"] },
+    ],
+    forkPrs: { approval: "all_external_contributors", private: { runs: true, secrets: false, writeTokens: false, needsApproval: true } },
+    runnerGroups: [
+      { id: 1, name: "Default", visibility: "all", allowsPublic: false, restrictedToWorkflows: false, repos: null },
+      { id: 2, name: "open", visibility: "selected", allowsPublic: true, restrictedToWorkflows: false, repos: ["docs"] },
+    ],
+    runners: [
+      { name: "build-1", os: "Linux", ephemeral: false, groupId: 1 },
+      { name: "docs-1", os: "Linux", ephemeral: true, groupId: 2 },
     ],
     repos: [repo()],
     dependabot: [{ repo: "web", severity: "low", pkg: "colors", advisory: "GHSA-0000-0000-0000", createdAt: days(-5) }],
@@ -80,10 +94,18 @@ export const GITHUB_CASES: Record<GithubCheckId, () => GithubInventory> = {
   "GID-003": () => githubInventory({ org: { ...org, membersCanCreatePublicRepos: true } }),
   "GID-004": () => githubInventory({ owners: ["a", "b", "c", "d"] }),
   "GID-005": () => githubInventory({ org: { ...org, membersCanForkPrivateRepos: true } }),
+  "GID-006": () => githubInventory({ org: { ...org, membersCanChangeVisibility: true } }),
+  "GID-007": () => githubInventory({ org: { ...org, membersCanDeleteRepos: true } }),
 
   "GBR-001": () => withRepo({ rules: [] }),
   "GBR-002": () => withRepo({ rules: [{ type: "pull_request", reviews: 1 }] }),
-  "GBR-003": () => withRepo({ rules: [], protection: { reviews: 1, enforceAdmins: false, allowForcePushes: false, allowDeletions: false } }),
+  "GBR-003": () =>
+    withRepo({
+      rules: [],
+      protection: { reviews: 1, enforceAdmins: false, allowForcePushes: false, allowDeletions: false, dismissStale: true, lastPushApproval: false },
+    }),
+  "GBR-004": () => withRepo({ rules: [{ type: "pull_request", reviews: 1, dismissStale: false, lastPushApproval: false }, ...repo().rules!.slice(1)] }),
+  "GRL-001": () => withRepo({ immutableReleases: false }),
 
   "GSC-001": () => withRepo({ security: { secretScanning: false, pushProtection: false, dependabotUpdates: true } }),
   "GSC-002": () => withRepo({ security: { secretScanning: true, pushProtection: false, dependabotUpdates: true } }),
@@ -101,6 +123,8 @@ export const GITHUB_CASES: Record<GithubCheckId, () => GithubInventory> = {
   "GAC-001": () => githubInventory({ actions: { ...base.actions!, defaultWorkflowPermissions: "write" } }),
   "GAC-002": () => githubInventory({ actions: { ...base.actions!, canApprovePullRequests: true } }),
   "GAC-003": () => githubInventory({ actions: { ...base.actions!, allowedActions: "all" } }),
+  "GAC-004": () => githubInventory({ forkPrs: { ...base.forkPrs!, private: { runs: true, secrets: true, writeTokens: false, needsApproval: false } } }),
+  "GAC-005": () => withRepo({ runners: [{ name: "docs-2", os: "Linux", ephemeral: false, groupId: null }] }),
 
   "GHK-001": () => githubInventory({ hooks: [{ id: 2, endpoint: "https://siem.example.com", insecureSsl: true, active: true }] }),
   "GHK-002": () => withRepo({ hooks: [{ id: 1, endpoint: "http://ci.example.com", insecureSsl: false, active: true }] }),

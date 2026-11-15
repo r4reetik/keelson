@@ -33,6 +33,12 @@ const DEFS = {
     probe: (c) => c.raw(`/orgs/${c.org}/hooks?per_page=1`),
   },
   installations: { label: "Installed GitHub Apps", permission: ORG_ADMIN, probe: (c) => c.raw(`/orgs/${c.org}/installations?per_page=1`) },
+  forkPrs: { label: "Workflow policy for fork pull requests", permission: ORG_ADMIN },
+  runners: {
+    label: "Self-hosted runners and runner groups",
+    permission: "Organization permissions → Self-hosted runners: Read-only",
+    probe: (c) => c.raw(`/orgs/${c.org}/actions/runner-groups?per_page=1`),
+  },
   repos: {
     label: "Repositories",
     permission: "Repository permissions → Metadata: Read-only (always granted)",
@@ -44,6 +50,9 @@ const DEFS = {
   deployKeys: { label: "Deploy keys", permission: REPO_ADMIN },
   repoHooks: { label: "Repository webhooks", permission: "Repository permissions → Webhooks: Read-only" },
   pages: { label: "GitHub Pages sites", permission: "Repository permissions → Pages: Read-only" },
+  repoRunners: { label: "Public repositories' own self-hosted runners", permission: REPO_ADMIN },
+  releases: { label: "Whether public repositories publish releases", permission: "None: a public repository's releases are public" },
+  immutableReleases: { label: "Whether releases are immutable", permission: REPO_ADMIN },
   dependabotSetup: { label: "Whether Dependabot alerts are on", permission: REPO_ADMIN },
   codeScanningSetup: { label: "Whether code scanning has run", permission: "Repository permissions → Code scanning alerts: Read-only" },
   dependabot: {

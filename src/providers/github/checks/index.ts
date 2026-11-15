@@ -8,9 +8,10 @@ import codeSecurity from "./code-security.ts";
 import actions from "./actions.ts";
 import integrations from "./integrations.ts";
 import pages from "./pages.ts";
+import releases from "./releases.ts";
 import type { CheckModule } from "../../../core/checks/define.ts";
 
-export const GITHUB_MODULES = [identity, branches, codeSecurity, actions, integrations, pages] as const;
+export const GITHUB_MODULES = [identity, branches, codeSecurity, actions, integrations, pages, releases] as const;
 
 type IdsOf<M> = M extends CheckModule<infer Id, infer _C, infer _S> ? Id : never;
 export type GithubCheckId = IdsOf<(typeof GITHUB_MODULES)[number]>;

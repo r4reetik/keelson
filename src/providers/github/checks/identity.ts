@@ -1,6 +1,6 @@
 // Identity & access on GitHub: two-factor authentication for every member, what
-// members can do in every repository by default, who can publish or copy code
-// out of the organization, and how many people hold the Owner role.
+// members can do in every repository by default, who can publish, copy, delete or
+// give away code, and how many people hold the Owner role.
 
 import { defineChecks } from "./define.ts";
 
@@ -54,6 +54,24 @@ export default defineChecks(
       why: "A fork of a private repository can live in a personal account, outside the organization's settings, and stays with the person after they leave.",
       fix: "Under Settings → Member privileges, untick Allow forking of private repositories, or allow it only within the organization where your plan offers that.",
     },
+    "GID-006": {
+      category: "Identity & access",
+      severity: "medium",
+      docs: "https://docs.github.com/en/organizations/managing-organization-settings/restricting-repository-visibility-changes-in-your-organization",
+      requires: ["orgSettings"],
+      title: "Members can make private repositories public",
+      why: "A member with admin access to a repository can make it public in two clicks, publishing its code and its whole history, including any secret ever committed. Only owners should be able to do that.",
+      fix: "Under the organization's Settings → Member privileges → Repository visibility change, untick Allow members to change repository visibilities for this organization.",
+    },
+    "GID-007": {
+      category: "Identity & access",
+      severity: "low",
+      docs: "https://docs.github.com/en/organizations/managing-organization-settings/setting-permissions-for-deleting-or-transferring-repositories",
+      requires: ["orgSettings"],
+      title: "Members can delete or transfer repositories",
+      why: "A member with admin access to a repository, or someone with their login, can delete it or transfer it to an account outside the organization, taking the code, issues and settings with it.",
+      fix: "Under the organization's Settings → Member privileges → Repository deletion and transfer, untick Allow members to delete or transfer repositories for this organization.",
+    },
   },
   ({ inv, d }, report) => {
     const o = inv.org;
@@ -87,6 +105,20 @@ export default defineChecks(
         ...where,
         pass: !o.membersCanForkPrivateRepos,
         detail: o.membersCanForkPrivateRepos ? "Forking of private repositories is allowed" : "",
+        link: d.settings("member_privileges"),
+      });
+    if (o?.membersCanChangeVisibility != null)
+      report("GID-006", {
+        ...where,
+        pass: !o.membersCanChangeVisibility,
+        detail: o.membersCanChangeVisibility ? "Repository admins who aren't owners can change visibility" : "",
+        link: d.settings("member_privileges"),
+      });
+    if (o?.membersCanDeleteRepos != null)
+      report("GID-007", {
+        ...where,
+        pass: !o.membersCanDeleteRepos,
+        detail: o.membersCanDeleteRepos ? "Repository admins who aren't owners can delete or transfer repositories" : "",
         link: d.settings("member_privileges"),
       });
     if (inv.owners)

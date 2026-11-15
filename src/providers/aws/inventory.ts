@@ -1,11 +1,13 @@
 // One AWS scan's reads: who the access key is, IAM (the root user, the password
-// policy, users with their keys and MFA, roles and policies), S3, every enabled
-// region (security groups, instances, EBS, VPCs, databases, load balancers,
-// functions, GuardDuty), CloudFront and Route 53.
+// policy, users with their keys and MFA, roles and policies, server certificates),
+// S3, every enabled region (security groups, instances, EBS, VPCs, databases, load
+// balancers, functions, GuardDuty, and the services in services.ts), CloudFront
+// and Route 53.
 //
 // Secrets never enter the inventory: policy documents are reduced to what they
-// allow, Lambda's environment variables are dropped with the rest of the payload,
-// and only the last four characters of an access key ID are kept.
+// allow, Lambda's environment variables are scanned for credentials and dropped
+// with the rest of the payload (only a variable's name and the kind found are
+// kept), and only the last four characters of an access key ID are kept.
 
 import { gunzipSync } from "node:zlib";
 import { AwsError, type AwsClient, type Json } from "./client.ts";
@@ -16,6 +18,7 @@ import type {
   AwsBucket,
   AwsDatabase,
   AwsDistribution,
+  AwsEscalation,
   AwsFunction,
   AwsHostedZone,
   AwsInstance,
@@ -34,7 +37,9 @@ import type {
 import type { ProgressEvent } from "../../core/types.ts";
 import { fetchEc2Prefixes } from "../../core/aws-ranges.ts";
 import { inCloudflare, isInternal } from "../../core/cloudflare-ranges.ts";
-import { secretKindIn } from "../../core/secret-patterns.ts";
+import { secretInVariables, secretKindIn } from "../../core/secret-patterns.ts";
+import { allowsAnyone, deniesPlainHttp, escalationPaths, list, otherAccounts, type Statement } from "./policy.ts";
+import { readServices } from "./services.ts";
 
 const REGION_CONCURRENCY = 4;
 const ITEM_CONCURRENCY = 6;
@@ -63,11 +68,17 @@ export async function collectAws(client: AwsClient, onProgress: (p: ProgressEven
     .catch(() => null);
 
   onProgress({ phase: "Reading IAM" });
-  const [root, passwordPolicy, users, details] = await Promise.all([
+  const [root, passwordPolicy, users, details, serverCertificates] = await Promise.all([
     client.read("iamSummary", () => client.query("iam", HOME_REGION, "GetAccountSummary")).then((d) => (d ? toRoot(d) : null)),
     client.readOptional("passwordPolicy", () => client.query("iam", HOME_REGION, "GetAccountPasswordPolicy")).then((d) => (d ? toPasswordPolicy(d) : d)),
     readUsers(client),
     client.read("iamDetails", () => readDetails(client)),
+    client.read("serverCertificates", async () =>
+      (await queryAll(client, "iam", HOME_REGION, "ListServerCertificates", "ServerCertificateMetadataList", IAM_PAGE)).map((c) => ({
+        name: text(c, "ServerCertificateName") ?? "",
+        expiresAt: time(c, "Expiration"),
+      })),
+    ),
   ]);
 
   onProgress({ phase: "Reading S3" });
@@ -98,7 +109,7 @@ export async function collectAws(client: AwsClient, onProgress: (p: ProgressEven
 
   onProgress({ phase: "Reading CloudFront and Route 53" });
   const [distributions, hostedZones, ec2Prefixes] = await Promise.all([
-    client.read("cloudfront", () => readDistributions(client)),
+    client.read("cloudfront", async () => checkOriginBuckets(client, await readDistributions(client), buckets)),
     client.read("route53", () => readZones(client)),
     client.read("ipRanges", fetchEc2Prefixes),
   ]);
@@ -115,6 +126,8 @@ export async function collectAws(client: AwsClient, onProgress: (p: ProgressEven
     admins: details?.admins ?? null,
     roles: details?.roles ?? null,
     policies: details?.policies ?? null,
+    escalations: details?.escalations ?? null,
+    serverCertificates,
     s3Block,
     buckets,
     regions,
@@ -215,16 +228,6 @@ async function readUsers(client: AwsClient): Promise<AwsUser[] | null> {
   return users.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-interface Statement {
-  Effect?: string;
-  Action?: string | string[];
-  Resource?: string | string[];
-  Principal?: string | Record<string, string | string[]>;
-  Condition?: unknown;
-}
-
-const list = <T>(v: T | T[] | undefined): T[] => (v == null ? [] : Array.isArray(v) ? v : [v]);
-
 /** A policy document as IAM returns it: URL-encoded JSON. Only its statements are looked at, and none of it is stored. */
 function statements(encoded: string | null): Statement[] {
   if (!encoded) return [];
@@ -280,7 +283,7 @@ export function trustOf(st: Statement[]): AwsTrust[] {
   return out;
 }
 
-async function readDetails(client: AwsClient): Promise<{ admins: AwsAdmin[]; roles: AwsRole[]; policies: AwsPolicy[] }> {
+async function readDetails(client: AwsClient): Promise<{ admins: AwsAdmin[]; roles: AwsRole[]; policies: AwsPolicy[]; escalations: AwsEscalation[] }> {
   const docs = await pages(
     (t) =>
       client.query("iam", HOME_REGION, "GetAccountAuthorizationDetails", {
@@ -296,9 +299,13 @@ async function readDetails(client: AwsClient): Promise<{ admins: AwsAdmin[]; rol
   const all = (name: string) => docs.flatMap((d) => items(find(d, name)));
 
   const adminArns = new Set<string>();
+  /** Customer managed policies' statements by ARN, for escalation paths. Held only for this function. */
+  const managed = new Map<string, { name: string; st: Statement[] }>();
   const policies: AwsPolicy[] = all("Policies").map((p) => {
     const current = items(p, "PolicyVersionList").find((v) => bool(v, "IsDefaultVersion"));
-    const fullAdmin = grantsEverything(statements(text(current, "Document")));
+    const st = statements(text(current, "Document"));
+    managed.set(text(p, "Arn") ?? "", { name: text(p, "PolicyName") ?? "", st });
+    const fullAdmin = grantsEverything(st);
     if (fullAdmin) adminArns.add(text(p, "Arn") ?? "");
     return { name: text(p, "PolicyName") ?? "", fullAdmin, attachments: Number(text(p, "AttachmentCount") ?? 0) };
   });
@@ -326,7 +333,30 @@ async function readDetails(client: AwsClient): Promise<{ admins: AwsAdmin[]; rol
     profiles: items(r, "InstanceProfileList").flatMap((p) => text(p, "InstanceProfileName") ?? []),
     lastUsedAt: time(r, "RoleLastUsed", "LastUsedDate"),
   }));
-  return { admins, roles, policies };
+  // Who can give themselves more access through their own policies. Administrators already have it all.
+  const escalations: AwsEscalation[] = [];
+  const escalation = (kind: AwsEscalation["kind"], name: string, node: XmlNode, inline: string) => {
+    const sources = [
+      ...items(node, "AttachedManagedPolicies").flatMap((a) => {
+        const m = managed.get(text(a, "PolicyArn") ?? "");
+        return m ? [{ via: `the policy ${m.name}`, st: m.st }] : [];
+      }),
+      ...items(node, inline).map((i) => ({ via: `the inline policy ${text(i, "PolicyName")}`, st: statements(text(i, "PolicyDocument")) })),
+    ];
+    const paths = escalationPaths(sources.flatMap((x) => x.st));
+    if (!paths.length) return;
+    const via = sources.filter((x) => escalationPaths(x.st).length || x.st.some((st) => list(st.Action).some((a) => /^iam:(PassRole|\*)$/i.test(a))));
+    escalations.push({ kind, name, via: (via.length ? via : sources).map((x) => x.via).join(", "), paths });
+  };
+  for (const u of all("UserDetailList"))
+    if (!admins.some((a) => a.user === text(u, "UserName"))) escalation("user", text(u, "UserName") ?? "", u, "UserPolicyList");
+  for (const g of all("GroupDetailList"))
+    if (!adminGroups.has(text(g, "GroupName") ?? "")) escalation("group", text(g, "GroupName") ?? "", g, "GroupPolicyList");
+  for (const r of all("RoleDetailList")) {
+    const role = roles.find((x) => x.name === text(r, "RoleName"));
+    if (role && !role.admin && !role.serviceLinked) escalation("role", role.name, r, "RolePolicyList");
+  }
+  return { admins, roles, policies, escalations };
 }
 
 // ---- S3
@@ -379,6 +409,19 @@ async function readBuckets(client: AwsClient): Promise<AwsBucket[] | null> {
     }
   });
   if (listed.length) client.note("s3BucketAccess", readable > 0, failure);
+  // Bucket policies, reduced to the other accounts they let in and whether they refuse plain HTTP.
+  let policyFailure: unknown = null;
+  let policiesRead = 0;
+  await pool(buckets, ITEM_CONCURRENCY, async (b) => {
+    try {
+      const text = await client.optional(() => client.s3Text(b.region, `/${b.name}`, { policy: "" }));
+      b.policy = text ? { otherAccounts: otherAccounts(text, client.accountId), deniesHttp: deniesPlainHttp(text) } : null;
+      policiesRead++;
+    } catch (e) {
+      policyFailure ??= e;
+    }
+  });
+  if (buckets.length) client.note("bucketPolicies", policiesRead > 0, policyFailure);
   return buckets.sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -513,6 +556,8 @@ function toDatabase(d: XmlNode): AwsDatabase {
     public: bool(d, "PubliclyAccessible") === true,
     encrypted: bool(d, "StorageEncrypted") === true,
     backupDays: Number(text(d, "BackupRetentionPeriod") ?? 0),
+    parameterGroup: text(items(d, "DBParameterGroups")[0], "DBParameterGroupName"),
+    cluster: text(d, "DBClusterIdentifier"),
     replica: !!text(d, "ReadReplicaSourceDBInstanceIdentifier") || !!text(d, "ReadReplicaSourceDBClusterIdentifier"),
     vpcId: text(d, "DBSubnetGroup", "VpcId"),
     securityGroups: items(d, "VpcSecurityGroups").flatMap((g) => text(g, "VpcSecurityGroupId") ?? []),
@@ -594,7 +639,9 @@ async function readRegion(client: AwsClient, region: string): Promise<AwsRegion>
     );
 
   const logged = flowLogs ? new Set(flowLogs.filter((f) => text(f, "flowLogStatus") === "ACTIVE").flatMap((f) => text(f, "resourceId") ?? [])) : null;
+  const services = await readServices(client, region, databases);
   return {
+    ...services,
     name: region,
     securityGroups,
     instances,
@@ -632,8 +679,15 @@ async function readLoadBalancers(client: AwsClient, region: string): Promise<Aws
       queryAll(client, elb, region, "DescribeListeners", "Listeners", paged, { LoadBalancerArn: arn }),
       client.query(elb, region, "DescribeLoadBalancerAttributes", { LoadBalancerArn: arn }),
     ]);
+    const attr = (key: string) =>
+      text(
+        items(find(attributes, "Attributes")).find((a) => text(a, "Key") === key),
+        "Value",
+      );
     out.push({
       name: text(lb, "LoadBalancerName") ?? "",
+      arn,
+      desync: text(lb, "Type") === "application" ? attr("routing.http.desync_mitigation_mode") : null,
       dnsName: (text(lb, "DNSName") ?? "").toLowerCase(),
       type: text(lb, "Type") ?? "",
       internetFacing: text(lb, "Scheme") === "internet-facing",
@@ -658,6 +712,10 @@ async function readLoadBalancers(client: AwsClient, region: string): Promise<Aws
       name,
       dnsName: (text(lb, "DNSName") ?? "").toLowerCase(),
       type: "classic",
+      desync: text(
+        items(find(attributes, "AdditionalAttributes")).find((a) => text(a, "Key") === "elb.http.desyncmitigationmode"),
+        "Value",
+      ),
       internetFacing: text(lb, "Scheme") === "internet-facing",
       vpcId: text(lb, "VPCId"),
       securityGroups: groups(lb),
@@ -688,12 +746,22 @@ async function readFunctions(client: AwsClient, region: string): Promise<AwsFunc
       // "arn:aws:iam::<account>:role/<path>/<name>"
       role: typeof f.Role === "string" ? f.Role.split("/").pop() || null : null,
       urls: null,
+      // Scanned here and dropped with the payload: only the variable's name and the kind found are kept.
+      envSecret: secretInVariables((f.Environment?.Variables ?? {}) as Record<string, unknown>),
     }));
   if (functions.length <= MAX_FUNCTION_URLS)
     await pool(functions, ITEM_CONCURRENCY, async (f) => {
       const body = await client.json("lambda", region, `/2021-10-31/functions/${f.name}/urls`);
       f.urls = (Array.isArray(body?.FunctionUrlConfigs) ? body.FunctionUrlConfigs : []).map((u: Json) => ({ authType: String(u.AuthType ?? "") }));
     });
+  if (functions.length <= MAX_FUNCTION_URLS)
+    await client.read("functionPolicies", () =>
+      pool(functions, ITEM_CONCURRENCY, async (f) => {
+        // No policy is a 404: only the account itself can invoke the function.
+        const body = await client.optional(() => client.json("lambda", region, `/2015-03-31/functions/${f.name}/policy`));
+        f.publicPolicy = body ? allowsAnyone(body.Policy) : false;
+      }),
+    );
   return functions.sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -730,6 +798,37 @@ async function readDistributions(client: AwsClient): Promise<AwsDistribution[]> 
         })),
       };
     });
+}
+
+/** "assets.s3.amazonaws.com", "assets.s3.eu-west-1.amazonaws.com", "assets.s3-eu-west-1.amazonaws.com" → "assets". */
+const s3Bucket = (domain: string) => /^(.+?)\.s3(?:[.-][a-z0-9-]+)?\.amazonaws\.com$/.exec(domain)?.[1] ?? null;
+
+/**
+ * Marks S3 origins whose bucket doesn't exist: anyone could create a bucket with that name and serve it on the
+ * distribution's hostnames. A bucket the account owns exists; for another, GetBucketLocation answers NoSuchBucket only
+ * when there is none (any other answer, a refusal included, means it exists or can't be told).
+ */
+async function checkOriginBuckets(client: AwsClient, distributions: AwsDistribution[], owned: AwsBucket[] | null): Promise<AwsDistribution[]> {
+  const ours = new Set((owned ?? []).map((b) => b.name));
+  const verdicts = new Map<string, Promise<boolean | null>>();
+  const missing = (bucket: string) => {
+    if (ours.has(bucket)) return Promise.resolve(false);
+    if (!verdicts.has(bucket))
+      verdicts.set(
+        bucket,
+        client.s3(HOME_REGION, `/${bucket}`, { location: "" }).then(
+          () => false,
+          (e) => (e instanceof AwsError && e.code === "NoSuchBucket" ? true : e instanceof AwsError && e.denied ? false : null),
+        ),
+      );
+    return verdicts.get(bucket)!;
+  };
+  for (const d of distributions)
+    for (const o of d.origins) {
+      const bucket = o.s3 ? s3Bucket(o.domain) : null;
+      if (bucket) o.missingBucket = await missing(bucket);
+    }
+  return distributions;
 }
 
 const RECORD_TYPES = new Set(["A", "AAAA", "CNAME"]);

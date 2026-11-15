@@ -10,7 +10,7 @@ flowchart LR
     VREST[REST API<br/>GET only]
   end
   subgraph AWS
-    AREST[Query and REST APIs<br/>signed GET only]
+    AREST[Query and REST APIs<br/>signed GET, plus named read actions over POST]
   end
   subgraph GitHub
     GREST[REST API<br/>read-only App token, GET only]
@@ -89,7 +89,7 @@ alerts.
 The scanner never changes anything: REST calls are GET, GraphQL is POST but only ever queries, GitHub's
 installation token request is the one other POST (it creates a token that can only read), and
 `test/integration.test.ts` (Cloudflare), `test/vercel.test.ts` (Vercel), `test/aws.test.ts` (AWS) and
-`test/github.test.ts` (GitHub) fail on any other request. AWS services whose APIs only answer POST (CloudTrail, KMS, Config) are left unread for that reason.
+`test/github.test.ts` (GitHub) fail on any other request. AWS services whose APIs only accept POST (CloudTrail, KMS, Config, ECS and others) are read with POST, but only for the read actions named in `READ_ACTIONS` (`src/providers/aws/client.ts`): `rpc()` refuses any other before sending it, and `test/aws.test.ts` fails on a POST for any action that isn't on the list.
 
 ## Checks that span providers
 
