@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.13.0
+
 - **Many more AWS checks, chosen for what matters in practice.** Keelson now reads CloudTrail, AWS Config, KMS, ACM, Secrets Manager, ECR, ECS, EKS, DynamoDB, Cognito, WAF, Systems Manager documents, CodeBuild, EventBridge, SageMaker, OpenSearch, ElastiCache, Redshift, SNS, SQS, Amazon MQ, MSK and EFS, plus launch templates, EBS volumes, RDS snapshots and parameters, and IAM server certificates. New findings include identities whose policies let them make themselves administrators, resource policies that let anyone in (Lambda, ECR, SNS, SQS, EventBridge, KMS, Secrets Manager), public database snapshots, OpenSearch domains, Redshift clusters and MQ brokers, EKS endpoints open to the internet, privileged ECS containers, credentials in Lambda, ECS and CodeBuild environment variables and in launch templates, Cognito identity pools that give AWS credentials to anyone, CloudTrail not recording every region, application load balancers without a web ACL, CloudFront origins whose S3 bucket no longer exists, and certificates that won't renew before they expire. Checks that only judge availability or compliance wording are left out.
 - AWS services whose APIs only accept POST are now read with a signed POST, for read actions only (Describe, List, Get): Keelson refuses to send any other, and a test fails if a scan does. AWS's SecurityAudit policy already grants these reads, so existing access keys need no change. Credentials found in environment variables are reported by variable name and kind; their values are never stored.
 
