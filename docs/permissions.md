@@ -199,6 +199,10 @@ to the permissions below and nothing else, so even an App that was given more ca
 POST Keelson sends to GitHub; every other request is GET (`test/github.test.ts` fails on anything else). Secret scanning alerts are read
 without the secret's value, and only the scheme and host of webhook URLs are kept.
 
+With **Contents**, Keelson lists each repository's files and fetches only manifest and lock files, GitHub Actions workflows and
+Dockerfiles, never source code, to keep a software bill of materials with Anchore's Syft, Grype and Grant. Those three run where
+Keelson runs, when installed, and aren't GitHub permissions: without one, its source below is listed as not readable.
+
 | Source | App permission | Checks that read it |
 |---|---|---|
 | Organization settings | Organization permissions → Administration: Read-only | GID-001, GID-002, GID-003, GID-005, GID-006, GID-007 |
@@ -222,6 +226,10 @@ without the secret's value, and only the scheme and host of webhook URLs are kep
 | Whether code scanning has run | Repository permissions → Code scanning alerts: Read-only | GSC-005, GSC-008 |
 | Dependabot alerts | Repository permissions → Dependabot alerts: Read-only | GSC-004, GSC-006 |
 | Code scanning alerts | Repository permissions → Code scanning alerts: Read-only | GSC-005 |
+| Manifest and lock files, for each repository's SBOM (never the code) | Repository permissions → Contents: Read-only | GDP-001, GDP-002, GDP-003, GDP-004, GDP-005, GLI-001 |
+| Software bill of materials (Anchore Syft) | Syft installed where Keelson runs: on the PATH, or its path in KEELSON_SYFT (not in the Docker image yet) | GDP-001, GDP-002, GDP-003, GLI-001 |
+| Known vulnerabilities in dependencies (Anchore Grype) | Grype installed where Keelson runs: on the PATH, or its path in KEELSON_GRYPE (not in the Docker image yet). Its database, about 3 GB, is downloaded from Anchore into the data folder | GDP-001, GDP-002, GDP-003 |
+| Dependency licenses (Anchore Grant) | Grant installed where Keelson runs: on the PATH, or its path in KEELSON_GRANT (not in the Docker image yet) | GLI-001 |
 | Secret scanning alerts | Repository permissions → Secret scanning alerts: Read-only | GSC-003 |
 
 ## Internet (Sonar)

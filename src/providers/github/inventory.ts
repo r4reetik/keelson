@@ -4,7 +4,7 @@
 // with its default branch's protection and rulesets, deploy keys, webhooks and
 // Pages site, and for public repositories their own runners and whether their
 // releases can change; and the organization's open Dependabot, code scanning and
-// secret scanning alerts.
+// secret scanning alerts; and each repository's dependencies (./sbom).
 //
 // Secrets never enter the inventory: secret scanning alerts are read with
 // hide_secret and their value field is dropped regardless, only the scheme and
@@ -28,11 +28,24 @@ import type {
   SelfHostedRunner,
 } from "./types.ts";
 import type { ProgressEvent } from "../../core/types.ts";
+import type { AccountCache } from "../../store/repo.ts";
+import { collectDependencies } from "./sbom/index.ts";
 
 const REPO_CONCURRENCY = 6;
 const MAX_ALERTS = 5000;
 
-export async function collectGithub(client: GithubClient, accountId: string, onProgress: (p: ProgressEvent) => void = () => {}): Promise<GithubInventory> {
+/** Where a scan keeps SBOMs between scans and Grype's database; without it, dependencies aren't read. */
+export interface DependencyStore {
+  cache: AccountCache;
+  toolDir: string | null;
+}
+
+export async function collectGithub(
+  client: GithubClient,
+  accountId: string,
+  onProgress: (p: ProgressEvent) => void = () => {},
+  deps: DependencyStore | null = null,
+): Promise<GithubInventory> {
   const org = client.org;
   onProgress({ phase: "Reading the organization" });
   const [orgBody, owners, actions, workflow, hooks, apps, forkPrs, runnerGroups, runners] = await Promise.all([
@@ -73,6 +86,9 @@ export async function collectGithub(client: GithubClient, accountId: string, onP
     client.list<Json>("secretScanning", `/orgs/${org}/secret-scanning/alerts?state=open&hide_secret=true`, { max: MAX_ALERTS }),
   ]);
 
+  onProgress({ phase: "Reading dependency manifests" });
+  const dependencies = deps ? await collectDependencies(client, repos, deps.cache, deps.toolDir, onProgress) : null;
+
   const inst = client.installation;
   return {
     accountId,
@@ -94,6 +110,7 @@ export async function collectGithub(client: GithubClient, accountId: string, onP
     dependabot: dependabot ? dependabot.map(toDependabot) : null,
     codeScanning: codeScanning ? codeScanning.map(toCodeScanning) : null,
     secretScanning: secretScanning ? secretScanning.map(toSecretAlert) : null,
+    dependencies,
   };
 }
 
@@ -268,6 +285,7 @@ function toRepo(r: Json): GithubRepo {
     defaultBranch: String(r.default_branch ?? "main"),
     pushedAt: time(r.pushed_at),
     hasPages: !!r.has_pages,
+    license: str(r.license?.spdx_id) && r.license.spdx_id !== "NOASSERTION" ? r.license.spdx_id : null,
     security: null,
     protection: undefined,
     rules: null,

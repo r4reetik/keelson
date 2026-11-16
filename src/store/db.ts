@@ -172,6 +172,19 @@ export const MIGRATIONS: string[] = [
     PRIMARY KEY (user_id, entity_id)
   );
   `,
+  `
+  -- What a provider keeps for an account between scans besides the scans
+  -- themselves: a GitHub repository's software bill of materials, rebuilt only
+  -- when its manifest and lock files change, and the dependency view the
+  -- Repositories page shows. Removed with the account.
+  CREATE TABLE provider_cache (
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    data BLOB NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (account_id, key)
+  );
+  `,
 ];
 
 export class Store {

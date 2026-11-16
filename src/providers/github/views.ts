@@ -3,7 +3,8 @@
 
 import { branchGuard } from "./checks/branches.ts";
 import { countBySeverity } from "../../shared/severity.ts";
-import type { ProviderLinks, RepoRow } from "../../shared/api.ts";
+import type { ProviderLinks, RepoDependencySummary, RepoRow } from "../../shared/api.ts";
+import type { RepoDependencies } from "../../shared/dependencies.ts";
 import type { Result } from "../../core/types.ts";
 import type { GithubInventory, GithubRepo } from "./types.ts";
 
@@ -14,9 +15,43 @@ function protectionOf(r: GithubRepo): string | null {
   return g.protected ? "Protected" : "None";
 }
 
+/** A repository's dependencies in a line: languages, projects, packages, vulnerabilities and licenses. */
+export function dependencySummary(d: RepoDependencies, grype: boolean, grant: boolean): RepoDependencySummary {
+  const total = Object.values(d.languages ?? {}).reduce((a, b) => a + b, 0);
+  const languages = Object.entries(d.languages ?? {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([name, bytes]) => ({ name, share: total ? Math.round((1000 * bytes) / total) / 10 : 0 }));
+  const pkgs = d.packages;
+  const vulns = { critical: 0, high: 0, medium: 0, low: 0 };
+  let exploited = 0;
+  for (const p of pkgs ?? [])
+    for (const v of p.vulns) {
+      if (v.severity in vulns) vulns[v.severity as keyof typeof vulns]++;
+      if (v.kev) exploited++;
+    }
+  const code = d.parts.filter((p) => !p.workflows);
+  return {
+    generatedAt: new Date(d.generatedAt).toISOString(),
+    languages,
+    ecosystems: [...new Set([...code.flatMap((p) => p.ecosystems), ...(pkgs ?? []).map((p) => p.ecosystem)])].sort(),
+    parts: code.length,
+    packages: pkgs ? pkgs.length : null,
+    vulnerable: pkgs && grype ? pkgs.filter((p) => p.vulns.length).length : null,
+    vulns: pkgs && grype ? vulns : null,
+    exploited: pkgs && grype ? exploited : null,
+    copyleft: pkgs && grant ? pkgs.filter((p) => p.licenseRisk === "strong").length : null,
+    unlocked: code.filter((p) => p.unpinned.length).length,
+    partial: d.partial,
+  };
+}
+
 export function repoRows(inv: GithubInventory, failures: Result[]): RepoRow[] {
   const count = (list: { repo: string; severity?: string }[] | null, name: string, serious: boolean) =>
     list ? list.filter((a) => a.repo === name && (!serious || a.severity === "critical" || a.severity === "high")).length : null;
+  const deps = new Map((inv.dependencies?.repos ?? []).map((d) => [d.repo, d]));
+  const grype = !inv.unreadable.includes("grype") && !!inv.dependencies?.tools.grype;
+  const grant = !inv.unreadable.includes("grant") && !!inv.dependencies?.tools.grant;
   return inv.repos.map((r) => ({
     name: r.name,
     visibility: r.visibility,
@@ -31,6 +66,7 @@ export function repoRows(inv: GithubInventory, failures: Result[]): RepoRow[] {
       codeScanning: count(inv.codeScanning, r.name, true),
     },
     pages: r.pages ? (r.pages.cname ?? "github.io") : null,
+    dependencies: deps.has(r.name) ? dependencySummary(deps.get(r.name)!, grype, grant) : null,
     findings: countBySeverity(failures.filter((f) => f.zone === r.name)),
   }));
 }

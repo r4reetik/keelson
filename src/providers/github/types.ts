@@ -98,6 +98,8 @@ export interface GithubRepo {
   defaultBranch: string;
   pushedAt: number | null;
   hasPages: boolean;
+  /** The repository's own license as GitHub detects it (an SPDX ID such as "MIT"); null without one. */
+  license: string | null;
   /** Secret scanning, push protection and Dependabot security updates; null when GitHub didn't say. */
   security: { secretScanning: boolean | null; pushProtection: boolean | null; dependabotUpdates: boolean | null } | null;
   /** The default branch's classic protection: null when there is none, undefined when it couldn't be read. */
@@ -193,4 +195,17 @@ export interface GithubInventory {
   dependabot: DependabotAlert[] | null;
   codeScanning: CodeScanningAlert[] | null;
   secretScanning: SecretAlert[] | null;
+  /** Each repository's dependencies, from its manifest and lock files (Syft, Grype, Grant); null when none could be read. */
+  dependencies: DependencyInventory | null;
+}
+
+export type { ActionUse, DepPackage, DepUsage, DepVuln, RepoDependencies } from "../../shared/dependencies.ts";
+import type { RepoDependencies } from "../../shared/dependencies.ts";
+
+export interface DependencyInventory {
+  repos: RepoDependencies[];
+  /** Versions of the tools that ran; null for one that isn't installed. */
+  tools: { syft: string | null; grype: string | null; grant: string | null };
+  /** When Grype's vulnerability database was built. */
+  dbBuilt: string | null;
 }

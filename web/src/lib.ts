@@ -7,6 +7,7 @@ export * from "../../src/shared/filters.ts";
 export { displayName, scopeKey as scopeKeyFor, splitScopeKey, withProvider } from "../../src/shared/scope.ts";
 export * from "../../src/shared/providers.ts";
 export * from "../../src/shared/github.ts";
+export * from "../../src/shared/dependencies.ts";
 export * from "../../src/shared/roles.ts";
 export * from "./lib/api.ts";
 export * from "./lib/router.ts";

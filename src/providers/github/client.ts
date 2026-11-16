@@ -151,10 +151,11 @@ export class GithubClient {
    * permission the organization didn't grant can't be asked for, so only the granted ones are named.
    */
   async #installationToken(inst: Installation): Promise<string> {
-    const cacheKey = `${this.#key}:${inst.id}`;
+    const permissions = Object.fromEntries(GITHUB_PERMISSION_KEYS.filter((k) => inst.permissions[k]).map((k) => [k, "read"]));
+    // A permission the organization accepts later needs a new token: the cached one can't read it.
+    const cacheKey = `${this.#key}:${inst.id}:${Object.keys(permissions).sort().join(",")}`;
     const cached = tokens.get(cacheKey);
     if (cached && cached.until > Date.now()) return cached.token;
-    const permissions = Object.fromEntries(GITHUB_PERMISSION_KEYS.filter((k) => inst.permissions[k]).map((k) => [k, "read"]));
     const { body } = await this.#send(`/app/installations/${inst.id}/access_tokens`, `Bearer ${appJwt(this.#app)}`, { permissions });
     const token = String(body?.token ?? "");
     if (!token) throw new GithubError(0, "GitHub didn't return an installation token.");

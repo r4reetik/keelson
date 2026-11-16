@@ -48,7 +48,8 @@ of those accounts, and are skipped when the entity has no scanned account on the
 | GitHub | [Deployments](#github-deployments) | 5 |
 | GitHub | [Secrets](#github-secrets) | 3 |
 | GitHub | [TLS & HTTPS](#github-tls--https) | 3 |
-| GitHub | [Platform](#github-platform) | 5 |
+| GitHub | [Platform](#github-platform) | 4 |
+| GitHub | [Supply chain](#github-supply-chain) | 7 |
 | GitHub | [Change risk](#github-change-risk) | 5 |
 | Internet | [Attack surface](#internet-attack-surface) | 6 |
 | Internet | [TLS & HTTPS](#internet-tls--https) | 1 |
@@ -3163,16 +3164,6 @@ In the repository's Settings → Pages, tick Enforce HTTPS. GitHub offers it onc
 
 ### GitHub: Platform
 
-#### GSC-004: Dependency with a critical or high vulnerability
-
-**Severity:** High · **Reads:** Dependabot alerts, Whether Dependabot alerts are on · [GitHub docs](https://docs.github.com/en/code-security/dependabot/dependabot-alerts/viewing-and-updating-dependabot-alerts)
-
-A package the repository depends on has a published vulnerability rated critical or high, so how to exploit it is public.
-
-**How to fix**
-
-Open the repository's Security → Dependabot alerts, update the packages, or dismiss an alert with the reason when the vulnerable code isn't reachable.
-
 #### GSC-005: Code scanning found a critical or high vulnerability
 
 **Severity:** High · **Reads:** Code scanning alerts, Whether code scanning has run · [GitHub docs](https://docs.github.com/en/code-security/code-scanning/managing-code-scanning-alerts/assessing-code-scanning-alerts-for-your-repository)
@@ -3212,6 +3203,84 @@ Anyone can read this code and look for injections and other weaknesses in it. Co
 **How to fix**
 
 In the repository's Settings → Code security, choose Set up → Default under Code scanning, or turn it on for every public repository in the organization's security configuration.
+
+### GitHub: Supply chain
+
+#### GSC-004: Dependency with a critical or high vulnerability
+
+**Severity:** High · **Reads:** Dependabot alerts, Whether Dependabot alerts are on · [GitHub docs](https://docs.github.com/en/code-security/dependabot/dependabot-alerts/viewing-and-updating-dependabot-alerts)
+
+A package the repository depends on has a published vulnerability rated critical or high, so how to exploit it is public.
+
+**How to fix**
+
+Open the repository's Security → Dependabot alerts, update the packages, or dismiss an alert with the reason when the vulnerable code isn't reachable.
+
+#### GDP-001: Dependency has a vulnerability attackers are exploiting
+
+**Severity:** Critical · **Attack path** · **Reads:** Manifest and lock files, for each repository's SBOM (never the code), Software bill of materials (Anchore Syft), Known vulnerabilities in dependencies (Anchore Grype) · [GitHub docs](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/about-supply-chain-security)
+
+A package this repository uses has a vulnerability in CISA's catalog of known exploited vulnerabilities: attackers are using it now, with tools that are already public. Anything built from this code that runs the package is exposed.
+
+**How to fix**
+
+1. Upgrade the package to the version the evidence names, in every part that uses it, and deploy.
+2. If it comes in through another package, upgrade that one, or override the version (npm overrides, Yarn resolutions, a Go replace or a constraint).
+3. Check what ran it before the upgrade for signs of compromise.
+
+#### GDP-002: Dependency has a critical or high vulnerability
+
+**Severity:** High · **Reads:** Manifest and lock files, for each repository's SBOM (never the code), Software bill of materials (Anchore Syft), Known vulnerabilities in dependencies (Anchore Grype) · [GitHub docs](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/about-supply-chain-security)
+
+A package this repository uses has a published vulnerability rated critical or high, or one that FIRST's EPSS rates likely to be exploited soon. How to exploit it is public, so whatever is built from this code inherits it until the package is upgraded.
+
+**How to fix**
+
+1. Upgrade the package to the version the evidence names; it fixes every listed vulnerability that has a fix.
+2. If it comes in through another package, upgrade that one, or override the version (npm overrides, Yarn resolutions, a Go replace or a constraint).
+3. If the vulnerable code can't be reached from how you use it, mark the finding as accepted with the reason.
+
+#### GDP-003: Dependency is a known malicious package
+
+**Severity:** Critical · **Attack path** · **Reads:** Manifest and lock files, for each repository's SBOM (never the code), Software bill of materials (Anchore Syft), Known vulnerabilities in dependencies (Anchore Grype) · [GitHub docs](https://docs.github.com/en/code-security/security-advisories/working-with-global-security-advisories-from-the-github-advisory-database/about-the-github-advisory-database)
+
+The package is listed as malware: published to steal credentials, open a backdoor or run code when it's installed. Installing it is enough, so every developer machine and CI runner that installed this version may be compromised.
+
+**How to fix**
+
+1. Remove the package, or move to a version that isn't listed, and regenerate the lock file.
+2. Treat every machine and CI runner that installed it as compromised: rotate the credentials they held.
+3. Check how it got in: a typo in the name, or a dependency that pulled it.
+
+#### GDP-004: Workflows run third-party actions by a tag that can be moved
+
+**Severity:** Low · **Reads:** Manifest and lock files, for each repository's SBOM (never the code) · [GitHub docs](https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions#using-third-party-actions)
+
+A tag such as v4 can be pointed at different code at any time, by the action's owner or by whoever takes over their account. Workflows run that code with the repository's token and secrets, as happened with tj-actions/changed-files in 2025. A commit SHA can't be moved.
+
+**How to fix**
+
+Pin each third-party action to the full commit SHA of the release you use, with the tag in a comment (uses: owner/action@<sha> # v4). Dependabot or Renovate keep pinned actions up to date. Actions owned by GitHub (actions/*, github/*) and your own organization aren't counted.
+
+#### GDP-005: Project installs dependencies without a lock file
+
+**Severity:** Low · **Reads:** Manifest and lock files, for each repository's SBOM (never the code) · [GitHub docs](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/dependency-graph-supported-package-ecosystems)
+
+Without a lock file, or with version ranges in a requirements file, every install takes whatever version is newest at that moment. A malicious or broken release reaches your builds without anyone changing the code, and Keelson can't check those versions for vulnerabilities.
+
+**How to fix**
+
+Commit the lock file your package manager writes (package-lock.json, yarn.lock, pnpm-lock.yaml, go.sum, Gemfile.lock, composer.lock, poetry.lock, Pipfile.lock), and install from it in CI (npm ci, pip install with pinned == versions or a lock).
+
+#### GLI-001: Dependency under a strong copyleft license
+
+**Severity:** Low · **Reads:** Manifest and lock files, for each repository's SBOM (never the code), Software bill of materials (Anchore Syft), Dependency licenses (Anchore Grant) · [GitHub docs](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository)
+
+The package's license (such as GPL or AGPL) requires software that includes it to be released under the same terms when it's distributed, or for AGPL and SSPL when it's offered over a network. A repository that isn't under a compatible license may have to release its own code, or remove the package.
+
+**How to fix**
+
+Check with whoever looks after licensing whether this use is allowed: it depends on how the software is distributed or offered. Otherwise replace the package with one under a permissive license. Mark the finding as accepted when the use is cleared.
 
 ### GitHub: Change risk
 

@@ -8,7 +8,7 @@ import type { EngineOptions, ProgressEvent } from "../core/types.ts";
 import type { CheckMeta } from "../core/checks/define.ts";
 import type { Coverage, LinkKey, PermissionProbe, ScanSnapshot, TokenInfo } from "../shared/api.ts";
 import type { ProviderId, ProviderInfo } from "../shared/providers.ts";
-import type { Account } from "../store/repo.ts";
+import type { Account, AccountCache } from "../store/repo.ts";
 
 export interface CheckDef extends CheckMeta<string> {
   id: string;
@@ -24,6 +24,10 @@ export interface ScanInput {
   probeTakeovers: boolean;
   /** What the account's last finished scan stored, for providers that compare a scan with the one before it. */
   previous: ScanSnapshot | null;
+  /** What the provider kept for this account in earlier scans (GitHub's SBOMs), to reuse and update. */
+  cache: AccountCache;
+  /** A folder for scanners' own data that outlives a scan (Grype's vulnerability database); null keeps nothing on disk. */
+  toolDir: string | null;
   onProgress: (p: ProgressEvent) => void;
 }
 

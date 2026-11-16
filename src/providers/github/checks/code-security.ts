@@ -64,7 +64,7 @@ export default defineChecks(
       fix: "1. Revoke or rotate the credential where it was issued. Deleting the commit doesn't help: the value stays in clones and forks. 2. Close the alert in the repository's Security → Secret scanning as Revoked.",
     },
     "GSC-004": {
-      category: "Platform",
+      category: "Supply chain",
       severity: "high",
       docs: "https://docs.github.com/en/code-security/dependabot/dependabot-alerts/viewing-and-updating-dependabot-alerts",
       requires: ["dependabot", "dependabotSetup"],

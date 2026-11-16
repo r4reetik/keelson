@@ -67,7 +67,7 @@ App's private key (`node:crypto`), finds the App's installation on the organizat
 token limited to read permissions; with it, it reads the organization's settings, owners, Actions policy, webhooks
 and installed Apps, then each repository's default branch protection and rulesets, deploy keys, webhooks and Pages
 site (about six requests per repository), and the organization's open Dependabot, code scanning and secret scanning
-alerts.
+alerts, and keeps each repository's SBOM ([below](#dependencies-a-software-bill-of-materials-per-repository)).
 
 1. **Inventory.** For one account, Keelson reads everything the checks need into one typed `Inventory`:
    zones and their settings, DNS records, rulesets, certificates, members, tokens, Access, Gateway, Workers,
@@ -90,6 +90,42 @@ The scanner never changes anything: REST calls are GET, GraphQL is POST but only
 installation token request is the one other POST (it creates a token that can only read), and
 `test/integration.test.ts` (Cloudflare), `test/vercel.test.ts` (Vercel), `test/aws.test.ts` (AWS) and
 `test/github.test.ts` (GitHub) fail on any other request. AWS services whose APIs only accept POST (CloudTrail, KMS, Config, ECS and others) are read with POST, but only for the read actions named in `READ_ACTIONS` (`src/providers/aws/client.ts`): `rpc()` refuses any other before sending it, and `test/aws.test.ts` fails on a POST for any action that isn't on the list.
+
+## Dependencies: a software bill of materials per repository
+
+A GitHub scan also keeps an SBOM of each repository (`src/providers/github/sbom/`), with Anchore's open-source
+tools when they're installed where Keelson runs (`src/core/anchore.ts`: `KEELSON_SYFT`, `KEELSON_GRYPE` and
+`KEELSON_GRANT`, or each on the PATH):
+
+1. **File list.** One request per repository reads the default branch's file list (`git/trees`, recursive; folder
+   by folder when GitHub cuts it short). `manifests.ts` picks the files that describe dependencies: package
+   manifests and lock files, GitHub Actions workflows and Dockerfiles, outside installed packages, build output and
+   test fixtures. Source code is never fetched. This needs the App's **Contents** permission; without it the
+   `manifests` source is a coverage gap and nothing is listed.
+2. **SBOM.** The cache key is every picked file's path and blob SHA, and Syft's version. When it matches the
+   repository's cached SBOM (`provider_cache`, `sbom:<repo>`), nothing more is fetched. Otherwise the files are
+   fetched by blob SHA, written to a temporary folder, read by Syft (`syft scan dir:… -o syft-json`, with no
+   network lookups and no file listing) and deleted. Only Syft's packages and their relationships are kept, with
+   what Keelson read from the files itself: the repository's parts (each project of a monorepo, with its name,
+   ecosystems, lock file, the dependencies its own manifest names, packages it installs without a pinned version,
+   and its Dockerfiles' base images), the actions its workflows use, and npm's development-only packages.
+3. **Vulnerabilities and licenses.** Every repository's packages are combined, one per identity (type and purl),
+   into one Syft document, and Grype matches it once per scan, so a vulnerability published today is found in
+   code that didn't change. Grype's own database (about 3 GB) lives under `<data-dir>/tools/grype` and is
+   refreshed from Anchore when a newer one is published. An advisory and its CVE are merged into one
+   vulnerability, keeping the smallest fixing version, CISA's known-exploited flag and FIRST's EPSS. Grant sorts each
+   license into permissive, weak or strong copyleft; an `OR` expression takes its least restrictive choice.
+4. **Where each package is used.** A package is attributed to the parts whose manifest names it (direct), the
+   parts that reach it through Syft's dependency graph (through another package), or the part holding its lock
+   file. A package used only by development dependencies, or only in examples and tests, is development only.
+5. **Checks and views.** `checks/dependencies.ts` reports one finding per package and repository, whatever its
+   version, so triage survives an upgrade that's still vulnerable. Each repository's view for the Repositories
+   page is cached as `deps:<repo>`, and `GET /api/dependencies` and `GET /api/dependencies/sbom` (CycloneDX, SPDX
+   through `syft convert`, or Syft JSON) read it. The Dependencies page reads every repository in view through `src/server/sbom.ts`, which
+   indexes those views once per account and scan and filters them per request (`/api/sbom/*`).
+
+The tools never get Keelson's environment: each runs with the PATH, a temporary home, proxy settings and its own
+settings only. The mock (`dev/mock/anchore.ts`) replaces them in tests and the mock dev server.
 
 ## Sonar: the view from outside
 

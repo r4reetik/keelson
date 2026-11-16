@@ -5,7 +5,7 @@
 
 import type { GithubCheckId } from "../src/providers/github/checks/index.ts";
 import type { EngineOptions } from "../src/core/types.ts";
-import type { GithubInventory, GithubRepo } from "../src/providers/github/types.ts";
+import type { DependencyInventory, DepPackage, DepVuln, GithubInventory, GithubRepo, RepoDependencies } from "../src/providers/github/types.ts";
 
 export const NOW = Date.parse("2026-06-01T00:00:00Z");
 const days = (n: number) => NOW + n * 86_400_000;
@@ -21,6 +21,7 @@ export function repo(extra: Partial<GithubRepo> = {}): GithubRepo {
     defaultBranch: "main",
     pushedAt: days(-2),
     hasPages: true,
+    license: null,
     security: { secretScanning: true, pushProtection: true, dependabotUpdates: true },
     protection: null,
     rules: [
@@ -80,9 +81,79 @@ export function githubInventory(extra: Partial<GithubInventory> = {}): GithubInv
     dependabot: [{ repo: "web", severity: "low", pkg: "colors", advisory: "GHSA-0000-0000-0000", createdAt: days(-5) }],
     codeScanning: [],
     secretScanning: [],
+    dependencies: dependencies(),
     ...extra,
   };
 }
+
+export function pkg(extra: Partial<DepPackage> = {}): DepPackage {
+  return {
+    name: "left-pad",
+    version: "1.3.0",
+    type: "npm",
+    ecosystem: "npm",
+    purl: "pkg:npm/left-pad@1.3.0",
+    locations: ["package-lock.json"],
+    licenses: ["MIT"],
+    licenseRisk: "permissive",
+    usedBy: [{ part: "", direct: true, dev: false }],
+    devOnly: false,
+    vulns: [],
+    ...extra,
+  };
+}
+
+export function vuln(extra: Partial<DepVuln> = {}): DepVuln {
+  return {
+    id: "GHSA-0000-1111-2222",
+    aliases: ["CVE-2026-0001"],
+    severity: "high",
+    cvss: 7.5,
+    epss: 0.02,
+    percentile: 0.8,
+    kev: false,
+    ransomware: false,
+    fixedIn: "1.3.1",
+    state: "fixed",
+    summary: "Prototype pollution",
+    url: "https://github.com/advisories/GHSA-0000-1111-2222",
+    risk: 5,
+    cpeOnly: false,
+    ...extra,
+  };
+}
+
+/** The repository "web": one npm project with its lock file, one clean package, and a workflow pinned to a commit. */
+export function repoDeps(extra: Partial<RepoDependencies> = {}): RepoDependencies {
+  return {
+    repo: "web",
+    generatedAt: NOW,
+    languages: { TypeScript: 9000, CSS: 1000 },
+    parts: [
+      {
+        path: "",
+        name: "web",
+        ecosystems: ["npm"],
+        files: ["package.json", "package-lock.json"],
+        lockfile: "package-lock.json",
+        direct: { "left-pad": { dev: false, ecosystem: "npm" } },
+        unpinned: [],
+        images: [],
+        devOnly: false,
+      },
+    ],
+    packages: [pkg()],
+    actions: [{ action: "docker/login-action", ref: "0123456789abcdef0123456789abcdef01234567", workflow: ".github/workflows/ci.yml" }],
+    partial: false,
+    ...extra,
+  };
+}
+
+export function dependencies(repos: RepoDependencies[] = [repoDeps()]): DependencyInventory {
+  return { repos, tools: { syft: "1.0.0", grype: "0.100.0", grant: "0.7.0" }, dbBuilt: "2026-05-31T00:00:00Z" };
+}
+
+const withPackages = (...packages: DepPackage[]) => githubInventory({ dependencies: dependencies([repoDeps({ packages })]) });
 
 const base = githubInventory();
 const org = base.org!;
@@ -132,6 +203,19 @@ export const GITHUB_CASES: Record<GithubCheckId, () => GithubInventory> = {
   "GHK-004": () => githubInventory({ apps: [...base.apps!, { slug: "ci", appId: 9, selection: "all", writes: ["contents", "workflows"] }] }),
 
   "GPG-001": () => withRepo({ pages: { cname: "docs.example.com", httpsEnforced: false } }),
+
+  "GDP-001": () => withPackages(pkg({ vulns: [vuln({ kev: true, severity: "medium", epss: 0.9 })] })),
+  "GDP-002": () => withPackages(pkg({ vulns: [vuln()] })),
+  "GDP-003": () => withPackages(pkg({ name: "left-padd", vulns: [vuln({ id: "MAL-2026-1", aliases: [], severity: "critical", fixedIn: null })] })),
+  "GDP-004": () =>
+    githubInventory({ dependencies: dependencies([repoDeps({ actions: [{ action: "someone/deploy", ref: "v2", workflow: ".github/workflows/ci.yml" }] })]) }),
+  "GDP-005": () =>
+    githubInventory({
+      dependencies: dependencies([
+        repoDeps({ parts: [{ ...repoDeps().parts[0], files: ["requirements.txt"], ecosystems: ["PyPI"], lockfile: null, unpinned: ["requests"] }] }),
+      ]),
+    }),
+  "GLI-001": () => withPackages(pkg({ name: "readline", licenses: ["GPL-3.0-only"], licenseRisk: "strong" })),
 };
 
 /** Engine options a case needs beyond the defaults. */

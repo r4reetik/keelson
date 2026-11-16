@@ -9,7 +9,8 @@
 // with the other mocks, the data is deliberately imperfect so every check family
 // has something to find, and dates are relative to now.
 
-import { createPublicKey, createVerify, generateKeyPairSync } from "node:crypto";
+import { createHash, createPublicKey, createVerify, generateKeyPairSync } from "node:crypto";
+import { installMockAnchore } from "./anchore.ts";
 
 const DAY = 86_400_000;
 const iso = (daysAgo: number) => new Date(Date.now() - daysAgo * DAY).toISOString();
@@ -33,6 +34,10 @@ interface MockOptions {
   onRequest?: (url: URL, init?: RequestInit) => void;
   /** Paths (regex) that answer 403, to simulate a permission the App wasn't given. */
   deny?: RegExp[];
+  /** Options for the mock Syft, Grype and Grant (dev/mock/anchore.ts), installed with the API. */
+  anchore?: Parameters<typeof installMockAnchore>[0];
+  /** Permissions the installation was granted, instead of the usual ones. */
+  granted?: Record<string, string>;
 }
 
 /** What the organization granted the App: more than Keelson asks for, and write where it shouldn't be, so the token request is tested. */
@@ -269,6 +274,69 @@ const SECRET_SCANNING = [
   },
 ];
 
+// What the repositories hold, as far as Keelson reads them: manifests, lock files, workflows and Dockerfiles, plus
+// one source file that Keelson must never fetch. "web" is an npm workspace monorepo (two apps sharing a lock file)
+// with a vulnerable XML parser that attackers exploit, a GPL package and a workflow that uses an action by its tag;
+// "api" is a Go service with a Python worker that installs a malicious package and a package without a pinned
+// version; "infra" has scripts installed without a lock file.
+const lock = (packages: Record<string, unknown>) => JSON.stringify({ name: "mock-web", lockfileVersion: 3, requires: true, packages }, null, 2);
+export const MOCK_SOURCE_FILE = "apps/site/src/server.ts";
+export const MOCK_SOURCE_CONTENT = "const secret = 'mock-source-code-SECRET';";
+const FILES: Record<string, Record<string, string>> = {
+  web: {
+    "package.json": JSON.stringify({ name: "mock-web", private: true, workspaces: ["apps/*", "packages/*"], devDependencies: { "mock-test-runner": "2.0.0" } }),
+    "package-lock.json": lock({
+      "": { name: "mock-web", workspaces: ["apps/*", "packages/*"], devDependencies: { "mock-test-runner": "2.0.0" } },
+      "apps/site": { name: "@mock/site", version: "1.0.0", dependencies: { "mock-router": "1.4.0", "mock-xml-parser": "0.9.1" } },
+      "packages/ui": { name: "@mock/ui", version: "1.0.0", dependencies: { "mock-router": "1.4.0", "mock-readline": "3.0.0" } },
+      "node_modules/@mock/site": { resolved: "apps/site", link: true },
+      "node_modules/@mock/ui": { resolved: "packages/ui", link: true },
+      "node_modules/mock-router": { version: "1.4.0", license: "MIT", dependencies: { "mock-path-match": "^0.2.0" } },
+      "node_modules/mock-path-match": { version: "0.2.0", license: "MIT" },
+      "node_modules/mock-xml-parser": { version: "0.9.1", license: "Apache-2.0" },
+      "node_modules/mock-readline": { version: "3.0.0", license: "GPL-3.0-only" },
+      "node_modules/mock-test-runner": { version: "2.0.0", dev: true, license: "MIT" },
+    }),
+    "apps/site/package.json": JSON.stringify({ name: "@mock/site", version: "1.0.0", dependencies: { "mock-router": "1.4.0", "mock-xml-parser": "0.9.1" } }),
+    "apps/site/Dockerfile": "FROM node:20-alpine AS build\nFROM gcr.io/distroless/nodejs20\n",
+    [MOCK_SOURCE_FILE]: MOCK_SOURCE_CONTENT,
+    "packages/ui/package.json": JSON.stringify({ name: "@mock/ui", version: "1.0.0", dependencies: { "mock-router": "1.4.0", "mock-readline": "3.0.0" } }),
+    "node_modules/mock-router/package.json": JSON.stringify({ name: "mock-router", version: "1.4.0" }),
+    ".github/workflows/ci.yml": [
+      "name: ci",
+      "on: push",
+      "jobs:",
+      "  build:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - uses: actions/checkout@v4",
+      "      - uses: mock-actions/cache@0123456789abcdef0123456789abcdef01234567 # v3",
+      "      - uses: mock-actions/deploy@v2",
+      "",
+    ].join("\n"),
+  },
+  api: {
+    "go.mod": "module example.com/mock/api\n\ngo 1.22\n\nrequire (\n\tmock.example/httpkit v1.2.0\n\tmock.example/log v0.3.0 // indirect\n)\n",
+    "go.sum": "mock.example/httpkit v1.2.0 h1:mock=\nmock.example/log v0.3.0 h1:mock=\n",
+    "main.go": "package main",
+    "worker/requirements.txt": "mock-celery==4.0.0\nmock-colorz==1.0.0\nmock-requests>=2.0\n",
+    "worker/Dockerfile": "FROM python:3.12-slim\n",
+  },
+  infra: {
+    "scripts/package.json": JSON.stringify({ name: "mock-infra-scripts", dependencies: { "mock-cli": "^1.0.0" } }),
+    "scripts/deploy.js": "console.log('deploy')",
+  },
+};
+const blobSha = (text: string) =>
+  createHash("sha1")
+    .update(`blob ${Buffer.byteLength(text)}\0${text}`)
+    .digest("hex");
+const LANGUAGES: Record<string, Record<string, number>> = {
+  web: { TypeScript: 52000, CSS: 8000, Dockerfile: 300 },
+  api: { Go: 41000, Python: 9000 },
+  infra: { JavaScript: 1200, HCL: 5400 },
+};
+
 /** Checks the App's JWT as GitHub does: signed with the App's key, issued for this App, not expired. */
 function validJwt(auth: string): boolean {
   const [h, p, sig] = auth.replace(/^Bearer /, "").split(".");
@@ -299,6 +367,8 @@ function paged(url: URL, items: unknown[], wrap?: string): Response {
 
 export function installMockGithub(o: MockOptions = {}): () => void {
   const real = globalThis.fetch;
+  const restoreAnchore = installMockAnchore(o.anchore);
+  const granted = o.granted ?? GRANTED;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
     if (url.hostname !== "api.github.com") return real(input as string, init);
@@ -312,21 +382,29 @@ export function installMockGithub(o: MockOptions = {}): () => void {
     // Requests as the App itself: listing installations and asking for an installation token.
     if (path.startsWith("/app/")) {
       if (!validJwt(auth)) return fail(401, "A JSON web token could not be decoded");
-      if (method === "GET" && path === "/app/installations") return paged(url, installations);
+      if (method === "GET" && path === "/app/installations")
+        return paged(
+          url,
+          installations.map((i) => (i.id === INSTALLATION ? { ...i, permissions: granted } : i)),
+        );
       const m = /^\/app\/installations\/(\d+)\/access_tokens$/.exec(path);
       if (method === "POST" && m) {
-        const inst = installations.find((i) => i.id === Number(m[1]));
-        if (!inst) return fail(404, "Not Found");
+        const found = installations.find((i) => i.id === Number(m[1]));
+        if (!found) return fail(404, "Not Found");
+        const inst = found.id === INSTALLATION ? { ...found, permissions: granted } : found;
         const asked = (JSON.parse(String(init?.body ?? "{}")).permissions ?? {}) as Record<string, string>;
         // GitHub refuses a permission the installation doesn't have.
         if (Object.keys(asked).some((k) => !(inst.permissions as Record<string, string>)[k]))
           return fail(422, "The permissions requested are not granted to this installation.");
-        return json({ token: INSTALLATION_TOKEN, expires_at: new Date(Date.now() + 3600_000).toISOString(), permissions: asked }, 201);
+        // Like GitHub's, the token can read only what it was asked for: one without contents can't list files.
+        const token = asked.contents ? `${INSTALLATION_TOKEN}-contents` : INSTALLATION_TOKEN;
+        return json({ token, expires_at: new Date(Date.now() + 3600_000).toISOString(), permissions: asked }, 201);
       }
       return fail(404, "Not Found");
     }
 
-    if (auth !== `Bearer ${INSTALLATION_TOKEN}`) return fail(401, "Bad credentials");
+    if (auth !== `Bearer ${INSTALLATION_TOKEN}` && auth !== `Bearer ${INSTALLATION_TOKEN}-contents`) return fail(401, "Bad credentials");
+    if (/^\/repos\/[^/]+\/[^/]+\/git\//.test(url.pathname) && !auth.endsWith("-contents")) return fail(403, "Resource not accessible by integration");
     if (method !== "GET") return fail(405, "The mock only reads");
     if (o.deny?.some((re) => re.test(path))) return fail(403, "Resource not accessible by integration");
 
@@ -370,6 +448,23 @@ export function installMockGithub(o: MockOptions = {}): () => void {
     if (rest === "/actions/runners") return paged(url, REPO_RUNNERS[r.name] ?? [], "runners");
     if (rest === "/releases") return paged(url, RELEASES[r.name] ?? []);
     if (rest === "/immutable-releases") return fail(404, "Not Found");
+    if (rest === "/languages") return json(LANGUAGES[r.name] ?? {});
+    if (rest === `/git/trees/${r.default_branch}`) {
+      if (r.size === 0) return fail(409, "Git Repository is empty.");
+      const files = Object.entries(FILES[r.name] ?? { "README.md": "# mock" });
+      return json({
+        sha: `tree-${r.name}`,
+        truncated: false,
+        tree: files.map(([p, text]) => ({ path: p, mode: "100644", type: "blob", sha: blobSha(text), size: Buffer.byteLength(text) })),
+      });
+    }
+    const blob = /^\/git\/blobs\/([0-9a-f]{40})$/.exec(rest);
+    if (blob) {
+      const text = Object.values(FILES[r.name] ?? {}).find((t) => blobSha(t) === blob[1]);
+      return text == null
+        ? fail(404, "Not Found")
+        : json({ sha: blob[1], size: Buffer.byteLength(text), encoding: "base64", content: Buffer.from(text).toString("base64") });
+    }
     // Dependabot alerts are on everywhere but "web"; code scanning has run on "api" only, and private repositories without Code Security say so.
     if (rest === "/vulnerability-alerts") return r.name === "web" ? fail(404, "Vulnerability alerts are disabled.") : new Response(null, { status: 204 });
     if (rest === "/code-scanning/analyses") {
@@ -380,5 +475,6 @@ export function installMockGithub(o: MockOptions = {}): () => void {
   }) as typeof fetch;
   return () => {
     globalThis.fetch = real;
+    restoreAnchore();
   };
 }

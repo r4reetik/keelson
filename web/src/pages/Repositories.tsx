@@ -2,13 +2,15 @@
 // scanning and push protection are on, open security alerts, the Pages site, and
 // open findings. The GitHub counterpart of Zones, Projects and Regions.
 
-import { Badge, Input, Switch, Table, Link } from "@cloudflare/kumo";
+import { Badge, Banner, Input, Switch, Table, Link, Tooltip } from "@cloudflare/kumo";
+import { FireIcon, WarningIcon } from "@phosphor-icons/react";
 import { useScopedApi, useShell } from "../shell.tsx";
 import { num, plural, SCORED_SEVERITIES, setParams, totalScored, useLocation, type RepoRow, type ReposResponse } from "../lib.ts";
 import { Flag, ListCard, NoRows, Page, PageState, SeverityBadge, unreadableText } from "../components/ui.tsx";
 
 const TITLE = "Repositories";
-const DESCRIPTION = "Every repository the GitHub App can read: how its default branch is protected, secret scanning, open security alerts and open findings.";
+const DESCRIPTION =
+  "Every repository the GitHub App can read: how its default branch is protected, secret scanning, open security alerts, what it depends on and open findings.";
 
 /** Open alerts by kind; Dependabot and code scanning count critical and high only. */
 const ALERTS: [keyof RepoRow["alerts"], string][] = [
@@ -40,8 +42,37 @@ export function RepositoriesPage() {
     .filter((r) => (!q || `${r.name} ${r.account || ""}`.toLowerCase().includes(q)) && (!issuesOnly || totalScored(r.findings) > 0))
     .sort((a, b) => Number(a.archived) - Number(b.archived) || totalScored(b.findings) - totalScored(a.findings) || a.name.localeCompare(b.name));
 
+  // Dependencies need the App's Contents permission and Anchore's tools: say which is missing, once, instead of in every row.
+  const sbomGaps = data.coverage.filter((c) => !c.ok && ["manifests", "syft", "grype", "grant"].includes(c.key ?? ""));
+
   return (
-    <Page title={TITLE} description={DESCRIPTION}>
+    <Page
+      title={TITLE}
+      description={DESCRIPTION}
+      actions={
+        repos.some((r) => r.dependencies?.packages != null) && (
+          <Link variant="plain" href="/dependencies" className="text-sm">
+            Every dependency, vulnerability and license
+          </Link>
+        )
+      }
+    >
+      {sbomGaps.length > 0 && (
+        <Banner
+          variant="alert"
+          icon={<WarningIcon weight="fill" />}
+          title={sbomGaps.some((c) => c.key === "manifests") ? "Dependencies aren't read yet" : "Some dependency data isn't read"}
+          description={
+            <ul className="list-disc space-y-1 pl-5">
+              {sbomGaps.map((c) => (
+                <li key={c.key}>
+                  {c.label}: {c.message ?? `needs ${c.permission}.`}
+                </li>
+              ))}
+            </ul>
+          }
+        />
+      )}
       <ListCard
         toolbar={
           <>
@@ -82,6 +113,7 @@ export function RepositoriesPage() {
                 <Table.Head className="whitespace-nowrap">Secret scanning</Table.Head>
                 <Table.Head className="whitespace-nowrap">Push protection</Table.Head>
                 <Table.Head className="whitespace-nowrap">Open alerts</Table.Head>
+                <Table.Head className="whitespace-nowrap">Dependencies</Table.Head>
                 <Table.Head className="whitespace-nowrap">Pages</Table.Head>
                 <Table.Head className="whitespace-nowrap">Open findings</Table.Head>
               </Table.Row>
@@ -90,12 +122,13 @@ export function RepositoriesPage() {
               {repos.map((r) => {
                 // Findings record the repository as their zone; the account is part of the link, as organizations can share repository names.
                 const href = `/findings?zone=${encodeURIComponent(r.name)}${r.accountId ? `&account=${r.accountId}` : ""}&status=all`;
+                const page = r.dependencies && r.accountId ? `/repositories/${encodeURIComponent(r.accountId)}/${encodeURIComponent(r.name)}` : null;
                 const alerts = ALERTS.filter(([k]) => r.alerts[k]);
                 return (
                   <Table.Row key={`${r.accountId}/${r.name}`}>
                     <Table.Cell sticky="left" className="whitespace-nowrap">
                       <span className="inline-flex items-center gap-2">
-                        <Link variant="plain" href={href}>
+                        <Link variant="plain" href={page ?? href}>
                           {r.name}
                         </Link>
                         {r.visibility !== "private" && <Badge variant="outline">{r.visibility === "public" ? "Public" : "Internal"}</Badge>}
@@ -133,9 +166,12 @@ export function RepositoriesPage() {
                         <span className="text-kumo-subtle">None</span>
                       )}
                     </Table.Cell>
+                    <Table.Cell className="whitespace-nowrap">
+                      <Dependencies r={r} href={page} />
+                    </Table.Cell>
                     <Table.Cell className="whitespace-nowrap text-kumo-subtle">{r.pages ?? "None"}</Table.Cell>
                     <Table.Cell>
-                      <div className="flex items-center gap-3 whitespace-nowrap">
+                      <Link variant="plain" href={href} className="flex items-center gap-3 whitespace-nowrap">
                         {SCORED_SEVERITIES.filter((s) => r.findings[s]).map((s) => (
                           <span key={s} className="inline-flex items-center gap-1.5">
                             <SeverityBadge severity={s} />
@@ -143,7 +179,7 @@ export function RepositoriesPage() {
                           </span>
                         ))}
                         {!SCORED_SEVERITIES.some((s) => r.findings[s]) && <span className="text-kumo-subtle">None</span>}
-                      </div>
+                      </Link>
                     </Table.Cell>
                   </Table.Row>
                 );
@@ -153,5 +189,47 @@ export function RepositoriesPage() {
         )}
       </ListCard>
     </Page>
+  );
+}
+
+/** What a repository depends on, in a cell: packages and projects, then its worst known vulnerabilities. */
+function Dependencies({ r, href }: { r: RepoRow; href: string | null }) {
+  const d = r.dependencies;
+  if (!d) return <span className="text-kumo-subtle">{r.archived ? "n/a" : "Not read"}</span>;
+  const v = d.vulns;
+  const serious = v ? (["critical", "high"] as const).filter((s) => v[s]) : [];
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-kumo-default">
+        {d.packages == null ? "Projects only" : plural(d.packages, "package", "packages")}
+        {d.parts > 1 && <span className="text-kumo-subtle"> · {num(d.parts)} projects</span>}
+      </span>
+      <span className="inline-flex items-center gap-2 text-sm text-kumo-subtle">
+        {d.ecosystems.slice(0, 3).join(", ") || "No manifests"}
+        {(d.exploited ?? 0) > 0 && (
+          <Tooltip content="Vulnerabilities attackers are known to exploit (CISA KEV)">
+            <Badge variant="red" icon={<FireIcon weight="fill" />}>
+              {num(d.exploited ?? 0)} exploited
+            </Badge>
+          </Tooltip>
+        )}
+        {d.unlocked > 0 && (
+          <Tooltip content="Projects that install dependencies without a lock file or pinned versions">
+            <Badge variant="warning">{d.unlocked === 1 ? "No lock file" : `${num(d.unlocked)} without a lock file`}</Badge>
+          </Tooltip>
+        )}
+        {serious.map((s) => (
+          <span key={s} className="inline-flex items-center gap-1.5">
+            <SeverityBadge severity={s} />
+            <span className="tabular-nums">{num(v![s])}</span>
+          </span>
+        ))}
+        {href && d.packages != null && (
+          <Link variant="plain" href={href}>
+            Details
+          </Link>
+        )}
+      </span>
+    </div>
   );
 }

@@ -919,7 +919,34 @@ export interface RepoRow {
   alerts: { secrets: number | null; dependabot: number | null; codeScanning: number | null };
   /** The Pages site's custom domain, "github.io" without one, or null without a site. */
   pages: string | null;
+  /** What it depends on, from its SBOM; null when its manifest and lock files weren't read. */
+  dependencies?: RepoDependencySummary | null;
   findings: SeverityCounts;
+}
+
+/** A repository's dependencies in a line of the Repositories page. */
+export interface RepoDependencySummary {
+  /** When its SBOM was made: the last time a manifest or lock file changed. */
+  generatedAt: string;
+  /** Its main languages by share of code, from GitHub, largest first. */
+  languages: { name: string; share: number }[];
+  ecosystems: string[];
+  /** Projects in it (more than one in a monorepo), not counting its workflows. */
+  parts: number;
+  /** Null when Syft isn't installed. */
+  packages: number | null;
+  /** Packages with at least one known vulnerability; null when Grype didn't run. */
+  vulnerable: number | null;
+  /** Known vulnerabilities by severity, counted once per package. */
+  vulns: { critical: number; high: number; medium: number; low: number } | null;
+  /** Vulnerabilities attackers are known to exploit (CISA KEV). */
+  exploited: number | null;
+  /** Packages under a strong copyleft license; null when Grant didn't run. */
+  copyleft: number | null;
+  /** Projects that install dependencies without a lock file. */
+  unlocked: number;
+  /** Some files were too large or too many to read. */
+  partial: boolean;
 }
 
 /** One of the entity's domains, as an internet scan (Sonar) sees it. */

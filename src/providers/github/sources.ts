@@ -65,6 +65,23 @@ const DEFS = {
     permission: "Repository permissions → Code scanning alerts: Read-only",
     probe: (c) => c.raw(`/orgs/${c.org}/code-scanning/alerts?per_page=1`),
   },
+  manifests: {
+    label: "Manifest and lock files, for each repository's SBOM (never the code)",
+    permission: "Repository permissions → Contents: Read-only",
+  },
+  syft: {
+    label: "Software bill of materials (Anchore Syft)",
+    permission: "Syft installed where Keelson runs: on the PATH, or its path in KEELSON_SYFT (not in the Docker image yet)",
+  },
+  grype: {
+    label: "Known vulnerabilities in dependencies (Anchore Grype)",
+    permission:
+      "Grype installed where Keelson runs: on the PATH, or its path in KEELSON_GRYPE (not in the Docker image yet). Its database, about 3 GB, is downloaded from Anchore into the data folder",
+  },
+  grant: {
+    label: "Dependency licenses (Anchore Grant)",
+    permission: "Grant installed where Keelson runs: on the PATH, or its path in KEELSON_GRANT (not in the Docker image yet)",
+  },
   secretScanning: {
     label: "Secret scanning alerts",
     permission: "Repository permissions → Secret scanning alerts: Read-only",

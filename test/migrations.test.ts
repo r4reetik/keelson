@@ -16,7 +16,16 @@ import { MIGRATIONS, NewerDatabaseError, Store } from "../src/store/db.ts";
  * migration; never change an existing one. Users' databases already ran them,
  * so a fix needs a new migration instead.
  */
-const SHIPPED = ["1d4e7bd803fb7be7", "03a85dfc75f3fd2a", "1526ed8c910c6781", "ce02ff70a5bd33c7", "601a8715d2ca80e3", "9004538aa7f649fe", "e8fab33b9093c9ae"];
+const SHIPPED = [
+  "1d4e7bd803fb7be7",
+  "03a85dfc75f3fd2a",
+  "1526ed8c910c6781",
+  "ce02ff70a5bd33c7",
+  "601a8715d2ca80e3",
+  "9004538aa7f649fe",
+  "e8fab33b9093c9ae",
+  "1755bb1899d2143b",
+];
 
 const hash = (sql: string) => createHash("sha256").update(sql).digest("hex").slice(0, 16);
 

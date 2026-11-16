@@ -21,6 +21,7 @@ import { settingsRoutes } from "./routes/settings.ts";
 import { dashboardRoutes, findingRoutes } from "./routes/dashboard.ts";
 import { exportRoutes } from "./routes/exports.ts";
 import { userRoutes } from "./routes/users.ts";
+import { dependencyRoutes, sbomRoutes } from "./routes/dependencies.ts";
 
 export type { AppContext } from "./env.ts";
 
@@ -48,8 +49,10 @@ export function createApp(ctx: AppContext) {
   settingsRoutes(authed, ctx);
   userRoutes(authed, ctx);
   findingRoutes(configured, ctx);
+  dependencyRoutes(configured, ctx);
   dashboardRoutes(scoped, ctx);
   exportRoutes(scoped, ctx);
+  sbomRoutes(scoped, ctx);
 
   app.all("/api/*", (c) => c.json({ error: "Not found" }, 404));
   app.get("*", (c) => serveWeb(c, ctx.webDir));

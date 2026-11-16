@@ -22,6 +22,7 @@ import {
 import { isoDate } from "../../../src/shared/time.ts";
 import { AccountName, ConfidenceBadge, FormGrid, PlatformMark, ReopenedBadge, SeverityBadge, StatusBadge } from "./ui.tsx";
 import { useShell } from "../shell.tsx";
+import { DEPENDENCY_EVIDENCE_KEYS, DependencyEvidenceView } from "./dependencies.tsx";
 
 type Editable = Pick<Triage, "status" | "owner" | "note" | "dueDate" | "acceptUntil">;
 /** Statuses where a due date means nothing: the finding is out of the queue. */
@@ -92,12 +93,15 @@ export function FindingHeader({ f, actions, hideTitle }: { f: Finding; actions?:
 /** What was found, why it matters, how to fix it, and the evidence. */
 export function FindingBody({ f }: { f: Finding }) {
   const chain = f.evidence?.chain;
-  const rest = f.evidence ? Object.fromEntries(Object.entries(f.evidence).filter(([k]) => k !== "securityCenter" && k !== "chain")) : {};
+  const shown = new Set(["securityCenter", "chain", ...DEPENDENCY_EVIDENCE_KEYS]);
+  const rest = f.evidence ? Object.fromEntries(Object.entries(f.evidence).filter(([k]) => !shown.has(k))) : {};
   const raw = Object.keys(rest).length ? JSON.stringify(rest, null, 2) : null;
   const sc = f.evidence?.securityCenter;
   return (
     <div className="flex flex-col gap-4 text-sm">
       {f.detail && <Section label="What we found">{f.detail}</Section>}
+      {/* A dependency's upgrade and where it's used are what to act on, so they come before the explanation. */}
+      <DependencyEvidenceView f={f} />
       {f.why && <Section label="Why it matters">{f.why}</Section>}
       {f.fix && (
         <Section label="How to fix">

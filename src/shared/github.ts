@@ -1,11 +1,14 @@
 // What Keelson's GitHub App may read, in GitHub's permission names. The same list
 // pre-fills the App's registration page (the Add accounts steps) and limits the
 // token Keelson asks for on every scan, so even an App given more than this gets
-// a token that can only read these. Portable: used by the server and the web.
+// a token that can only read these. Contents is used for dependency files only
+// (manifests, lock files, workflows, Dockerfiles), never source code. Portable:
+// used by the server and the web.
 
 /** GitHub's permission names, each with the level Keelson asks for: always read. */
 export const GITHUB_APP_PERMISSIONS = {
   metadata: "Repository metadata",
+  contents: "Repository contents",
   administration: "Repository administration",
   repository_hooks: "Repository webhooks",
   pages: "Pages",

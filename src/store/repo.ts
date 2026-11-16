@@ -5,6 +5,7 @@
 //   repo.scans      scan lifecycle, trends and retention
 //   repo.findings   findings with triage, and each finding's timeline
 //   repo.users      the people who sign in, and their roles
+//   repo.cache      what providers keep between scans (GitHub's SBOMs)
 
 import type { Store } from "./db.ts";
 import { SettingsRepo } from "./settings.ts";
@@ -12,6 +13,7 @@ import { AccountRepo, EntityRepo, type Account, type Entity } from "./accounts.t
 import { ScanRepo } from "./scans.ts";
 import { FindingRepo } from "./findings.ts";
 import { UserRepo } from "./users.ts";
+import { CacheRepo } from "./cache.ts";
 import { resolveScope, type ResolvedScope } from "../shared/scope.ts";
 
 export type { Account, Entity, EntityNotifications, EntityUpdate } from "./accounts.ts";
@@ -20,6 +22,7 @@ export { DEFAULT_SETTINGS, type Overrides } from "./settings.ts";
 export type { StoredFinding, TriagePatch } from "./findings.ts";
 export type { DoneScan } from "./scans.ts";
 export type { User } from "./users.ts";
+export type { AccountCache } from "./cache.ts";
 export type { Settings } from "../shared/api.ts";
 export { displayName } from "../shared/scope.ts";
 
@@ -34,6 +37,7 @@ export class Repo {
   readonly scans: ScanRepo;
   readonly findings: FindingRepo;
   readonly users: UserRepo;
+  readonly cache: CacheRepo;
 
   constructor(store: Store) {
     this.store = store;
@@ -43,6 +47,7 @@ export class Repo {
     this.scans = new ScanRepo(store);
     this.findings = new FindingRepo(store);
     this.users = new UserRepo(store);
+    this.cache = new CacheRepo(store);
   }
 
   /**

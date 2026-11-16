@@ -48,13 +48,16 @@ export class Scanner {
   readonly #repo: Repo;
   readonly #vault: TokenVault;
   readonly #log: (msg: string) => void;
+  readonly #toolDir: string | null;
   #jobs: Job[] = [];
   #current: Job | null = null;
 
-  constructor(repo: Repo, vault: TokenVault, log: (msg: string) => void) {
+  /** `toolDir`: where scanners keep data between scans (Grype's database), or null to keep none. */
+  constructor(repo: Repo, vault: TokenVault, log: (msg: string) => void, opts: { toolDir?: string | null } = {}) {
     this.#repo = repo;
     this.#vault = vault;
     this.#log = log;
+    this.#toolDir = opts.toolDir ?? null;
   }
 
   #perEntity(accountId: string): boolean {
@@ -152,6 +155,8 @@ export class Scanner {
         account,
         probeTakeovers: settings.probes.takeover,
         previous: prev?.snapshot ? (JSON.parse(prev.snapshot as string) as ScanSnapshot) : null,
+        cache: this.#repo.cache.for(account.id),
+        toolDir: this.#toolDir,
         engine: {
           orgDomains: [...(entity?.orgDomains || []), ...siblings.domains],
           disabledChecks: overrides.disabled,

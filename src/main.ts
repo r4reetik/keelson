@@ -61,7 +61,7 @@ export async function start(o: StartOptions): Promise<Running> {
   repo.scans.recoverInterrupted();
   if (o.dataDir) importLegacy(o.dataDir, repo, vault, log.info);
 
-  const scanner = new Scanner(repo, vault, log.info);
+  const scanner = new Scanner(repo, vault, log.info, { toolDir: o.dataDir ? join(o.dataDir, "tools") : null });
   const auth = new Auth(
     {
       insecureNoAuth: o.insecureNoAuth,

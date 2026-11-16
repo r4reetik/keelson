@@ -14,6 +14,7 @@ export const CATEGORIES = [
   "DNS",
   "Email",
   "Platform",
+  "Supply chain",
   "Monitoring",
   "Change risk",
   "Cost & usage",

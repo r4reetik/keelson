@@ -121,17 +121,20 @@ Per-region settings are only judged where something runs, so an empty region doe
 ### GitHub
 
 Every organization a GitHub App you register is installed on, and every repository it can read. Keelson reads
-settings and the alerts GitHub's own code security raises; it doesn't read or run your code, and never reads a
-leaked secret's value.
+settings and the alerts GitHub's own code security raises, and each repository's manifest and lock files to keep
+a software bill of materials (SBOM) with Anchore's [Syft](https://github.com/anchore/syft),
+[Grype](https://github.com/anchore/grype) and [Grant](https://github.com/anchore/grant), when they are installed.
+It doesn't read or run your code, and never reads a leaked secret's value.
 
 | Area | Examples |
 |---|---|
 | Identity & access | Two-factor authentication not required, a base permission that lets every member write to every repository, members who can create public repositories, fork private ones, make private repositories public, or delete and transfer repositories, too many owners, deploy keys that can push, other GitHub Apps that can change every repository |
 | Change risk | Default branches that take changes without a pull request, that keep an approval after new commits are pushed, that allow force pushes or deletion, or whose review rule administrators can skip. Classic branch protection and rulesets, the repository's and the organization's, count alike. Public repositories whose published releases and tags can still be changed |
 | Secrets | Leaked secrets GitHub found and nobody resolved (critical while GitHub says the secret still works), public repositories without secret scanning, push protection off |
-| Platform | Open critical and high Dependabot and code scanning alerts, Dependabot alerts off, public repositories code scanning has never analysed, Dependabot security updates off where Dependabot has found something |
+| Platform | Open critical and high code scanning alerts, Dependabot alerts off, public repositories code scanning has never analysed, Dependabot security updates off where Dependabot has found something |
 | Deployments | Public repositories that can run jobs on your self-hosted runners (critical when a runner keeps state between jobs and outside contributors' pull requests run without approval), pull requests from forks of private repositories that get secrets or a write token, workflows whose GITHUB_TOKEN can write by default, workflows that can approve pull requests, any third-party action allowed to run |
 | TLS & HTTPS | Webhooks that skip certificate checks or send over plain HTTP, Pages sites that don't enforce HTTPS |
+| Supply chain | Open critical and high Dependabot alerts, dependencies with a vulnerability attackers are exploiting (CISA's catalog), with a critical or high vulnerability or one likely to be exploited soon (FIRST's EPSS), or known to be malicious; third-party actions used by a tag that can be moved; projects that install dependencies without a lock file; dependencies under a strong copyleft license. A monorepo's findings name the project in it that uses each package, directly or through another package, and the smallest upgrade that fixes it |
 
 ### Sonar: external attack surface
 
@@ -211,7 +214,8 @@ finding has its own page with a history of each scan and triage change, to share
 - **Zones** (Cloudflare). A settings grid for every zone: TLS, HSTS, DNSSEC, WAF, rate limits, bots and more.
 - **Projects** (Vercel). Every project: who can open its previews and *.vercel.app URLs, fork protection, the firewall and its managed rules, how many secrets are Sensitive.
 - **Regions** (AWS). Every enabled region: what runs there, whether GuardDuty is on, and its open findings, plus the account's global resources.
-- **Repositories** (GitHub). Every repository: how its default branch is protected, secret scanning and push protection, open security alerts, its Pages site and its open findings.
+- **Repositories** (GitHub). Every repository: how its default branch is protected, secret scanning and push protection, open security alerts, what it depends on, its Pages site and its open findings. Each repository's page lists its projects (every part of a monorepo, with its ecosystems, lock file and base images), every package with where it's used, its known vulnerabilities and license, and downloads the SBOM as CycloneDX, SPDX or Syft JSON.
+- **Dependencies** (GitHub). Every package across your repositories' SBOMs, filtered by vulnerability status (exploited, has a fix, no fix yet, malicious), severity, package manager, repository, license risk, direct or not, runtime or development, and the triage of its findings, with each package's repositories and findings a click away. A Vulnerabilities tab lists each CVE with the packages it affects, and a Licenses tab is Grant's report: every license with its risk class. Packages export as CSV.
 - **Activity** (Cloudflare). Seven days of audit log, filtered down to changes, with destructive actions highlighted.
 - **Value** (Cloudflare). What you pay for, the traffic and threats it handled, and features your plans include but that are switched off.
 - **Audit report.** A print-ready report for auditors and management (use the browser's Save as PDF). Findings also export as CSV and JSON.
@@ -289,6 +293,11 @@ make it public under its **Advanced** settings (the key stays yours, so nobody e
 On every scan Keelson asks GitHub for a token limited to reading what it checks, even if the App was given more.
 That request is the one POST Keelson sends to GitHub; everything else is GET. The permissions each source needs
 are in [docs/permissions.md](docs/permissions.md#github).
+
+To keep an SBOM of each repository, give the App **Contents: Read-only** and install Syft, Grype and Grant where
+Keelson runs (they aren't in the Docker image yet). Keelson fetches only manifest and lock files, workflows and
+Dockerfiles, never the code, and makes a repository's SBOM again only when one of them changes. Grype keeps its
+vulnerability database, about 3 GB, in the data folder and downloads it from Anchore on the first scan.
 
 ### Sonar (Shodan, optional)
 
