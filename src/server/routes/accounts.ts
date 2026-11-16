@@ -10,10 +10,18 @@ import { PROVIDER } from "../../providers/index.ts";
 import { requirePermission } from "../middleware.ts";
 import { ownAccount, reaches, unlimitedOnly, viewOf } from "../access.ts";
 import { publicAccount, publicEntity } from "../present.ts";
-import { ACCOUNT_ID_PATTERN } from "../../shared/providers.ts";
+import { ACCOUNT_ID_PATTERN, accountIdForEntity, entityOfAccountId } from "../../shared/providers.ts";
 import { accountIds, bool, cleanName, direction, param, providerId, readJson, requireJson, token } from "../validate.ts";
 import { badRequest, conflict } from "../errors.ts";
-import type { AccountRow, AccountsResponse, AddAccountsResponse, TemplateResponse, VerifyResponse } from "../../shared/api.ts";
+import {
+  LINK_PROVIDER,
+  type AccountRow,
+  type AccountsResponse,
+  type AddAccountsResponse,
+  type ScanSnapshot,
+  type TemplateResponse,
+  type VerifyResponse,
+} from "../../shared/api.ts";
 
 /** Permissions are probed for the first few accounts a token can read; the rest are assumed alike. */
 const PROBE_LIMIT = 10;
@@ -22,7 +30,14 @@ export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
   const manage = r.with(requirePermission("accounts"));
   /** Drops tokens that no account references any more. */
   const pruneTokens = () => vault.retain(new Set(repo.accounts.list().map((a) => a.tokenId)));
-  const visibleAccounts = (p: Provider, t: string) => p.listAccounts(t).catch(() => [] as { id: string; name: string }[]);
+  /**
+   * What a credential can read. A per-entity provider (Sonar) has one account per entity instead, so its "accounts"
+   * are the entities this person can add to, named after them.
+   */
+  const accountsFor = async (p: Provider, t: string, c: Parameters<typeof viewOf>[1]) =>
+    p.info.perEntity
+      ? viewOf(repo, c).entities.map((e) => ({ id: accountIdForEntity(e.id), name: e.name }))
+      : p.listAccounts(t).catch(() => [] as { id: string; name: string }[]);
 
   r.get("/api/accounts/template", (c) => {
     const p = PROVIDER[providerId(c.req.query("provider"))];
@@ -31,16 +46,38 @@ export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
     return c.json({ url: help.templateUrl ?? help.url, readAllUrl: help.url, template: !!help.templateUrl } satisfies TemplateResponse);
   });
 
+  /**
+   * The accounts a provider that starts from its siblings (Sonar, `reads`) needs scanned again: in the entities of
+   * `ids`, the ones whose latest scan doesn't have a list their provider publishes, because it predates the list.
+   * The scanner runs them first. A list left out because it couldn't be read only costs one more scan.
+   */
+  const staleFor = (p: Provider, ids: string[]): string[] => {
+    if (!p.reads?.length) return [];
+    const entities = new Set(ids.map((id) => repo.accounts.get(id)?.entityId));
+    return repo.accounts
+      .list()
+      .filter((a) => entities.has(a.entityId) && !ids.includes(a.id))
+      .filter((a) => {
+        const latest = repo.scans.latest(a.id);
+        if (!latest?.snapshot) return false;
+        const links = (JSON.parse(latest.snapshot as string) as ScanSnapshot).links ?? {};
+        return p.reads!.some((k) => LINK_PROVIDER[k] === a.provider && !(k in links));
+      })
+      .map((a) => a.id);
+  };
+
   manage.post("/api/accounts/verify", async (c) => {
     const body = await requireJson(c);
     const p = PROVIDER[providerId(body.provider)];
     const t = token(body.token, p.info.id);
     const ids = accountIds(body.accountIds ?? (body.accountId ? [body.accountId] : []), p.info.id);
-    const [info, visible] = await Promise.all([p.verify(t, ids), visibleAccounts(p, t)]);
+    const [info, visible] = await Promise.all([p.verify(t, ids), accountsFor(p, t, c)]);
     if (!info.valid) return c.json({ token: info, accounts: [], probes: {}, probeLimit: PROBE_LIMIT } satisfies VerifyResponse);
     const known = new Map(repo.accounts.list().map((a) => [a.id, a]));
     const user = c.get("user");
-    const probes = Object.fromEntries(await Promise.all(ids.slice(0, PROBE_LIMIT).map(async (id) => [id, await p.probe(t, id)] as const)));
+    // A per-entity provider's probe depends on the credential alone, so it is asked once.
+    const once = p.info.perEntity && ids.length ? await p.probe(t, ids[0]) : null;
+    const probes = Object.fromEntries(await Promise.all(ids.slice(0, PROBE_LIMIT).map(async (id) => [id, once ?? (await p.probe(t, id))] as const)));
     return c.json({
       token: info,
       probes,
@@ -62,7 +99,7 @@ export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
     if (!ids.length) throw badRequest(`Choose at least one ${p.info.account}.`);
     const info = await p.verify(t, ids);
     if (!info.valid) throw badRequest(info.message || `The ${p.info.credential} is not valid.`);
-    const visible = new Map((await visibleAccounts(p, t)).map((a) => [a.id, a.name]));
+    const visible = new Map((await accountsFor(p, t, c)).map((a) => [a.id, a.name]));
     const unseen = ids.find((id) => !visible.has(id));
     if (unseen) throw badRequest(`This ${p.info.credential} can't read ${p.info.account} ${unseen}.`);
     const other = ids.map((id) => repo.accounts.get(id)).find((a) => a && a.provider !== p.info.id);
@@ -75,7 +112,10 @@ export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
     // created only when at least one account is new; otherwise it would be left empty.
     const fresh = ids.filter((id) => !repo.accounts.get(id));
     let entityId: number;
-    if (body.entityId != null) {
+    if (p.info.perEntity) {
+      // Each account goes to the entity it watches (its ID names it); the response names the first.
+      entityId = entityOfAccountId(ids[0])!;
+    } else if (body.entityId != null) {
       const e = repo.entities.get(Number(body.entityId));
       if (!e || !reaches(user, e.id)) throw badRequest("That entity no longer exists.");
       entityId = e.id;
@@ -98,15 +138,18 @@ export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
       updated: string[] = [];
     for (const id of ids) {
       if (repo.accounts.get(id)) {
-        repo.accounts.update(id, { tokenId, tokenKind: info.kind, name: visible.get(id) ?? null });
+        repo.accounts.update(id, { tokenId, tokenKind: info.kind, ...(p.info.perEntity ? {} : { name: visible.get(id) ?? null }) });
         updated.push(id);
+      } else if (p.info.perEntity) {
+        repo.accounts.add({ id, provider: p.info.id, name: p.info.label, entityId: entityOfAccountId(id)!, tokenId, tokenKind: info.kind });
+        added.push(id);
       } else {
         repo.accounts.add({ id, provider: p.info.id, name: visible.get(id) ?? null, entityId, tokenId, tokenKind: info.kind });
         added.push(id);
       }
     }
     pruneTokens();
-    scanner.start("setup", ids);
+    scanner.start("setup", [...staleFor(p, ids), ...ids]);
     return c.json({ ok: true, added, updated, entityId } satisfies AddAccountsResponse);
   });
 
@@ -139,6 +182,10 @@ export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
     const scheduled = body.scheduled === undefined ? undefined : bool(body.scheduled, "scheduled");
     const entity = body.entityId === undefined ? undefined : repo.entities.get(Number(body.entityId));
     if (body.entityId !== undefined && (!entity || !reaches(c.get("user"), entity.id))) throw badRequest("Unknown entity");
+    if (entity && entity.id !== a.entityId && PROVIDER[a.provider].info.perEntity)
+      throw badRequest(
+        `This account watches ${repo.entities.get(a.entityId)?.name ?? "its entity"} from the internet, so it stays there. Add one to the other entity instead.`,
+      );
     const move = body.move === undefined ? undefined : direction(body.move);
     repo.store.tx(() => {
       if (alias !== undefined) repo.accounts.update(a.id, { alias });
@@ -155,7 +202,7 @@ export function accountRoutes(r: Routes, { repo, scanner, vault }: AppContext) {
     const t = token((await readJson(c))?.token, a.provider);
     const info = await p.verify(t, [a.id]);
     if (!info.valid) throw badRequest(info.message || `The ${p.info.credential} is not valid.`);
-    if (!(await visibleAccounts(p, t)).some((v) => v.id === a.id)) throw badRequest(`This ${p.info.credential} can't read this ${p.info.account}.`);
+    if (!(await accountsFor(p, t, c)).some((v) => v.id === a.id)) throw badRequest(`This ${p.info.credential} can't read this ${p.info.account}.`);
     repo.accounts.update(a.id, { tokenId: vault.put(t, info.kind), tokenKind: info.kind });
     pruneTokens();
     scanner.start("token", [a.id]);

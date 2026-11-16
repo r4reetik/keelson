@@ -21,6 +21,7 @@ import type {
   ProjectRow,
   RegionRow,
   RepoRow,
+  SurfaceView,
   ProviderScore,
   ScanMeta,
   Settings,
@@ -236,6 +237,31 @@ export function regions(scans: AccountScan[]): RegionRow[] | null {
 export function repos(scans: AccountScan[]): RepoRow[] | null {
   if (!scans.some((s) => s.scan.snap.repos)) return null;
   return scans.flatMap(({ account, scan }) => tag(scan.snap.repos, account));
+}
+
+/** Sonar's outside view, every row tagged with its account and named by its entity: there is one such account per entity. */
+export function surface(scans: AccountScan[]): SurfaceView | null {
+  const views = scans.filter((s) => s.scan.snap.surface);
+  if (!views.length) return null;
+  const named = <T extends object>(rows: T[], { account, entity }: AccountScan) =>
+    tag(rows, account).map((r) => ({ ...r, account: entity?.name ?? r.account }));
+  return {
+    domains: views.flatMap((v) => named(v.scan.snap.surface!.domains, v)),
+    hosts: views.flatMap((v) => named(v.scan.snap.surface!.hosts, v)),
+    addresses: views.flatMap((v) => named(v.scan.snap.surface!.addresses, v)),
+    loadBalancers: views.flatMap((v) => named(v.scan.snap.surface!.loadBalancers ?? [], v)),
+    unresolved: views.reduce((n, { scan }) => n + scan.snap.surface!.unresolved, 0),
+    // Amass's numbers add up across the entities in view; it ran in none of them when none has numbers.
+    amass: views.some((v) => v.scan.snap.surface!.amass)
+      ? views.reduce(
+          (sum, v) => {
+            const a = v.scan.snap.surface!.amass;
+            return a ? { names: sum.names + a.names, added: sum.added + a.added, minutes: Math.max(sum.minutes, a.minutes) } : sum;
+          },
+          { names: 0, added: 0, minutes: 0 },
+        )
+      : null,
+  };
 }
 
 export function value(scans: AccountScan[]): ValueView | null {

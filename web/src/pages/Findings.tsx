@@ -4,7 +4,7 @@
 // changes, so a search can narrow what to triage without losing the rest.
 
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Button, Checkbox, DropdownMenu, Input, Pagination, Select, Table, Tabs, Empty, useKumoToastManager } from "@cloudflare/kumo";
+import { Button, Checkbox, DropdownMenu, Input, Pagination, Select, Table, Tabs, Empty, useKumoToastManager, Link } from "@cloudflare/kumo";
 import {
   CaretDownIcon,
   CaretRightIcon,
@@ -21,7 +21,6 @@ import {
   dateOnly,
   filterFindings,
   filtersFromParams,
-  link,
   num,
   openFor,
   plural,
@@ -478,11 +477,11 @@ interface TableProps {
 
 /** The finding title as a real link: a click opens the dialog, a modifier click opens the page. */
 function TitleLink({ f, onOpen, wrap }: { f: Finding; onOpen: (f: Finding) => void; wrap?: boolean }) {
-  const l = link(`/findings/${f.fingerprint}`);
   return (
-    <a
-      href={l.href}
-      className={`${wrap ? "" : "truncate "}text-kumo-default hover:text-kumo-link focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-kumo-brand focus-visible:outline-none`}
+    <Link
+      variant="plain"
+      href={`/findings/${f.fingerprint}`}
+      className={wrap ? undefined : "truncate"}
       onClick={(e) => {
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
         e.preventDefault();
@@ -491,7 +490,7 @@ function TitleLink({ f, onOpen, wrap }: { f: Finding; onOpen: (f: Finding) => vo
       }}
     >
       {f.title}
-    </a>
+    </Link>
   );
 }
 
@@ -737,15 +736,15 @@ function GroupedTable({
             <Fragment key={g.id}>
               <Table.Row className="cursor-pointer" onClick={flip}>
                 <Table.Cell onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    shape="square"
                     aria-expanded={isOpen}
                     aria-label={`${isOpen ? "Collapse" : "Expand"} ${typeof g.title === "string" ? g.title : "group"}`}
                     onClick={flip}
-                    className="flex h-7 w-7 items-center justify-center rounded text-kumo-subtle hover:bg-kumo-tint focus-visible:ring-2 focus-visible:ring-kumo-brand focus-visible:outline-none"
-                  >
-                    {isOpen ? <CaretDownIcon /> : <CaretRightIcon />}
-                  </button>
+                    icon={isOpen ? <CaretDownIcon /> : <CaretRightIcon />}
+                  />
                 </Table.Cell>
                 <Table.Cell onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                   <Checkbox

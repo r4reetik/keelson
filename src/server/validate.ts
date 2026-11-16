@@ -42,7 +42,10 @@ export async function requireJson(c: Context): Promise<Body> {
 /** A provider's credential as it is stored: a token, or its several fields joined (PROVIDER_INFO.fields). */
 export function token(v: unknown, provider: ProviderId = "cloudflare"): string {
   const t = String(v ?? "").trim();
-  const what = PROVIDER_INFO[provider].credential;
+  const info = PROVIDER_INFO[provider];
+  const what = info.credential;
+  // A provider whose credential is optional (Sonar's Shodan key) stores an empty one.
+  if (!t && info.fields.every((f) => f.optional)) return "";
   if (!t || t.length > MAX_TOKEN) throw badRequest(`Enter ${/^[aeiou]/i.test(what) ? "an" : "a"} ${what}.`);
   return t;
 }

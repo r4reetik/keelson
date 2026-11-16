@@ -91,6 +91,47 @@ installation token request is the one other POST (it creates a token that can on
 `test/integration.test.ts` (Cloudflare), `test/vercel.test.ts` (Vercel), `test/aws.test.ts` (AWS) and
 `test/github.test.ts` (GitHub) fail on any other request. AWS services whose APIs only accept POST (CloudTrail, KMS, Config, ECS and others) are read with POST, but only for the read actions named in `READ_ACTIONS` (`src/providers/aws/client.ts`): `rpc()` refuses any other before sending it, and `test/aws.test.ts` fails on a POST for any action that isn't on the list.
 
+## Sonar: the view from outside
+
+Sonar (`src/providers/internet/`) is a provider without an API of its own. Its provider is `internet`, and
+`PROVIDER_INFO.internet.perEntity` makes the account routes offer one account per entity (`ext_<entity ID>`) instead
+of listing accounts from a credential; that account can't move to another entity. Its only credential is an optional
+Shodan API key, and it is scanned after every other queued account, since it starts from their latest scans. Adding it
+also queues the entity's accounts whose latest scan predates the lists it reads (`Provider.reads`).
+
+1. **Starting point.** From `related` (below): the entity's Cloudflare and Route 53 zones and host records
+   (`cloudflareZones`, `cloudflareDns`, `route53Zones`, `route53Dns`), Vercel and GitHub Pages domains, the addresses
+   AWS holds and the ones it released, plus the entity's own domains. Names under a platform's shared domains
+   (`*.vercel.app`, `*.github.io`…) are never the entity's.
+2. **Discovery.** For each domain: CAA and nameservers from public DNS, valid certificates from crt.sh (one domain at
+   a time, with retries), and with a key, Shodan's subdomains. Hostnames that AWS load balancer rules route by name
+   join them. Then, when Amass is installed (`amass.ts`: `KEELSON_AMASS`, or `amass` on the PATH), Keelson starts an
+   Amass engine with a home directory of its own, runs a passive enumeration of the domains limited to them
+   (`-rigid`; no `-active`, brute forcing or alterations), reads the names back and stops the engine; the directory
+   is deleted. The engine listens on port 4000 while it runs, and an engine that stops mid-run stops the scan's use of
+   Amass with its own error. Names no
+   connected DNS lists are looked up in public DNS.
+3. **Into AWS.** Each hostname's CNAME, alias or proxied origin is matched with the entity's AWS load balancers
+   (`awsLoadBalancers`: each listener's rules in the order the load balancer tries them, the target groups they forward
+   to and the targets registered there, with each target's public address and whether its security groups let anyone
+   reach its port), and an A record with the addresses AWS holds (`awsExposure`: what has each address and the inbound
+   rules that admit anyone), following CNAMEs through the entity's own hostnames. `routesFor` in `checks/routing.ts`
+   gives the rules a request for a hostname can take. A
+   header condition keeps the header's name only: its value can be a shared secret.
+4. **Addresses.** Shodan is asked about addresses the entity's AWS accounts hold and addresses its DNS points at
+   directly (or through a CNAME under its own domains). Private addresses, Cloudflare's, Vercel's and GitHub Pages'
+   shared ones, released AWS addresses and AWS addresses no AWS account in the entity holds are left out. With a key,
+   Shodan's API answers (at most once a second); without one, InternetDB. Only ports, products, versions, CVE IDs and
+   the entity's own hostnames are kept.
+5. **Checks and view.** The checks in `src/providers/internet/checks/` judge the result; `views.ts` stores the
+   domains, hostnames (with their path into AWS), load balancers and addresses for the Attack surface page
+   (`/api/surface`).
+
+Nothing is sent to the entity's hosts, and every request is a GET (`test/internet.test.ts` fails otherwise). A
+source it couldn't read is a coverage gap like any other: an account in the entity that hasn't been scanned since
+Sonar was added makes `related` one, and the checks that need it are skipped; an AWS account not scanned since load
+balancer routing was added makes `routing` one. Amass not being installed makes `amass` one, and nothing else.
+
 ## Checks that span providers
 
 Some problems only show when a company's accounts on different providers are compared, for example a Cloudflare
@@ -100,7 +141,9 @@ distribution none of its AWS accounts has. Each scan stores a few `links` in its
 record; Vercel, the domains its projects serve; AWS, its CloudFront domain names, load balancer names, buckets,
 public addresses, account ID, and who its web origins' security groups let in on ports 80 and 443 (`awsOrigins`:
 anyone, only Cloudflare's ranges, or other public ranges; never the ranges themselves); GitHub, the custom domains of
-its Pages sites. A list is left out when its scan couldn't read all of it. When an account is
+its Pages sites. Cloudflare and AWS also share their zones and host records (`cloudflareDns`, `route53Dns`), and AWS
+its load balancers' routing and what its public addresses let anyone reach (`awsLoadBalancers`, `awsExposure`), for Sonar.
+A list is left out when its scan couldn't read all of it. When an account is
 scanned, the scanner merges every list from the latest scans of the other accounts in the same entity and passes
 them to the checks as `related`. A list is only used when every account of the provider that publishes it
 (`LINK_PROVIDER`) supplied it: if one hasn't been scanned yet, or left it out, the merged list is incomplete, it is
@@ -163,11 +206,12 @@ src/
     vercel/             Vercel: read-only client, sources, inventory, checks, views, token checks
     aws/                AWS: signed read-only client, sources, inventory, checks, views, access key checks
     github/             GitHub: App client (JWT, read-only installation token), sources, inventory, checks, views, App checks
+    internet/           Sonar: crt.sh and Shodan client, discovery from the entity's accounts, checks, views
   store/                SQLite: migrations (db.ts) and one repository per concern
   server/               Hono app: routes/, guards, validation, presentation
   shared/               API types and logic shared with the web app (no Node, no DOM)
 web/src/                React app: routes.tsx lists every page
-dev/mock/               mocked Cloudflare, Vercel, AWS and GitHub APIs, for tests and `npm run dev -- --mock`
+dev/mock/               mocked Cloudflare, Vercel, AWS and GitHub APIs, and crt.sh and Shodan, for tests and `npm run dev -- --mock`
 scripts/                dev runner, and the generator for docs/checks.md and docs/permissions.md
 test/                   node:test suites
 ```

@@ -2,9 +2,9 @@
 // scanning and push protection are on, open security alerts, the Pages site, and
 // open findings. The GitHub counterpart of Zones, Projects and Regions.
 
-import { Badge, Input, Switch, Table } from "@cloudflare/kumo";
+import { Badge, Input, Switch, Table, Link } from "@cloudflare/kumo";
 import { useScopedApi, useShell } from "../shell.tsx";
-import { link, num, plural, SCORED_SEVERITIES, setParams, totalScored, useLocation, type RepoRow, type ReposResponse } from "../lib.ts";
+import { num, plural, SCORED_SEVERITIES, setParams, totalScored, useLocation, type RepoRow, type ReposResponse } from "../lib.ts";
 import { Flag, ListCard, NoRows, Page, PageState, SeverityBadge, unreadableText } from "../components/ui.tsx";
 
 const TITLE = "Repositories";
@@ -95,9 +95,9 @@ export function RepositoriesPage() {
                   <Table.Row key={`${r.accountId}/${r.name}`}>
                     <Table.Cell sticky="left" className="whitespace-nowrap">
                       <span className="inline-flex items-center gap-2">
-                        <a className="text-kumo-link hover:underline" {...link(href)}>
+                        <Link variant="plain" href={href}>
                           {r.name}
-                        </a>
+                        </Link>
                         {r.visibility !== "private" && <Badge variant="outline">{r.visibility === "public" ? "Public" : "Internal"}</Badge>}
                         {r.archived && <Badge variant="neutral">Archived</Badge>}
                       </span>

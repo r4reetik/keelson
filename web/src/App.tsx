@@ -4,7 +4,20 @@
 // yet the shell still opens: pages that need one show how to add it (GetStarted).
 
 import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Breadcrumbs, Button, ButtonGroup, DropdownMenu, Sidebar, Toasty, Tooltip, TooltipProvider, useKumoToastManager } from "@cloudflare/kumo";
+import {
+  Breadcrumbs,
+  Button,
+  ButtonGroup,
+  DropdownMenu,
+  Empty,
+  LayerCard,
+  LinkProvider,
+  Sidebar,
+  Toasty,
+  Tooltip,
+  TooltipProvider,
+  useKumoToastManager,
+} from "@cloudflare/kumo";
 import {
   ArrowCircleUpIcon,
   ArrowsClockwiseIcon,
@@ -13,6 +26,7 @@ import {
   CaretUpDownIcon,
   CheckSquareIcon,
   GearIcon,
+  PlugsIcon,
   GlobeIcon,
   KeyIcon,
   SignOutIcon,
@@ -53,7 +67,7 @@ import {
 } from "./lib.ts";
 import { ShellContext, useShell, type Shell } from "./shell.tsx";
 import { NAV_GROUPS, ROUTES, ReportPage, matchRoute } from "./routes.tsx";
-import { Loading, NoRows, Page, ProviderIcon } from "./components/ui.tsx";
+import { AppLink, Loading, NoRows, Page, ProviderIcon } from "./components/ui.tsx";
 import { Wordmark } from "./components/brand.tsx";
 import { GetStarted, NoAccountsYet } from "./pages/Setup.tsx";
 import { ChangePasswordDialog, ChangePasswordPage, LoginPage, SignupPage } from "./pages/Login.tsx";
@@ -62,7 +76,9 @@ export function App() {
   return (
     <Toasty>
       <TooltipProvider delay={300}>
-        <Root />
+        <LinkProvider component={AppLink}>
+          <Root />
+        </LinkProvider>
       </TooltipProvider>
     </Toasty>
   );
@@ -86,23 +102,57 @@ function Root() {
   useEffect(() => onApiError(() => void refreshSession()), [refreshSession]);
   const { path } = useLocation();
 
-  if (failed) {
-    return (
-      <div className="mx-auto max-w-md p-10 text-sm">
-        <p className="font-medium text-kumo-danger">The Keelson server is unreachable.</p>
-        <p className="mt-1 text-kumo-subtle">{failed}</p>
-        <Button className="mt-4" size="sm" onClick={() => void refreshSession()}>
-          Try again
-        </Button>
-      </div>
-    );
-  }
+  if (failed) return <Unreachable error={failed} retry={refreshSession} />;
   if (!session) return <Loading />;
   if (session.setupRequired) return <SignupPage codeRequired={session.setupCodeRequired} onDone={refreshSession} />;
   if (!session.user) return <LoginPage onDone={refreshSession} />;
   if (session.user.mustChangePassword) return <ChangePasswordPage user={session.user} onDone={refreshSession} />;
   // Nothing connected yet still opens the app; the report has nothing to show, so it opens the app too.
   return <AppShell session={session} refreshSession={refreshSession} standalone={path === "/report" && !!session.accounts?.length} />;
+}
+
+/** How often the app asks again while the server doesn't answer. */
+const RETRY_SECONDS = 5;
+
+/**
+ * Before the app has a session, the server didn't answer. In the same frame as signing in, and it keeps asking:
+ * a server that is restarting (an upgrade, or a change while developing) comes back on its own.
+ */
+function Unreachable({ error, retry }: { error: string; retry: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const again = useCallback(async () => {
+    setBusy(true);
+    await retry();
+    setBusy(false);
+  }, [retry]);
+  useEffect(() => {
+    const t = setInterval(() => void again(), RETRY_SECONDS * 1000);
+    return () => clearInterval(t);
+  }, [again]);
+  return (
+    <div className="flex min-h-full items-center justify-center bg-kumo-canvas px-4 py-10">
+      <div className="w-full max-w-md">
+        <div className="mb-6 flex justify-center">
+          <Wordmark />
+        </div>
+        <LayerCard className="py-8">
+          <Empty
+            icon={<PlugsIcon size={40} className="text-kumo-inactive" />}
+            title="Can't reach the Keelson server"
+            description={`It may be restarting or stopped. Keelson tries again every ${RETRY_SECONDS} seconds. If this stays, start the server again or read its logs (docker logs keelson).`}
+            contents={
+              <div className="flex flex-col items-center gap-2">
+                <Button variant="secondary" loading={busy} onClick={() => void again()}>
+                  Try now
+                </Button>
+                <span className="text-xs text-kumo-subtle">Last answer: {error}</span>
+              </div>
+            }
+          />
+        </LayerCard>
+      </div>
+    </div>
+  );
 }
 
 /** Status checks that fail in a row before the app says the server is unreachable. */

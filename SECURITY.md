@@ -23,7 +23,7 @@ A false positive or missed finding in a check is not a vulnerability; use the
 ## Threat model
 
 Keelson holds the credentials of the platforms you connect (Cloudflare API tokens, Vercel access tokens,
-AWS access keys, GitHub App private keys), and a database describing accounts' configuration, including member email addresses. It is designed to:
+AWS access keys, GitHub App private keys, a Shodan API key), and a database describing accounts' configuration, including member email addresses. It is designed to:
 
 - **Only read.** The scanner issues GET requests, plus Cloudflare GraphQL analytics queries (GraphQL is sent
   as POST, as Cloudflare requires, and only ever queries). Use a Cloudflare token with read permissions;
@@ -45,6 +45,14 @@ AWS access keys, GitHub App private keys), and a database describing accounts' c
 - **Contact only what it needs.** Besides the APIs of the platforms you connect and public DNS, the optional takeover check
   sends one GET to your own hostnames that point at known cloud providers, and the update check reads
   GitHub's public list of releases once a day, sending nothing about the installation. Both can be turned off in Settings.
+  Sonar, when you add it to an entity, sends that entity's domain names to crt.sh and Shodan and its public addresses
+  to Shodan, with GET requests, and nothing to its hosts. A Shodan key travels only to `api.shodan.io`, in the request's
+  address as Shodan requires, and never into a log line or an error. Of Shodan's answers, only ports, products,
+  versions, vulnerability IDs and the entity's own hostnames are stored. When OWASP Amass is installed where Keelson
+  runs, Sonar also runs it, passive and limited to the entity's domains: Amass sends the domain names to its own data
+  sources and public DNS, and nothing to the entity's hosts. It runs
+  with no Keelson setting or credential in its environment, its database is deleted after each scan, and its engine
+  listens on port 4000 while it runs. Set `KEELSON_AMASS=off` to never run it.
   Secrets found in rules, such as hard-coded header values, and in plain-text Worker or Pages variables are
   never stored or shown; only their name (and, for headers, length) is.
 - **Keep secrets local.**

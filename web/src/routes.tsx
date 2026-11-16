@@ -5,6 +5,7 @@ import type { ProviderId } from "../../src/shared/providers.ts";
 import type { Permission } from "../../src/shared/roles.ts";
 import {
   ArrowsClockwiseIcon,
+  BroadcastIcon,
   MapPinIcon,
   BuildingsIcon,
   ClipboardTextIcon,
@@ -97,6 +98,14 @@ export const ROUTES: RouteDef[] = [
     icon: GitBranchIcon,
     providers: ["github"],
     page: page(() => import("./pages/Repositories.tsx"), "RepositoriesPage"),
+  },
+  {
+    path: "/surface",
+    label: "Attack surface",
+    group: "Inventory",
+    icon: BroadcastIcon,
+    // Shown for every platform, unlike other inventory pages: before Sonar watches an entity, the page is how it's found.
+    page: page(() => import("./pages/Surface.tsx"), "SurfacePage"),
   },
   {
     path: "/activity",

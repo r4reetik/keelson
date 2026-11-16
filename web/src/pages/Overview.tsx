@@ -4,7 +4,7 @@
 // and with several accounts, how each account compares.
 
 import { useState } from "react";
-import { Banner, Button, Table, Tabs } from "@cloudflare/kumo";
+import { Banner, Button, Table, Tabs, Link } from "@cloudflare/kumo";
 import { ArrowRightIcon, ArrowsClockwiseIcon, FileTextIcon, WarningIcon } from "@phosphor-icons/react";
 import { useScopedApi, useShell } from "../shell.tsx";
 import {
@@ -270,6 +270,7 @@ const PATH_SOURCES: Record<ProviderId, string> = {
   vercel: "deployment protection, secrets, the firewall and domains",
   aws: "IAM, security groups, buckets, databases and DNS",
   github: "organization settings, branch protection and code security alerts",
+  internet: "certificate logs, public DNS and Shodan",
 };
 
 function AttackPaths({ data, multi }: { data: Extract<Overview, { trend: unknown }>; multi: boolean }) {
@@ -353,13 +354,9 @@ function AccountsCard({ rows, unscanned, showEntity }: { rows: AccountSummary[];
           {sorted.map((a) => (
             <Table.Row key={a.id}>
               <Table.Cell className="max-w-64 truncate">
-                <button
-                  type="button"
-                  className="text-kumo-link hover:underline focus-visible:ring-2 focus-visible:ring-kumo-brand focus-visible:outline-none"
-                  onClick={() => setScope(scopeKeyFor.account(a.id))}
-                >
+                <Link variant="plain" render={<button type="button" onClick={() => setScope(scopeKeyFor.account(a.id))} />}>
                   <AccountName name={a.name} provider={a.provider} />
-                </button>
+                </Link>
               </Table.Cell>
               {showEntity && <Table.Cell className="max-w-48 truncate text-kumo-subtle">{a.entity}</Table.Cell>}
               <Table.Cell>{a.score == null ? "—" : <ScoreMeter label="Score" value={a.score} />}</Table.Cell>
@@ -410,12 +407,9 @@ function GroupTable({ rows, multi }: { rows: FindingGroup[]; multi: boolean }) {
               <Table.Cell className="max-w-md">
                 <div className="flex min-w-0 items-center gap-2">
                   <PlatformMark provider={g.providers} spans={g.spans} />
-                  <a
-                    {...link(to)}
-                    className="truncate text-kumo-link hover:underline focus-visible:ring-2 focus-visible:ring-kumo-brand focus-visible:outline-none"
-                  >
+                  <Link variant="plain" href={to} className="truncate">
                     {g.title}
-                  </a>
+                  </Link>
                   <ConfidenceBadge confidence={g.confidence} />
                 </div>
               </Table.Cell>
@@ -454,12 +448,9 @@ function BriefTable({ rows, linked, multi }: { rows: FindingBrief[]; linked: boo
                 <PlatformMark provider={f.provider} spans={f.spans} />
               </span>
               {linked ? (
-                <a
-                  {...link(`/findings/${f.fingerprint}`)}
-                  className="text-kumo-link hover:underline focus-visible:ring-2 focus-visible:ring-kumo-brand focus-visible:outline-none"
-                >
+                <Link variant="plain" href={`/findings/${f.fingerprint}`}>
                   {f.title}
-                </a>
+                </Link>
               ) : (
                 <span className="text-kumo-default">{f.title}</span>
               )}

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Input, Link, Select, Switch, Table, useKumoToastManager } from "@cloudflare/kumo";
 import { BookOpenIcon } from "@phosphor-icons/react";
 import { useScopedApi, useShell } from "../shell.tsx";
-import { api, link, num, pct, plural, SEVERITY_LABEL, siteName, type CheckRow, type ChecksResponse, type Severity } from "../lib.ts";
+import { api, num, pct, plural, SEVERITY_LABEL, siteName, type CheckRow, type ChecksResponse, type Severity } from "../lib.ts";
 import { ListCard, NoRows, Page, PageState, PlatformMark, Tag } from "../components/ui.tsx";
 type Check = CheckRow;
 
@@ -137,13 +137,14 @@ export function ChecksPage() {
                   <Table.Cell className="text-right tabular-nums">{num(c.evaluated)}</Table.Cell>
                   <Table.Cell className="text-right tabular-nums">
                     {c.failed ? (
-                      <a
-                        {...link(`/findings?check=${c.id}&status=all`)}
-                        className="text-kumo-danger hover:underline"
+                      <Link
+                        variant="current"
+                        href={`/findings?check=${c.id}&status=all`}
+                        className="text-kumo-danger"
                         title={`See the ${plural(c.failed, "finding")}${multi ? " in view" : ""}`}
                       >
                         {num(c.failed)}
-                      </a>
+                      </Link>
                     ) : (
                       "0"
                     )}

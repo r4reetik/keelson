@@ -111,6 +111,7 @@ keelson.example.com {
 | | `KEELSON_ALLOWED_HOSTS` | | Extra names for this machine when Keelson listens on loopback, comma-separated |
 | | `KEELSON_LOG=json` | text | Log one JSON object per line, for log collectors |
 | | `KEELSON_UPDATE_CHECK=off` | on | Never check GitHub for new releases, whatever Settings say |
+| | `KEELSON_AMASS` | `amass` on the `PATH` | Path to the [OWASP Amass](https://owasp.org/www-project-amass/) 5 binary Sonar runs, or `off` to never run it. The Docker image doesn't include Amass yet |
 
 Flags are for the command, so in a container they mean running it there: `docker exec keelson node dist/bin.js
 --reset-password <username>`.

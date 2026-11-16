@@ -34,7 +34,9 @@ Point Keelson at your Cloudflare accounts, your Vercel teams, your AWS accounts,
 scans them (one, or dozens across several companies), scores them, and tracks every finding until it's fixed:
 who owns it, when it's due, and which risks were accepted and until when. It runs on your machine or your
 server, and only ever reads. Use it for one platform or several: a company's accounts on every platform sit
-together in one entity, and checks that span platforms catch what no single dashboard shows.
+together in one entity, and checks that span platforms catch what no single dashboard shows. Sonar, its
+external attack surface module, then looks at each entity from the internet: the hostnames under its domains,
+the addresses they point at, and what is open there.
 
 Keelson is growing into one place for the security of everything you run: it already reads your GitHub
 organizations' settings and security alerts; next come the code itself, where that code is deployed and who can
@@ -130,6 +132,33 @@ leaked secret's value.
 | Platform | Open critical and high Dependabot and code scanning alerts, Dependabot alerts off, public repositories code scanning has never analysed, Dependabot security updates off where Dependabot has found something |
 | Deployments | Public repositories that can run jobs on your self-hosted runners (critical when a runner keeps state between jobs and outside contributors' pull requests run without approval), pull requests from forks of private repositories that get secrets or a write token, workflows whose GITHUB_TOKEN can write by default, workflows that can approve pull requests, any third-party action allowed to run |
 | TLS & HTTPS | Webhooks that skip certificate checks or send over plain HTTP, Pages sites that don't enforce HTTPS |
+
+### Sonar: external attack surface
+
+Sonar looks at an entity from outside, starting from what its connected accounts know: their domains, DNS records,
+the addresses AWS holds and the hostnames its load balancers route. It finds more hostnames under those domains in
+certificate transparency logs (crt.sh), Shodan and [OWASP Amass](https://owasp.org/www-project-amass/) (when it is
+installed where Keelson runs, on the domains of every connected account), looks them up in public DNS, and asks Shodan
+what it has seen open on the entity's addresses. Each hostname is then followed into AWS: the load balancer its DNS
+names, internal or internet-facing, the listener rules that match it, and the targets behind them, down to whether a
+target's own public address and security groups let anyone skip the load balancer. It is passive: nothing is sent to
+your hosts. Turn it on with **Watch from the internet**, on the Attack surface page or an entity's card under
+Accounts; a Shodan API key is optional, and can be added later from the Internet account's menu. The **Attack
+surface** page lists every hostname with what serves it and its path into AWS, every load balancer with its rules and
+targets, every address with its open ports, known vulnerabilities and what its security groups let anyone reach, and
+every domain with where its DNS lives and who issues its certificates.
+
+| Area | Examples |
+|---|---|
+| Attack surface | Databases and caches Shodan has seen open (Redis, MongoDB, Elasticsearch and others that need no password by default are critical), remote administration open to the internet (SSH, Remote Desktop, VNC, SMB, the Docker API, Kubelet), software with known vulnerabilities on the entity's addresses, the origin of a Cloudflare-proxied hostname that anyone can find by searching Shodan for the hostname, a load balancer's target that anyone can reach without the load balancer (critical when the rule signs visitors in first), a load balancer that still routes a hostname no DNS record points at it |
+| TLS & HTTPS | A recent certificate for the entity's names from an authority its CAA records don't allow |
+| DNS | Domains whose DNS no connected account serves, so their records go unchecked, and public hostnames that point at an internal load balancer |
+
+Shodan's data is from its own scans, so these findings are marked **Likely**. When an AWS account in the entity holds
+the address, its security groups are read alongside: a port Shodan saw that no group lets anyone reach any more is
+rated one step lower, and says so. Addresses are only asked about when
+an AWS account in the entity holds them or the entity's DNS points straight at them: not a platform's shared
+addresses, and not an address AWS was seen to release, which belongs to someone else now.
 
 ### Across providers
 
@@ -261,6 +290,13 @@ On every scan Keelson asks GitHub for a token limited to reading what it checks,
 That request is the one POST Keelson sends to GitHub; everything else is GET. The permissions each source needs
 are in [docs/permissions.md](docs/permissions.md#github).
 
+### Sonar (Shodan, optional)
+
+Sonar needs no credential. A Shodan API key adds the product and version on each open port and the subdomains
+Shodan knows; without one, Keelson asks Shodan's free InternetDB, which gives open ports and known vulnerabilities.
+Copy the key from your [Shodan account](https://account.shodan.io/) when you turn Sonar on, or later under
+**Accounts → the entity's Internet account → ⋯ → Add a Shodan API key**.
+
 ## Run it for a team (Docker)
 
 ```bash
@@ -342,7 +378,8 @@ history, email domains and alert destinations.
 - **Contained.**
   - Tokens are never sent to the browser or written to logs. Each account is only ever scanned with its own token.
   - Webhook URLs are write-only in the UI.
-  - Outbound traffic goes to `api.cloudflare.com`, `api.vercel.com`, `*.amazonaws.com` and `api.github.com` (for the platforms you connect; with AWS connected that includes AWS's public address-range file at `ip-ranges.amazonaws.com`, read without your access key), to `cloudflare-dns.com` (public DNS lookups), to any webhook you configure, and to `api.github.com` shortly after start and then daily, to see if there's a newer release (no identifying data; turn it off in Settings or with `KEELSON_UPDATE_CHECK=off`).
+  - Outbound traffic goes to `api.cloudflare.com`, `api.vercel.com`, `*.amazonaws.com` and `api.github.com` (for the platforms you connect; with AWS connected that includes AWS's public address-range file at `ip-ranges.amazonaws.com`, read without your access key), to `cloudflare-dns.com` (public DNS lookups), to `crt.sh` and Shodan for entities you add Sonar to (below), to any webhook you configure, and to `api.github.com` shortly after start and then daily, to see if there's a newer release (no identifying data; turn it off in Settings or with `KEELSON_UPDATE_CHECK=off`).
+  - **Sonar (when you add it to an entity):** the entity's domain names go to `crt.sh` (certificate transparency logs) and Shodan (`api.shodan.io` with a key, `internetdb.shodan.io` without), and its public addresses to Shodan, all with GET requests. Nothing is sent to your hosts. Shodan only accepts a key in the request's address; Keelson never logs it or puts it in an error. Of what Shodan returns, only ports, products, versions, vulnerability IDs and the entity's own hostnames are kept: banners, page content and other companies' hostnames on a shared address are dropped.
   - **Takeover check (on by default):** a `GET /` to each of your own hostnames that points at a cloud provider known for takeovers (S3, GitHub Pages, Heroku, Vercel, Azure…), over HTTPS and then HTTP if that fails, following at most two redirects on the same host. At most 100 hosts per scan, no cookies, the first 64 KB of the answer, and a User-Agent of `Keelson takeover check (+https://github.com/r4reetik/keelson)`. Turn it off under **Settings → Scans → Confirm subdomain takeovers** to keep every request inside Cloudflare's API.
   - There is no telemetry.
 - **Hardened web app.**
@@ -406,7 +443,10 @@ explicitly allow more:
 - **Code:** scan the code in your GitHub repositories itself, for vulnerable dependencies, secrets and risky
   workflows beyond what GitHub's own alerts report, without running any of it. (Organization settings, branch
   protection and GitHub's alerts are read today.)
-- **Deployments and exposure:** map which code runs where, and what can reach it from the internet.
+- **Deployments and exposure:** map which code runs where, and what can reach it from the internet. Sonar's
+  passive view (certificate logs, public DNS and Shodan) is here today; next, opt-in checks Keelson runs itself:
+  which ports answer on the addresses the entity holds, what its hostnames serve, their certificates, and
+  known-vulnerability templates, run from where Keelson runs.
 - **Cloud activity:** read CloudTrail, VPC flow logs and similar records to see what actually happened.
 - **Runtime:** watch running workloads.
 - **AI penetration testing:** an AI tester that uses everything above to test your systems from the inside

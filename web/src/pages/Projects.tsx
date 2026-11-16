@@ -1,9 +1,9 @@
 // Vercel projects: who can open their deployments, the firewall, how secrets are
 // stored, and open findings, one row per project. The Vercel counterpart of Zones.
 
-import { Input, Switch, Table } from "@cloudflare/kumo";
+import { Input, Switch, Table, Link } from "@cloudflare/kumo";
 import { useScopedApi, useShell } from "../shell.tsx";
-import { link, num, plural, SCORED_SEVERITIES, setParams, totalScored, useLocation, type ProjectRow, type ProjectsResponse } from "../lib.ts";
+import { num, plural, SCORED_SEVERITIES, setParams, totalScored, useLocation, type ProjectRow, type ProjectsResponse } from "../lib.ts";
 import { Flag, ListCard, NoRows, Page, PageState, SeverityBadge, unreadableText } from "../components/ui.tsx";
 
 const TITLE = "Projects";
@@ -112,9 +112,9 @@ export function ProjectsPage() {
                 return (
                   <Table.Row key={`${p.accountId}/${p.id}`}>
                     <Table.Cell sticky="left" className="whitespace-nowrap">
-                      <a className="text-kumo-link hover:underline" {...link(href)}>
+                      <Link variant="plain" href={href}>
                         {p.name}
-                      </a>
+                      </Link>
                       <div className="max-w-80 truncate text-sm text-kumo-subtle">
                         {multi && `${p.account} · `}
                         {[p.framework, p.domains.filter((d) => !d.endsWith(".vercel.app")).join(", ") || "No custom domain"].filter(Boolean).join(" · ")}

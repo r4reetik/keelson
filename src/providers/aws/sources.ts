@@ -93,6 +93,12 @@ const DEFS = {
     probe: (c) => c.query("elasticloadbalancing", HOME_REGION, "DescribeLoadBalancers", { PageSize: "1" }),
     regional: true,
   },
+  lbRouting: {
+    label: "Load balancer rules, target groups and their targets",
+    permission: "elasticloadbalancing:DescribeRules, elasticloadbalancing:DescribeTargetGroups, elasticloadbalancing:DescribeTargetHealth",
+    probe: (c) => c.query("elasticloadbalancing", HOME_REGION, "DescribeTargetGroups", { PageSize: "1" }),
+    regional: true,
+  },
   functions: {
     label: "Lambda functions and function URLs",
     permission: "lambda:ListFunctions, lambda:ListFunctionUrlConfigs",

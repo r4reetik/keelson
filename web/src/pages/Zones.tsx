@@ -1,6 +1,6 @@
-import { Input, Switch, Table } from "@cloudflare/kumo";
+import { Input, Switch, Table, Link } from "@cloudflare/kumo";
 import { useScopedApi, useShell } from "../shell.tsx";
-import { compact, link, num, plural, SCORED_SEVERITIES, setParams, totalScored, useLocation, type ZoneRow, type ZonesResponse } from "../lib.ts";
+import { compact, num, plural, SCORED_SEVERITIES, setParams, totalScored, useLocation, type ZoneRow, type ZonesResponse } from "../lib.ts";
 import { Flag, ListCard, NoRows, Page, PageState, SeverityBadge, unreadableText } from "../components/ui.tsx";
 import { OLD_TLS, WEAK_SECURITY_LEVELS } from "../../../src/core/cf-constants.ts";
 type Zone = ZoneRow;
@@ -131,9 +131,9 @@ export function ZonesPage() {
                 return (
                   <Table.Row key={`${z.accountId}/${z.name}`}>
                     <Table.Cell sticky="left" className="whitespace-nowrap">
-                      <a className="text-kumo-link hover:underline" {...link(href)}>
+                      <Link variant="plain" href={href}>
                         {z.name}
-                      </a>
+                      </Link>
                       <div className="text-sm text-kumo-subtle">
                         {multi && `${z.account} · `}
                         {z.planName} · {num(z.records)} records, {num(z.proxied)} proxied

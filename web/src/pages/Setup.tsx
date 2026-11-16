@@ -3,10 +3,10 @@
 // choice and its steps live. Other pages that need an account say so in one line.
 // A role that can't connect accounts is told who can.
 
-import { Button } from "@cloudflare/kumo";
+import { Button, Link } from "@cloudflare/kumo";
 import { EyeIcon, HardDrivesIcon, LockKeyIcon, PlusIcon } from "@phosphor-icons/react";
 import { Card, NoRows, Page } from "../components/ui.tsx";
-import { link, navigate, providerList } from "../lib.ts";
+import { navigate, providerList } from "../lib.ts";
 import { useShell } from "../shell.tsx";
 
 /** Opens the Accounts page with its Add accounts dialog. */
@@ -61,9 +61,9 @@ export function NoAccountsYet() {
       {can("accounts") ? (
         <>
           No accounts yet.{" "}
-          <a {...link(ADD_ACCOUNTS)} className="text-kumo-link hover:underline">
+          <Link variant="plain" href={ADD_ACCOUNTS}>
             Add accounts
-          </a>{" "}
+          </Link>{" "}
           to see this page.
         </>
       ) : (

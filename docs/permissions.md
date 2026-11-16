@@ -3,7 +3,7 @@
 # Permissions
 
 Keelson only reads, on every provider. Each provider's section lists the data a scan reads and what grants it:
-a token permission on Cloudflare, a team role on Vercel, IAM actions on AWS, an App permission on GitHub.
+a token permission on Cloudflare, a team role on Vercel, IAM actions on AWS, an App permission on GitHub, and for Sonar, public sources and Shodan.
 
 ## Cloudflare
 
@@ -146,6 +146,7 @@ for example) is skipped and shown as not readable on the Regions page: nothing t
 | VPCs and flow logs (every enabled region) | `ec2:DescribeVpcs`, `ec2:DescribeFlowLogs` | AMO-002 |
 | RDS databases (every enabled region) | `rds:DescribeDBInstances` | ADB-001, ADB-002, ADB-003, ADB-005, AMO-001, AMO-002, AMO-006 |
 | Load balancers and listeners (every enabled region) | `elasticloadbalancing:DescribeLoadBalancers`, `elasticloadbalancing:DescribeListeners`, `elasticloadbalancing:DescribeLoadBalancerAttributes` | AED-005, AED-006, AED-007, AED-009, ADN-001, AMO-001, AMO-002, AMO-003, AMO-006, XP-006 |
+| Load balancer rules, target groups and their targets (every enabled region) | `elasticloadbalancing:DescribeRules`, `elasticloadbalancing:DescribeTargetGroups`, `elasticloadbalancing:DescribeTargetHealth` | Supporting data for other checks |
 | Lambda functions and function URLs (every enabled region) | `lambda:ListFunctions`, `lambda:ListFunctionUrlConfigs` | AEC-005, AEC-006, AEC-013, AEC-014, AMO-001, AMO-006 |
 | Instance start-up scripts (scanned for credentials, never stored) (every enabled region) | `ec2:DescribeInstanceAttribute` | AEC-008 |
 | API Gateway custom domain names (every enabled region) | `apigateway:GET` | Supporting data for other checks |
@@ -222,3 +223,24 @@ without the secret's value, and only the scheme and host of webhook URLs are kep
 | Dependabot alerts | Repository permissions → Dependabot alerts: Read-only | GSC-004, GSC-006 |
 | Code scanning alerts | Repository permissions → Code scanning alerts: Read-only | GSC-005 |
 | Secret scanning alerts | Repository permissions → Secret scanning alerts: Read-only | GSC-003 |
+
+## Internet (Sonar)
+
+Sonar looks at each entity from outside. It isn't a platform with an API: Keelson adds one internet account per entity, and it
+starts from what the entity's other accounts know (their domains, DNS records and the addresses AWS holds), so it is scanned after them.
+It sends nothing to the entity's own hosts. It sends the entity's domain names to crt.sh (certificate transparency logs) and to
+Shodan, and its public addresses to Shodan, and looks names up in public DNS over HTTPS.
+
+Its only credential is an optional Shodan API key, which can't change anything. Without one, Keelson asks Shodan's free InternetDB, which
+gives open ports and known vulnerabilities but no products or versions, and finds hostnames from the certificate logs only. Shodan only
+accepts its key in the address of each request; Keelson never puts it in an error or a log line.
+
+| Source | What it needs | Checks that read it |
+|---|---|---|
+| Domains, DNS records and addresses of the entity's other accounts | None: read from their latest scans. Every account in the entity needs a scan since Sonar was added. | NDS-001, XP-012, XP-015 |
+| Certificate transparency logs (crt.sh) | None: the logs are public | NCT-001 |
+| Public DNS lookups | None: public DNS over HTTPS | NCT-001 |
+| What Shodan has seen on the entity's addresses | a Shodan API key for service details, or none for Shodan's free InternetDB | NSV-001, NSV-002, NSV-003, XP-012 |
+| Subdomains Shodan has seen | a Shodan API key on a plan with query credits | Finding hostnames and addresses for other checks |
+| Load balancers, their rules and targets, and security groups in the entity's AWS accounts | None: read from the AWS accounts' latest scans. Each needs a scan since this was added. | XP-013, XP-014, XP-015 |
+| Subdomains Amass found (OWASP Amass, passive) | Amass 5 installed where Keelson runs: on the PATH, or its path in KEELSON_AMASS (not in the Docker image yet) | Finding hostnames and addresses for other checks |

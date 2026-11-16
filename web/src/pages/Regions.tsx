@@ -2,9 +2,9 @@
 // findings, one row per region plus one for the account's global resources (IAM,
 // S3, CloudFront, Route 53). The AWS counterpart of Zones and Projects.
 
-import { Badge, Input, Switch, Table } from "@cloudflare/kumo";
+import { Badge, Input, Switch, Table, Link } from "@cloudflare/kumo";
 import { useScopedApi, useShell } from "../shell.tsx";
-import { link, num, plural, SCORED_SEVERITIES, setParams, totalScored, useLocation, type RegionRow, type RegionsResponse } from "../lib.ts";
+import { num, plural, SCORED_SEVERITIES, setParams, totalScored, useLocation, type RegionRow, type RegionsResponse } from "../lib.ts";
 import { Flag, ListCard, NoRows, Page, PageState, SeverityBadge, unreadableText } from "../components/ui.tsx";
 
 const TITLE = "Regions";
@@ -84,9 +84,9 @@ export function RegionsPage() {
                 return (
                   <Table.Row key={`${r.accountId}/${r.name}`}>
                     <Table.Cell sticky="left" className="whitespace-nowrap">
-                      <a className="text-kumo-link hover:underline" {...link(href)}>
+                      <Link variant="plain" href={href}>
                         {r.name}
-                      </a>
+                      </Link>
                       {multi && <div className="max-w-80 truncate text-sm text-kumo-subtle">{r.account}</div>}
                     </Table.Cell>
                     <Table.Cell>

@@ -50,6 +50,9 @@ of those accounts, and are skipped when the entity has no scanned account on the
 | GitHub | [TLS & HTTPS](#github-tls--https) | 3 |
 | GitHub | [Platform](#github-platform) | 5 |
 | GitHub | [Change risk](#github-change-risk) | 5 |
+| Internet | [Attack surface](#internet-attack-surface) | 6 |
+| Internet | [TLS & HTTPS](#internet-tls--https) | 1 |
+| Internet | [DNS](#internet-dns) | 2 |
 
 ## Cloudflare
 
@@ -3263,3 +3266,116 @@ Anyone with write access, or a stolen token that has it, can replace a published
 **How to fix**
 
 In the repository's Settings, under Releases, select Enable release immutability. To enforce it everywhere, under the organization's Settings → Repository → General → Releases, choose All repositories. Only releases published afterwards are immutable, so publish a new one.
+
+## Internet
+
+### Internet: Attack surface
+
+#### NSV-001: Database or cache open to the internet
+
+**Severity:** High · **Attack path** · **Reads:** What Shodan has seen on the entity's addresses · [Internet docs](https://help.shodan.io/the-basics/what-is-shodan)
+
+Shodan reached a database, cache or message broker on this address from the internet. Anyone can try passwords against it, use any vulnerability in it, or, for stores that need no password by default (Redis, MongoDB, Elasticsearch, Memcached, etcd, CouchDB), read and change the data directly.
+
+**How to fix**
+
+1. Close the port to the internet: in AWS, remove the security group rule that admits 0.0.0.0/0 or ::/0 on it; elsewhere, the host's firewall.
+2. Reach the service from inside the network, or through a VPN, bastion or Cloudflare Tunnel.
+3. Check the service's logs for connections you don't recognise.
+
+#### NSV-002: Remote administration open to the internet
+
+**Severity:** High · **Attack path** · **Reads:** What Shodan has seen on the entity's addresses · [Internet docs](https://help.shodan.io/the-basics/what-is-shodan)
+
+Shodan reached a way to log in to or control this machine (SSH, Remote Desktop, VNC, SMB, a Docker or Kubernetes API) from the internet. These are tried with stolen and guessed passwords around the clock, and an unauthenticated Docker API or Kubelet is a way to run code at once.
+
+**How to fix**
+
+1. Close the port to the internet, or limit it to the addresses you work from.
+2. Use AWS Systems Manager Session Manager, a VPN, a bastion or Cloudflare Access for remote access instead.
+3. Never expose the Docker API without TLS.
+
+#### NSV-003: Software with known vulnerabilities on an address the entity uses
+
+**Severity:** Medium · **Reads:** What Shodan has seen on the entity's addresses · [Internet docs](https://help.shodan.io/the-basics/what-is-shodan)
+
+Shodan matched the software it saw on this address to published vulnerabilities (CVEs). Shodan judges by the version the software announces, so a patched build can be listed by mistake, but attackers search Shodan the same way to find targets.
+
+**How to fix**
+
+1. Open the address on Shodan to see which service and version each vulnerability is for.
+2. Update that software, or confirm the fix is backported and mark the finding a false positive.
+3. If the service doesn't need to be on the internet, close it.
+
+#### XP-012: Origin of a proxied hostname can be found on Shodan
+
+**Severity:** Medium · **Attack path** · **Spans providers** · **Reads:** What Shodan has seen on the entity's addresses, Domains, DNS records and addresses of the entity's other accounts · [Cloudflare docs](https://developers.cloudflare.com/fundamentals/security/protect-your-origin-server/)
+
+The hostname is proxied through Cloudflare to hide its origin, but Shodan lists the origin's address with the entity's hostnames, usually from the certificate the origin answers with. Anyone can search Shodan for the hostname, find the origin and send traffic straight to it, past the WAF, rate limits and Access.
+
+**How to fix**
+
+1. Let only Cloudflare reach the origin: in AWS, a security group that admits only Cloudflare's ranges (a managed prefix list keeps it current); elsewhere, the firewall.
+2. Better, use a Cloudflare Tunnel so the origin has no open port.
+3. Use Authenticated Origin Pulls, so the origin refuses connections without Cloudflare's client certificate.
+4. Move the origin to a new address once it is locked, since the old one is known.
+
+#### XP-013: Load balancer's target can be reached without the load balancer
+
+**Severity:** High · **Attack path** · **Spans providers** · **Reads:** Load balancers, their rules and targets, and security groups in the entity's AWS accounts · [AWS docs](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-update-security-groups.html)
+
+The entity's hostname goes through a load balancer, but a target behind it has its own public address and security groups that let anyone reach the port it serves on. Anyone who finds that address (Shodan, certificate logs, an old DNS record) skips the load balancer and everything on it: the WAF, rate limits, TLS settings, and any sign-in the rule requires. Critical when the rule signs visitors in first: the application is reachable without signing in.
+
+**How to fix**
+
+1. Let only the load balancer reach its targets: in the target's security group, replace the rule that admits 0.0.0.0/0 or ::/0 on the target port with one that admits the load balancer's security group.
+2. Move targets to private subnets without public addresses, so they can't be reached from the internet at all.
+3. If the application checks who is signed in from the load balancer's headers, make it verify the header's signature, since a direct request can forge it.
+
+#### XP-015: Load balancer still routes a hostname that DNS doesn't point at it
+
+**Severity:** Low · **Spans providers** · **Reads:** Load balancers, their rules and targets, and security groups in the entity's AWS accounts, Domains, DNS records and addresses of the entity's other accounts · [AWS docs](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/rule-condition-types.html#host-conditions)
+
+An internet-facing load balancer has a rule for this hostname, but no DNS record sends it there any more. The application behind the rule is still reachable by anyone who sends that Host header to the load balancer, and old or staging applications left this way are rarely patched or watched.
+
+**How to fix**
+
+If the application is retired, delete the rule and its target group. If it is still needed, give it a DNS record and the same protection as the entity's other hostnames, or limit the rule to the addresses that use it (a source IP condition).
+
+### Internet: TLS & HTTPS
+
+#### NCT-001: Certificate issued by an authority the domain's CAA records don't allow
+
+**Severity:** Medium · **Reads:** Certificate transparency logs (crt.sh), Public DNS lookups · [Cloudflare docs](https://developers.cloudflare.com/ssl/edge-certificates/caa-records/)
+
+CAA records name the only certificate authorities that may issue for a domain. A recent certificate from another one means the records changed, an authority ignored them, or someone got a certificate for your name who shouldn't have, and could use it to impersonate the site.
+
+**How to fix**
+
+1. Open the certificate in the logs and find who requested it.
+2. If it's yours, add its authority to the domain's CAA records.
+3. If it isn't, ask the authority to revoke it and find how the name was validated (a dangling record, a compromised account, a hijacked email).
+
+### Internet: DNS
+
+#### NDS-001: Domain whose DNS isn't in any connected account
+
+**Severity:** Low · **Reads:** Domains, DNS records and addresses of the entity's other accounts · [Cloudflare docs](https://developers.cloudflare.com/dns/zone-setups/full-setup/)
+
+Keelson can only check the records of DNS it reads. Records on this domain that point at deleted servers, buckets or sites, or that publish an origin's address, go unnoticed, and the domain is often forgotten until someone takes over one of its names.
+
+**How to fix**
+
+1. Find where the domain's DNS is hosted from its nameservers.
+2. If it is on a platform Keelson reads (Cloudflare or Route 53), add that account to this entity.
+3. Otherwise consider moving its DNS to one, or remove the domain from the entity's domains if it isn't yours.
+
+#### XP-014: Public hostname points at an internal load balancer
+
+**Severity:** Low · **Spans providers** · **Reads:** Load balancers, their rules and targets, and security groups in the entity's AWS accounts · [AWS docs](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/application-load-balancers.html#load-balancer-scheme)
+
+The hostname is in public DNS but its load balancer is internal: it answers only inside its VPC, and its public name resolves to private addresses. Anyone can read the internal load balancer's name and the private addresses behind it, which maps the internal network, and the hostname doesn't work for anyone outside.
+
+**How to fix**
+
+Move the record to a private hosted zone (Route 53) that only the VPC resolves, or point it at an internet-facing load balancer if it is meant to be public. Delete it if nothing uses it.

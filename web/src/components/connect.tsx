@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Badge, Banner, Button, Input, Link, Radio, Select, SensitiveInput, Table, LayerCard } from "@cloudflare/kumo";
 import { ArrowSquareOutIcon, CheckCircleIcon, WarningIcon, XCircleIcon } from "@phosphor-icons/react";
 import {
+  accountIdForEntity,
   api,
   capitalize,
   CREDENTIAL_SEPARATOR,
@@ -55,6 +56,7 @@ const TOKEN_HELP: Record<ProviderId, () => React.ReactNode> = {
   vercel: VercelTokenHelp,
   aws: AwsTokenHelp,
   github: GithubTokenHelp,
+  internet: InternetTokenHelp,
 };
 
 export function TokenHelp({ provider = "cloudflare" }: { provider?: ProviderId }) {
@@ -219,6 +221,26 @@ function GithubTokenHelp() {
   );
 }
 
+function InternetTokenHelp() {
+  return (
+    <ol className="ml-5 list-decimal space-y-2 text-base text-kumo-default marker:text-kumo-subtle">
+      <li>
+        Sonar watches an entity from outside. It starts from the domains, DNS records and addresses of the entity's other accounts, finds more hostnames in
+        certificate transparency logs, and asks Shodan what it has seen open on the entity's addresses. It sends nothing to your hosts.
+      </li>
+      <li>It sends the entity's domain names to crt.sh and Shodan, and its public addresses to Shodan.</li>
+      <li>
+        A Shodan API key is optional. With one, Keelson also gets the product and version on each port and the subdomains Shodan knows; without one it uses
+        Shodan's free InternetDB.{" "}
+        <Link href="https://account.shodan.io/" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1">
+          Open your Shodan account <ArrowSquareOutIcon />
+        </Link>
+      </li>
+      <li>Choose the entities to watch. Connect their other accounts first: Sonar starts from what those know.</li>
+    </ol>
+  );
+}
+
 /** Remount it (key={provider}) when the provider changes: a credential belongs to one provider. */
 export function ConnectForm({
   provider = "cloudflare",
@@ -237,6 +259,9 @@ export function ConnectForm({
   submitLabel?: (n: number) => string;
 }) {
   const info = PROVIDER_INFO[provider];
+  // A per-entity provider (Sonar) lists entities rather than accounts, and its credential may be left empty.
+  const perEntity = !!info.perEntity;
+  const optional = info.fields.every((f) => f.optional);
   const unit = info.account;
   const Unit = capitalize(unit);
   const cred = info.credential;
@@ -268,7 +293,8 @@ export function ConnectForm({
         const sibling = r.accounts.find((a) => a.added && a.entityId != null);
         if (defaultEntityId == null && sibling && entities.some((e) => e.id === sibling.entityId)) setEntity(String(sibling.entityId));
         const fresh = r.accounts
-          .filter((a) => !a.added)
+          // Opened from one entity, Sonar watches that one; the others can still be ticked.
+          .filter((a) => !a.added && (!perEntity || defaultEntityId == null || a.id === accountIdForEntity(defaultEntityId)))
           .map((a) => a.id)
           .sort();
         setSelected(new Set(fresh));
@@ -321,9 +347,9 @@ export function ConnectForm({
           setSelected(new Set());
         }}
         onEnter={() => {
-          if (token && !result && !busy) void verify([]);
+          if ((token || optional) && !result && !busy) void verify([]);
         }}
-        description={`Stored only on this machine, readable by your user only. It is never shown again or sent anywhere except ${info.apiHost}.`}
+        description={`${optional ? "Leave it empty to use only what needs no key. " : ""}Stored only on this machine, readable by your user only. It is never shown again or sent anywhere except ${info.apiHost}.`}
       />
 
       {err && <Banner variant="error" icon={<XCircleIcon weight="fill" />} title="Something went wrong" description={err} />}
@@ -341,7 +367,9 @@ export function ConnectForm({
 
       {valid && accounts.length > 0 && (
         <div className="flex flex-col gap-2">
-          <div className="text-sm font-medium text-kumo-default">{Unit}s to scan</div>
+          <div className="text-sm font-medium text-kumo-default">
+            {capitalize(info.accounts)} to {perEntity ? "watch" : "scan"}
+          </div>
           <LayerCard className="max-h-64 overflow-auto bg-kumo-base p-0">
             <Table layout="auto">
               <Table.Header variant="compact">
@@ -353,7 +381,7 @@ export function ConnectForm({
                     onCheckedChange={() => setSelected(new Set(ids.length === accounts.length ? [] : accounts.map((a) => a.id)))}
                   />
                   <Table.Head>{Unit}</Table.Head>
-                  <Table.Head>{Unit} ID</Table.Head>
+                  {!perEntity && <Table.Head>{Unit} ID</Table.Head>}
                   <Table.Head>
                     <span className="sr-only">State</span>
                   </Table.Head>
@@ -374,11 +402,15 @@ export function ConnectForm({
                       aria-label={`Scan ${a.name}`}
                     />
                     <Table.Cell className="max-w-64 truncate text-kumo-default">{a.name}</Table.Cell>
-                    <Table.Cell className="font-mono text-xs text-kumo-subtle">{a.id}</Table.Cell>
+                    {!perEntity && <Table.Cell className="font-mono text-xs text-kumo-subtle">{a.id}</Table.Cell>}
                     <Table.Cell className="whitespace-nowrap text-right">
                       {a.added && (
                         <Badge variant="neutral">
-                          {selected.has(a.id) ? `${capitalize(cred)} will be replaced` : `Added${entityOf(a.entityId) ? ` to ${entityOf(a.entityId)}` : ""}`}
+                          {selected.has(a.id)
+                            ? `${capitalize(cred)} will be replaced`
+                            : perEntity
+                              ? "Watched"
+                              : `Added${entityOf(a.entityId) ? ` to ${entityOf(a.entityId)}` : ""}`}
                         </Badge>
                       )}
                     </Table.Cell>
@@ -390,7 +422,7 @@ export function ConnectForm({
         </div>
       )}
 
-      {valid && ids.length > 0 && (
+      {valid && ids.length > 0 && !perEntity && (
         <FormGrid>
           {entities.length > 0 && (
             <Select
@@ -488,15 +520,23 @@ export function ConnectForm({
       )}
 
       <div className="flex flex-wrap items-center justify-end gap-2">
-        {valid && ids.length === 0 && accounts.length > 0 && <span className="mr-auto text-sm text-kumo-subtle">Select at least one {unit}.</span>}
+        {valid && ids.length === 0 && accounts.length > 0 && (
+          <span className="mr-auto text-sm text-kumo-subtle">
+            {perEntity && accounts.every((a) => a.added) ? `Every ${unit} is already watched.` : `Select at least one ${unit}.`}
+          </span>
+        )}
         {(!valid || stale) && (
-          <Button variant={valid ? "secondary" : "primary"} disabled={!token} loading={busy === "verify"} onClick={() => verify(valid ? ids : [])}>
-            {valid ? "Check permissions" : `Verify ${cred}`}
+          <Button variant={valid ? "secondary" : "primary"} disabled={!token && !optional} loading={busy === "verify"} onClick={() => verify(valid ? ids : [])}>
+            {valid ? "Check permissions" : optional && !token ? "Continue without a key" : `Verify ${cred}`}
           </Button>
         )}
         {valid && ids.length > 0 && (
           <Button variant="primary" loading={busy === "save"} disabled={busy === "verify"} onClick={save}>
-            {submitLabel ? submitLabel(ids.length) : `Add ${plural(ids.length, unit)} and scan`}
+            {submitLabel
+              ? submitLabel(ids.length)
+              : perEntity
+                ? `Watch ${plural(ids.length, unit, info.accounts)} and scan`
+                : `Add ${plural(ids.length, unit, info.accounts)} and scan`}
           </Button>
         )}
       </div>

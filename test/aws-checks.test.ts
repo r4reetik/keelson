@@ -177,7 +177,18 @@ test("Route 53 records are compared with this account's endpoints and the entity
     ],
   });
   assert.equal(by(run(lb), "ADN-001").length, 0);
-  assert.deepEqual(awsLinks(lb), { awsAccounts: ["111122223333"], awsReleased: [] }, "only the account's ID is shared when a region couldn't be read");
+  assert.deepEqual(
+    awsLinks(lb),
+    {
+      awsAccounts: ["111122223333"],
+      awsReleased: [],
+      // Route 53 is global, so a region that couldn't be read doesn't make its records incomplete.
+      route53Zones: ["example.com"],
+      route53Dns: [{ host: "api.example.com", zone: "example.com", type: "ALIAS", target: "x-1.ap-south-1.elb.amazonaws.com", proxied: false }],
+    },
+    "only the account's ID and its DNS are shared when a region couldn't be read",
+  );
+  assert.equal(awsLinks(awsInventory({ hostedZones: null })).route53Dns, undefined, "DNS that couldn't be read isn't shared as empty");
   assert.equal(ownEndpoints(awsInventory({ distributions: null })), null);
   // XP-005 is skipped, not passed, when the entity has no scanned Vercel account.
   assert.equal(by(run(AWS_CASES["XP-005"]()), "XP-005").length, 0);
@@ -186,6 +197,11 @@ test("Route 53 records are compared with this account's endpoints and the entity
 test("AWS endpoints are recognised by name", () => {
   assert.deepEqual(awsEndpointOf("d111111abcdef8.cloudfront.net."), { kind: "cloudfront", name: "d111111abcdef8.cloudfront.net" });
   assert.deepEqual(awsEndpointOf("dualstack.my-lb-1.eu-west-1.elb.amazonaws.com"), { kind: "elb", name: "my-lb-1.eu-west-1.elb.amazonaws.com" });
+  assert.deepEqual(
+    awsEndpointOf("my-nlb-0123456789abcdef.elb.ap-south-1.amazonaws.com"),
+    { kind: "elb", name: "my-nlb-0123456789abcdef.elb.ap-south-1.amazonaws.com" },
+    "a network load balancer's name puts the region after elb",
+  );
   assert.deepEqual(awsEndpointOf("my.bucket.s3-website-eu-west-1.amazonaws.com"), { kind: "s3", name: "my.bucket" });
   assert.deepEqual(awsEndpointOf("assets.s3.eu-west-1.amazonaws.com"), { kind: "s3", name: "assets" });
   assert.deepEqual(awsEndpointOf("assets.s3.amazonaws.com"), { kind: "s3", name: "assets" });

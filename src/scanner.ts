@@ -57,6 +57,11 @@ export class Scanner {
     this.#log = log;
   }
 
+  #perEntity(accountId: string): boolean {
+    const a = this.#repo.accounts.get(accountId);
+    return !!a && !!PROVIDER[a.provider].info.perEntity;
+  }
+
   isBusy(accountId: string): boolean {
     return this.#current?.accountId === accountId || this.#jobs.some((j) => j.accountId === accountId);
   }
@@ -98,7 +103,9 @@ export class Scanner {
 
   async #drain(): Promise<void> {
     while (this.#jobs.length) {
-      const job = this.#jobs.shift()!;
+      // A per-entity account (Sonar) reads its siblings' latest scans, so it waits until no other account is queued.
+      const next = this.#jobs.findIndex((j) => !this.#perEntity(j.accountId));
+      const job = this.#jobs.splice(Math.max(next, 0), 1)[0];
       this.#current = job;
       try {
         job.resolve(await this.#scan(job));

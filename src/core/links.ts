@@ -32,7 +32,9 @@ export function pointsAtGithubPages(type: string, content: string): boolean {
 export function awsEndpointOf(target: string): { kind: AwsEndpointKind; name: string } | null {
   const host = target.toLowerCase().replace(/\.$/, "");
   if (/^[a-z0-9]+\.cloudfront\.net$/.test(host)) return { kind: "cloudfront", name: host };
-  if (/\.elb\.amazonaws\.com(\.cn)?$/.test(host)) return { kind: "elb", name: host.replace(/^dualstack\./, "") };
+  // Application and classic load balancers are <name>.<region>.elb.amazonaws.com; network ones <name>.elb.<region>.amazonaws.com.
+  if (/\.elb\.amazonaws\.com(\.cn)?$|\.elb\.[a-z]{2}(-[a-z]+)+-\d\.amazonaws\.com(\.cn)?$/.test(host))
+    return { kind: "elb", name: host.replace(/^dualstack\./, "") };
   const bucket = /^(.+)\.s3(-website)?[.-]([a-z0-9-]+\.)?amazonaws\.com$/.exec(host);
   return bucket ? { kind: "s3", name: bucket[1] } : null;
 }
@@ -51,18 +53,24 @@ export const DANGLING: Record<AwsEndpointKind, { what: string; severity: "high" 
   },
 };
 
+/** Records that make a hostname answer: what the outside view (src/providers/internet) compares with what it finds. */
+const HOST_TYPES = new Set(["A", "AAAA", "CNAME"]);
+
 export function cloudflareLinks(inv: Inventory): ProviderLinks {
   const toVercel: NonNullable<ProviderLinks["toVercel"]> = [];
   const toAws: NonNullable<ProviderLinks["toAws"]> = [];
   const dnsAddresses: NonNullable<ProviderLinks["dnsAddresses"]> = [];
+  const cloudflareDns: NonNullable<ProviderLinks["cloudflareDns"]> = [];
   for (const z of inv.zones)
     for (const r of z.dns) {
       const host = r.name.toLowerCase();
+      if (HOST_TYPES.has(r.type)) cloudflareDns.push({ host, zone: z.name, type: r.type, target: String(r.content).toLowerCase(), proxied: !!r.proxied });
       if (pointsAtVercel(r.type, r.content)) toVercel.push({ host, zone: z.name, type: r.type, target: r.content, proxied: !!r.proxied });
       const aws = r.type === "CNAME" ? awsEndpointOf(r.content) : null;
       if (aws) toAws.push({ host, zone: z.name, target: r.content, ...aws, proxied: !!r.proxied });
       if (r.type === "A") dnsAddresses.push({ host, zone: z.name, ip: r.content, proxied: !!r.proxied });
     }
   // Without readable DNS the lists would look empty rather than unknown.
-  return inv.zones.every((z) => z.dnsReadable) ? { toVercel, toAws, dnsAddresses } : {};
+  const cloudflareZones = inv.zones.map((z) => z.name.toLowerCase());
+  return inv.zones.every((z) => z.dnsReadable) ? { toVercel, toAws, dnsAddresses, cloudflareZones, cloudflareDns } : {};
 }

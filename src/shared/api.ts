@@ -148,6 +148,8 @@ export interface SessionAccount {
   tokenHint: string | null;
   tokenKind: TokenKind | null;
   tokenMissing: boolean;
+  /** The credential is optional and was left empty. */
+  tokenEmpty: boolean;
 }
 
 export interface SessionEntity {
@@ -648,6 +650,8 @@ export interface ScanSnapshot {
   regions?: RegionRow[];
   /** GitHub: repositories. */
   repos?: RepoRow[];
+  /** Internet (Sonar): the entity's domains, hostnames and addresses as seen from outside. */
+  surface?: SurfaceView;
   /** AWS: the public addresses the account held at its last complete scan, and the ones seen to leave it since. */
   addressHistory?: AddressHistory;
   /** Domains the account owns, when no other part of the snapshot lists them (AWS: public hosted zones). */
@@ -693,6 +697,96 @@ export interface ProviderLinks {
   githubOrgs?: string[];
   /** Every repository of a GitHub organization ("org/name", lowercase), its default branch, and whether a change there needs a reviewed pull request. */
   githubRepos?: { repo: string; defaultBranch: string; reviewed: boolean }[];
+  /** Cloudflare zones, so an outside view can tell a domain whose DNS Keelson reads from one it doesn't. */
+  cloudflareZones?: string[];
+  /** Cloudflare's host records (A, AAAA, CNAME), with whether Cloudflare proxies each. */
+  cloudflareDns?: DnsHostRecord[];
+  /** Route 53's public hosted zones. */
+  route53Zones?: string[];
+  /** Route 53's host records (A, AAAA, CNAME, and aliases as CNAME) in public hosted zones. */
+  route53Dns?: DnsHostRecord[];
+  /** An AWS account's load balancers with their listeners, routing and targets, so a hostname can be followed to what serves it. */
+  awsLoadBalancers?: AwsLoadBalancerLink[];
+  /** Every public address an AWS account holds, with what owns it and what its security groups let anyone reach. */
+  awsExposure?: AwsExposureLink[];
+}
+
+/** An AWS load balancer as a hostname that names it reaches it. */
+export interface AwsLoadBalancerLink {
+  name: string;
+  dnsName: string;
+  /** The AWS account's alias, or its ID without one. */
+  account: string;
+  region: string;
+  /** "application", "network", "gateway" or "classic". */
+  type: string;
+  internetFacing: boolean;
+  /** Who its own security groups let in on ports 80 and 443 (see AwsOrigin); null without groups of its own or when Keelson can't tell. */
+  web: AwsOrigin["web"] | null;
+  /** A WAF web ACL filters it, on it or on a distribution in front of it; null when unknown or not applicable. */
+  waf: boolean | null;
+  listeners: AwsListenerLink[];
+}
+
+export interface AwsListenerLink {
+  port: number | null;
+  protocol: string;
+  /** Its routes in the order the load balancer tries them, the default last; null when they couldn't be read. */
+  routes: AwsRouteLink[] | null;
+}
+
+export interface AwsRouteLink {
+  /** The rule's priority, or "default". */
+  rule: string;
+  /** Host header values it matches (* and ? wildcards); empty: any host. */
+  hosts: string[];
+  paths: string[];
+  /** Other conditions, by kind (a header by its name, never its value). */
+  conditions: string[];
+  action: "forward" | "redirect" | "fixed-response" | "other";
+  /** Visitors sign in (Cognito or OpenID Connect) before it forwards. */
+  authenticates: boolean;
+  /** A redirect's destination or a fixed response's status code. */
+  detail: string | null;
+  /** What it forwards to; null when its target groups or their targets couldn't be read. */
+  targets: AwsTargetLink[] | null;
+}
+
+export interface AwsTargetLink {
+  /** "instance", "ip", "lambda" or "alb". */
+  kind: string;
+  /** The instance ID, private address, function or load balancer name. */
+  id: string;
+  /** The instance's Name tag. */
+  name: string | null;
+  /** The target group's name ("" for a classic load balancer's instances). */
+  group: string;
+  port: number | null;
+  health: string | null;
+  /** Its public address: with one, it can be reached without the load balancer if its security groups let anyone in. */
+  publicIp: string | null;
+  /** Its security groups let anyone (0.0.0.0/0 or ::/0) reach `port`; null when unknown. */
+  openOnPort: boolean | null;
+}
+
+/** A public address an AWS account holds, and what its security groups let anyone reach there. */
+export interface AwsExposureLink {
+  ip: string;
+  account: string;
+  region: string;
+  /** What has it, as AWS's checks name it: "instance web-1 (i-…)", "load balancer web-alb", "NAT gateway eni-…". */
+  resource: string;
+  /** Inbound rules that admit 0.0.0.0/0 or ::/0, with the groups that hold them; null when the groups couldn't be read. */
+  open: { protocol: string; from: number | null; to: number | null; groups: string[] }[] | null;
+}
+
+/** One DNS record that names a host, as a platform that serves the zone lists it. */
+export interface DnsHostRecord {
+  host: string;
+  zone: string;
+  type: string;
+  target: string;
+  proxied: boolean;
 }
 
 /** How an AWS account's public addresses changed over its scans: what it holds, and what it gave up and when. */
@@ -734,6 +828,12 @@ export const LINK_KEYS = [
   "githubPages",
   "githubOrgs",
   "githubRepos",
+  "cloudflareZones",
+  "cloudflareDns",
+  "route53Zones",
+  "route53Dns",
+  "awsLoadBalancers",
+  "awsExposure",
 ] as const satisfies readonly (keyof ProviderLinks)[];
 export type LinkKey = (typeof LINK_KEYS)[number];
 
@@ -751,6 +851,12 @@ export const LINK_PROVIDER: Record<LinkKey, ProviderId> = {
   githubPages: "github",
   githubOrgs: "github",
   githubRepos: "github",
+  cloudflareZones: "cloudflare",
+  cloudflareDns: "cloudflare",
+  route53Zones: "aws",
+  route53Dns: "aws",
+  awsLoadBalancers: "aws",
+  awsExposure: "aws",
 };
 
 /** One region of an AWS account as the Regions page shows it, or the account's global resources. */
@@ -814,6 +920,125 @@ export interface RepoRow {
   /** The Pages site's custom domain, "github.io" without one, or null without a site. */
   pages: string | null;
   findings: SeverityCounts;
+}
+
+/** One of the entity's domains, as an internet scan (Sonar) sees it. */
+export interface SurfaceDomainRow {
+  name: string;
+  /** The entity's name: Sonar has one account per entity. */
+  account?: string;
+  accountId?: string;
+  /** The platform whose connected account serves its DNS, or null when none does. */
+  dns: ProviderId | null;
+  nameservers: string[] | null;
+  /** Certificates in the logs that are still valid; null when the logs couldn't be read. */
+  certificates: number | null;
+  /** Who issued them, most first. */
+  issuers: string[];
+  /** The authorities its CAA records allow (";" for none); empty without CAA, null when the lookup failed. */
+  caa: string[] | null;
+  findings: SeverityCounts;
+}
+
+export interface SurfaceHostRow {
+  name: string;
+  domain: string;
+  account?: string;
+  accountId?: string;
+  /** Where it was found: "DNS", "Certificate logs", "Shodan". */
+  found: string[];
+  /** What it points at: records, or the public DNS answer. */
+  points: string;
+  servedBy: string;
+  /** Where its requests go in a connected AWS account; null when it reaches neither a load balancer nor an address one holds. */
+  route?: SurfaceHostRoute | null;
+  findings: SeverityCounts;
+}
+
+/** A hostname followed into AWS: the load balancer it reaches and the rules that match it, or the address it points at. */
+export interface SurfaceHostRoute {
+  /** The load balancer whose rules decide, as in SurfaceView.loadBalancers. */
+  loadBalancer: string | null;
+  /** Load balancers in front of it, in order: a network load balancer that forwards to an application one. */
+  via?: string[];
+  /** Each listener with only the routes a request for this hostname can take. */
+  listeners: SurfaceListener[];
+  /** An address an AWS account holds that it points at directly. */
+  address: { ip: string; resource: string; open: string[] | null } | null;
+}
+
+export interface SurfaceListener {
+  port: number | null;
+  protocol: string;
+  /** Null when the routing couldn't be read. */
+  routes: SurfaceRouteRow[] | null;
+}
+
+export interface SurfaceRouteRow {
+  /** "default" or the rule's priority. */
+  rule: string;
+  /** What it matches: "api.example.com /admin/*", or "Any request". */
+  match: string;
+  /** What it does: "Forwards to web", "Signs visitors in, then forwards to admin", "Redirects to HTTPS". */
+  action: string;
+  /** Null when its targets couldn't be read. */
+  targets: { label: string; port: number | null; health: string | null; publicIp: string | null; direct: boolean }[] | null;
+}
+
+/** One of the entity's AWS load balancers, with the hostnames that reach it and its routing. */
+export interface SurfaceLoadBalancerRow {
+  name: string;
+  /** The entity's name: Sonar has one account per entity. */
+  account?: string;
+  accountId?: string;
+  /** The AWS account's alias, or its ID without one. */
+  awsAccount: string;
+  region: string;
+  type: string;
+  internetFacing: boolean;
+  web: AwsOrigin["web"] | null;
+  waf: boolean | null;
+  hosts: string[];
+  /** Hostnames its rules name that no DNS record points at it. */
+  unpointed: string[];
+  listeners: SurfaceListener[];
+  findings: SeverityCounts;
+}
+
+export interface SurfaceAddressRow {
+  ip: string;
+  account?: string;
+  accountId?: string;
+  /** "AWS" when an AWS account in the entity holds it, null when only its DNS points at it. */
+  heldBy: string | null;
+  hosts: string[];
+  /** Whether a proxied hostname uses it as its origin. */
+  origin: boolean;
+  /** What Shodan has seen: null when it couldn't be asked, `seen: false` when it knows nothing. */
+  shodan: { seen: boolean; ports: number[]; products: string[]; vulns: number; lastSeen: string | null } | null;
+  /** What has the address in AWS ("instance web-1 (i-…)"), when an AWS account in the entity holds it. */
+  resource?: string | null;
+  /** What its security groups let anyone reach ("tcp 443", "all traffic"); null when unknown or not held in AWS. */
+  open?: string[] | null;
+  findings: SeverityCounts;
+}
+
+export interface SurfaceView {
+  domains: SurfaceDomainRow[];
+  hosts: SurfaceHostRow[];
+  addresses: SurfaceAddressRow[];
+  /** The entity's AWS load balancers; absent on scans from before they were followed. */
+  loadBalancers?: SurfaceLoadBalancerRow[];
+  /** Names from the logs or Shodan that don't resolve (or weren't looked up past the limit). */
+  unresolved: number;
+  /** What Amass added, when it ran: names it returned, how many nothing else had found, and how long it took. */
+  amass?: { names: number; added: number; minutes: number } | null;
+}
+
+export interface SurfaceResponse {
+  scan: ScanMeta | null;
+  surface: SurfaceView | null;
+  coverage: Coverage[];
 }
 
 export interface ReposResponse {

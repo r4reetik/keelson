@@ -1,6 +1,6 @@
-import { Badge, Table } from "@cloudflare/kumo";
+import { Badge, Table, Link } from "@cloudflare/kumo";
 import { useScopedApi, useShell } from "../shell.tsx";
-import { dateTime, link, num, plural, PROVIDER_INFO, score, type ScansResponse } from "../lib.ts";
+import { dateTime, num, plural, PROVIDER_INFO, score, type ScansResponse } from "../lib.ts";
 import { Aside, Flag, ListCard, NoRows, Page, PageState } from "../components/ui.tsx";
 
 const TITLE = "Scans";
@@ -135,9 +135,9 @@ export function ScansPage() {
                           </span>
                         )}
                         {c.permission ? (
-                          <a {...link("/accounts")} className="text-kumo-link">
+                          <Link variant="plain" href={"/accounts"}>
                             Replace the token on the Accounts page
-                          </a>
+                          </Link>
                         ) : (
                           // Public DNS lookups and probes need no permission, only outbound network access.
                           <span>Check that this server can reach the internet over HTTPS.</span>

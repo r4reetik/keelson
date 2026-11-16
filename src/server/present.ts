@@ -16,6 +16,8 @@ export const publicAccount = (vault: TokenVault, a: Account): SessionAccount => 
   tokenHint: vault.hint(a.tokenId),
   tokenKind: a.tokenKind,
   tokenMissing: !vault.get(a.tokenId),
+  // An optional credential left empty (Sonar without a Shodan key), so the page offers to add one.
+  tokenEmpty: vault.get(a.tokenId)?.token === "",
 });
 
 export const sessionEntity = (e: Entity): SessionEntity => ({ id: e.id, name: e.name, includeInAll: e.includeInAll });

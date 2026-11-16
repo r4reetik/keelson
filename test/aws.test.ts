@@ -30,7 +30,7 @@ import { PROVIDER } from "../src/providers/index.ts";
 import { ACCOUNT_ID_PATTERN, PROVIDERS, PROVIDER_INFO, providerForId, providerList, providerOfUrl, zoneWord } from "../src/shared/providers.ts";
 import { makeApp } from "./helpers/app.ts";
 import { filterFindings } from "../src/shared/filters.ts";
-import type { Finding } from "../src/shared/api.ts";
+import type { Finding, ScanSnapshot } from "../src/shared/api.ts";
 import { CHECKS } from "../src/providers/catalog.ts";
 
 function setup(o: { cloudflare?: boolean; vercel?: boolean } = {}) {
@@ -111,7 +111,45 @@ describe("AWS scan against the mocked API", () => {
     assert.ok(!/Statement|sts%3AAssumeRole/.test(stored), "policy documents aren't stored");
     for (const secret of [MOCK_AWS_TASK_TOKEN, MOCK_AWS_BUILD_PASSWORD, MOCK_AWS_SNS_SECRET])
       assert.ok(!stored.includes(secret), `a credential found in configuration is reported by kind, never stored: ${secret}`);
+    assert.ok(!stored.includes("mock-secret-value"), "a listener rule's header condition keeps the header's name, never its value");
     assert.equal(repo.accounts.get(MOCK_AWS_ACCOUNT)!.name, "mock-aws", "the account takes its alias as its name");
+  });
+
+  test("load balancers are published with their routing down to the targets, and public addresses with what anyone can reach", async () => {
+    const { repo, scanner } = setup();
+    await scanner.start("test").done;
+    const links = (snapshotOf(repo) as ScanSnapshot).links!;
+    const alb = links.awsLoadBalancers!.find((lb) => lb.name === "web-alb")!;
+    assert.equal(alb.internetFacing, true);
+    assert.equal(alb.web, "open");
+    const https = alb.listeners.find((l) => l.port === 443)!;
+    assert.deepEqual(
+      https.routes!.map((r) => [r.rule, r.hosts, r.paths, r.conditions, r.authenticates]),
+      [
+        ["10", ["api.mock-aws.example"], ["/admin/*"], [], true],
+        ["20", ["beta.mock-aws.example"], [], [], false],
+        ["30", ["*.mock-aws.example"], [], ["header X-Mock-Verify"], false],
+        ["default", [], [], [], false],
+      ],
+      "rules in the order the load balancer tries them, the default last",
+    );
+    const web1 = https.routes![0].targets!.find((t) => t.name === "web-1")!;
+    assert.deepEqual([web1.kind, web1.group, web1.port, web1.publicIp != null, web1.openOnPort], ["instance", "admin", 443, true, true]);
+    const worker = https.routes![3].targets!.find((t) => t.name === "worker-1")!;
+    assert.equal(worker.publicIp, null, "a target without a public address can only be reached through the load balancer");
+    const legacy = links.awsLoadBalancers!.find((lb) => lb.type === "classic")!;
+    assert.equal(legacy.internetFacing, false);
+    assert.deepEqual(
+      legacy.listeners[0].routes![0].targets!.map((t) => [t.id, t.port]),
+      [["i-0worker0000000001", 8443]],
+      "a classic load balancer forwards to its instances on the instance port",
+    );
+    const vm = links.awsExposure!.find((e) => e.resource.includes("web-1"))!;
+    assert.deepEqual(
+      vm.open!.map((o) => `${o.protocol} ${o.from}`).sort(),
+      ["tcp 22", "tcp 443"],
+      "the ports anyone can reach on an instance's public address",
+    );
   });
 
   test("findings carry their region, the judgement behind them and a console link", async () => {
@@ -493,6 +531,7 @@ test("every provider says what the app needs to know about it", () => {
   assert.equal(providerForId(MOCK_ACCOUNT), "cloudflare");
   assert.equal(providerForId("team_MockWeb0000000000000001"), "vercel");
   assert.equal(providerForId("gh_1000001"), "github", "a GitHub ID isn't mistaken for an AWS or Vercel one");
+  assert.equal(providerForId("ext_3"), "internet", "Sonar's account is named after its entity");
   assert.equal(providerList(), "Cloudflare, Vercel, AWS and GitHub");
   assert.equal(providerList(["cloudflare", "vercel"], "or"), "Cloudflare or Vercel");
   assert.equal(providerList(["aws"]), "AWS");

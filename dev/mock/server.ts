@@ -1,4 +1,4 @@
-// Keelson against mocked provider APIs (Cloudflare, Vercel, AWS and GitHub), in memory:
+// Keelson against mocked provider APIs (Cloudflare, Vercel, AWS and GitHub) and Sonar's sources (crt.sh, Shodan), in memory:
 // three Cloudflare accounts, a Vercel team, an AWS account and a GitHub organization in two entities,
 // plus a Vercel-only entity with a personal account. Everything is scanned twice,
 // so trends, "new since last scan" and the checks that span providers have data.
@@ -12,7 +12,8 @@ import { installMockCloudflare, MOCK_ACCOUNT, MOCK_ACCOUNT_2, MOCK_ACCOUNT_3, MO
 import { installMockVercel } from "./vercel.ts";
 import { installMockAws, mockAws } from "./aws.ts";
 import { installMockGithub } from "./github.ts";
-import { seedAccount, seedAws, seedGithub, seedTriageHistory, seedVercel } from "./accounts.ts";
+import { installMockInternet } from "./internet.ts";
+import { seedAccount, seedAws, seedGithub, seedInternet, seedTriageHistory, seedVercel } from "./accounts.ts";
 import { providerList } from "../../src/shared/providers.ts";
 import { ROLES, ROLE_INFO } from "../../src/shared/roles.ts";
 import { hashPasswordSync } from "../../src/server/passwords.ts";
@@ -24,6 +25,8 @@ installMockCloudflare();
 installMockVercel();
 installMockAws();
 installMockGithub();
+// After Cloudflare's, so Sonar's public DNS answers come first.
+installMockInternet();
 const port = Number(process.env.KEELSON_PORT || 4317);
 const running = await start({
   host: "127.0.0.1",
@@ -61,6 +64,7 @@ if (!signup)
 seedVercel(repo, vault, { entity: "Mock Group", personal: { entity: "Side Projects" } });
 seedAws(repo, vault, { entity: "Mock Group" });
 seedGithub(repo, vault, { entity: "Mock Group" });
+seedInternet(repo, vault, { entity: "Mock Group" });
 await scanner.start("setup").done;
 // Between the scans the AWS account gives up an Elastic IP, so the second one finds the DNS records still pointing at it.
 mockAws.released = true;

@@ -21,6 +21,7 @@ import {
   providerScores,
   regions,
   repos,
+  surface,
   scopeFindings,
   scores,
   securityCenter,
@@ -41,6 +42,7 @@ import type {
   ProjectsResponse,
   RegionsResponse,
   ReposResponse,
+  SurfaceResponse,
   Report,
   ScanRow,
   ScansResponse,
@@ -233,6 +235,10 @@ export function dashboardRoutes(r: Routes, { repo, scanner, version }: AppContex
   r.get("/api/repos", (c) => {
     const s = latestScans(repo, c.get("scope"));
     return c.json({ scan: scanMeta(s), repos: repos(s), coverage: coverage(s) } satisfies ReposResponse);
+  });
+  r.get("/api/surface", (c) => {
+    const s = latestScans(repo, c.get("scope"));
+    return c.json({ scan: scanMeta(s), surface: surface(s), coverage: coverage(s) } satisfies SurfaceResponse);
   });
   r.get("/api/value", (c) => {
     const s = latestScans(repo, c.get("scope"));

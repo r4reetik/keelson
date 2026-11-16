@@ -10,6 +10,7 @@ import { SOURCES, SOURCE_KEYS } from "../src/core/sources.ts";
 import { VERCEL_SOURCES, VERCEL_SOURCE_KEYS } from "../src/providers/vercel/sources.ts";
 import { AWS_SOURCES, AWS_SOURCE_KEYS } from "../src/providers/aws/sources.ts";
 import { GITHUB_SOURCES, GITHUB_SOURCE_KEYS } from "../src/providers/github/sources.ts";
+import { INTERNET_SOURCES, INTERNET_SOURCE_KEYS } from "../src/providers/internet/sources.ts";
 import { PROVIDERS, PROVIDER_INFO, providerOfUrl, type ProviderId } from "../src/shared/providers.ts";
 import { SEVERITY_LABEL } from "../src/shared/severity.ts";
 
@@ -36,6 +37,7 @@ const SOURCE_REGISTRY: Record<ProviderId, Record<string, { label: string }>> = {
   vercel: VERCEL_SOURCES,
   aws: AWS_SOURCES,
   github: GITHUB_SOURCES,
+  internet: INTERNET_SOURCES,
 };
 const sourceLabel = (c: CheckDef, k: string) => SOURCE_REGISTRY[c.provider][k].label;
 /** A check links its own provider's docs; one that spans providers may link the other's. */
@@ -109,6 +111,11 @@ export function permissionsDoc(): string {
     const ids = needs(k, "github");
     return `| ${s.label} | ${s.permission} | ${ids.length ? ids.join(", ") : "Supporting data for other checks"} |`;
   });
+  const internetRows = INTERNET_SOURCE_KEYS.map((k) => {
+    const s = INTERNET_SOURCES[k];
+    const ids = needs(k, "internet");
+    return `| ${s.label} | ${s.permission} | ${ids.length ? ids.join(", ") : "Finding hostnames and addresses for other checks"} |`;
+  });
   const rows = SOURCE_KEYS.filter((k) => !SOURCES[k].external).map((k) => {
     const s = SOURCES[k];
     const ids = needs(k);
@@ -121,7 +128,7 @@ export function permissionsDoc(): string {
     "# Permissions",
     "",
     "Keelson only reads, on every provider. Each provider's section lists the data a scan reads and what grants it:",
-    "a token permission on Cloudflare, a team role on Vercel, IAM actions on AWS, an App permission on GitHub.",
+    "a token permission on Cloudflare, a team role on Vercel, IAM actions on AWS, an App permission on GitHub, and for Sonar, public sources and Shodan.",
     "",
     "## Cloudflare",
     "",
@@ -190,6 +197,21 @@ export function permissionsDoc(): string {
     "| Source | App permission | Checks that read it |",
     "|---|---|---|",
     ...githubRows,
+    "",
+    "## Internet (Sonar)",
+    "",
+    "Sonar looks at each entity from outside. It isn't a platform with an API: Keelson adds one internet account per entity, and it",
+    "starts from what the entity's other accounts know (their domains, DNS records and the addresses AWS holds), so it is scanned after them.",
+    "It sends nothing to the entity's own hosts. It sends the entity's domain names to crt.sh (certificate transparency logs) and to",
+    "Shodan, and its public addresses to Shodan, and looks names up in public DNS over HTTPS.",
+    "",
+    "Its only credential is an optional Shodan API key, which can't change anything. Without one, Keelson asks Shodan's free InternetDB, which",
+    "gives open ports and known vulnerabilities but no products or versions, and finds hostnames from the certificate logs only. Shodan only",
+    "accepts its key in the address of each request; Keelson never puts it in an error or a log line.",
+    "",
+    "| Source | What it needs | Checks that read it |",
+    "|---|---|---|",
+    ...internetRows,
     "",
   ].join("\n");
 }

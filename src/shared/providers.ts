@@ -5,7 +5,7 @@
 // Everything the UI and the server say about a provider comes from PROVIDER_INFO,
 // so no screen has to branch on a provider's name.
 
-export const PROVIDERS = ["cloudflare", "vercel", "aws", "github"] as const;
+export const PROVIDERS = ["cloudflare", "vercel", "aws", "github", "internet"] as const;
 export type ProviderId = (typeof PROVIDERS)[number];
 
 /** One input of a provider's credential. Most providers have one; AWS has a key ID and a secret, a GitHub App its ID and private key. */
@@ -14,6 +14,8 @@ export interface CredentialField {
   /** Hidden while typing. A key ID is shown, a secret isn't. */
   secret: boolean;
   placeholder?: string;
+  /** May be left empty: the provider then reads only what needs no credential. */
+  optional?: boolean;
 }
 
 export interface ProviderInfo {
@@ -50,6 +52,12 @@ export interface ProviderInfo {
   idHint: string;
   /** IDs that are compared lowercase. */
   lowercaseIds: boolean;
+  /**
+   * Keelson makes one account per entity instead of reading accounts from the credential (the internet as seen
+   * from outside). Add accounts lists the entities to watch, each account stays in its entity, and it is scanned
+   * after the entity's other accounts, whose latest scans it reads.
+   */
+  perEntity?: boolean;
 }
 
 export const CREDENTIAL_SEPARATOR = ":";
@@ -140,25 +148,55 @@ export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
     idHint: "A GitHub organization ID in Keelson is gh_ followed by its number.",
     lowercaseIds: false,
   },
+  internet: {
+    id: "internet",
+    label: "Internet",
+    account: "entity",
+    accounts: "entities",
+    resource: "domain",
+    blurb: "Sonar: what your domains and addresses expose, from certificate logs and Shodan",
+    covers: "what the entity's domains and addresses expose, from certificate transparency logs and Shodan",
+    credential: "Shodan API key",
+    fields: [{ label: "Shodan API key (optional)", secret: true, optional: true }],
+    dashboard: "Shodan account",
+    // Shodan keys can't write anything, and Keelson only searches with it.
+    readOnlyCredential: true,
+    apiHost: "api.shodan.io",
+    sites: ["shodan.io", "crt.sh"],
+    noAccounts: "Create an entity first by adding an account on another platform.",
+    needsToRead: "belongs to a Shodan plan that includes it",
+    idHint: "An internet account ID in Keelson is ext_ followed by its entity's number.",
+    lowercaseIds: true,
+    perEntity: true,
+  },
 };
 
 export const isProvider = (v: unknown): v is ProviderId => typeof v === "string" && (PROVIDERS as readonly string[]).includes(v);
 
-/** Account IDs as each provider issues them: Cloudflare's are 32 hex characters, Vercel's are team or user IDs, AWS's are 12 digits, GitHub's are gh_ and the organization's number. */
+/** Account IDs as each provider issues them: Cloudflare's are 32 hex characters, Vercel's are team or user IDs, AWS's are 12 digits, GitHub's are gh_ and the organization's number, and the internet's are ext_ and the entity's number. */
 export const ACCOUNT_ID_PATTERN: Record<ProviderId, RegExp> = {
   cloudflare: /^[0-9a-f]{32}$/,
   vercel: /^(team_)?[A-Za-z0-9]{8,40}$/,
   aws: /^\d{12}$/,
   // GitHub's organization IDs are plain numbers, which would pass for AWS's; the prefix keeps them apart.
   github: /^gh_\d{1,20}$/,
+  // One per entity, named after it (accountIdForEntity).
+  internet: /^ext_\d{1,9}$/,
 };
 
+/** The account that watches an entity from the internet (PROVIDER_INFO.internet.perEntity). */
+export const accountIdForEntity = (entityId: number) => `ext_${entityId}`;
+export const entityOfAccountId = (id: string): number | null => (/^ext_(\d{1,9})$/.test(id) ? Number(id.slice(4)) : null);
+
 /** The provider an account ID can belong to, judged by its shape. The strictest shapes are tried first: 12 digits would also pass as a Vercel user ID. */
-const BY_STRICTEST_ID: ProviderId[] = ["cloudflare", "aws", "github", "vercel"];
+const BY_STRICTEST_ID: ProviderId[] = ["cloudflare", "aws", "github", "internet", "vercel"];
 export const providerForId = (id: string): ProviderId | null => BY_STRICTEST_ID.find((p) => ACCOUNT_ID_PATTERN[p].test(id)) ?? null;
 
-/** "Cloudflare", "Cloudflare and Vercel", "Cloudflare, Vercel and AWS". */
-export function providerList(providers: readonly ProviderId[] = PROVIDERS, last = "and"): string {
+/** Providers that are platforms with accounts of their own, not the per-entity view from outside (Sonar). */
+export const PLATFORMS: readonly ProviderId[] = PROVIDERS.filter((p) => !PROVIDER_INFO[p].perEntity);
+
+/** "Cloudflare", "Cloudflare and Vercel", "Cloudflare, Vercel and AWS". Without a list, every platform (not Sonar's internet). */
+export function providerList(providers: readonly ProviderId[] = PLATFORMS, last = "and"): string {
   const labels = providers.map((p) => PROVIDER_INFO[p].label);
   return labels.length < 2 ? labels.join("") : `${labels.slice(0, -1).join(", ")} ${last} ${labels[labels.length - 1]}`;
 }

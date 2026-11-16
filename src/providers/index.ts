@@ -5,8 +5,9 @@ import { cloudflare } from "./cloudflare.ts";
 import { vercel } from "./vercel/index.ts";
 import { aws } from "./aws/index.ts";
 import { github } from "./github/index.ts";
+import { internet } from "./internet/index.ts";
 import type { ProviderId } from "../shared/providers.ts";
 import type { Provider } from "./types.ts";
 
-export const PROVIDER: Record<ProviderId, Provider> = { cloudflare, vercel, aws, github };
+export const PROVIDER: Record<ProviderId, Provider> = { cloudflare, vercel, aws, github, internet };
 export type { Provider };

@@ -5,8 +5,8 @@
 // the admin hands over and the person replaces when they first sign in.
 
 import { useState } from "react";
-import { Badge, Button, Checkbox, Dialog, DropdownMenu, Input, Select, Table, useKumoToastManager } from "@cloudflare/kumo";
-import { BuildingsIcon, CopyIcon, DotsThreeIcon, KeyIcon, PlusIcon, TrashIcon, UserSwitchIcon } from "@phosphor-icons/react";
+import { Badge, Button, Checkbox, ClipboardText, Dialog, DropdownMenu, Input, Select, Table, useKumoToastManager } from "@cloudflare/kumo";
+import { BuildingsIcon, DotsThreeIcon, KeyIcon, PlusIcon, TrashIcon, UserSwitchIcon } from "@phosphor-icons/react";
 import {
   ago,
   api,
@@ -404,14 +404,6 @@ function AddUserDialog({
 function PasswordDialog({ result, reset, onClose }: { result: OneTimePasswordResponse; reset: boolean; onClose: () => void }) {
   const toasts = useKumoToastManager();
   const u = result.user;
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(result.password);
-      toasts.add({ title: "One-time password copied", variant: "success" });
-    } catch {
-      toasts.add({ title: "Couldn't copy", description: "Select the password and copy it instead.", variant: "error" });
-    }
-  };
   return (
     <Dialog.Root open onOpenChange={(o: boolean) => !o && onClose()}>
       <Dialog size="lg" className="p-6">
@@ -419,12 +411,7 @@ function PasswordDialog({ result, reset, onClose }: { result: OneTimePasswordRes
           title={reset ? `New password for ${u.username}` : `${u.username} added as ${withArticle(ROLE_INFO[u.role].label)}`}
           description={`Give ${u.name || u.username} this one-time password, and their username, ${u.username}. It's shown only now. When they sign in with it, they choose their own.${reset ? " They've been signed out everywhere." : ""}`}
         />
-        <div className="flex items-center gap-2 rounded-md border border-kumo-hairline bg-kumo-base p-3">
-          <code className="min-w-0 flex-1 truncate font-mono text-base text-kumo-default select-all">{result.password}</code>
-          <Button variant="secondary" size="sm" icon={<CopyIcon />} onClick={() => void copy()}>
-            Copy
-          </Button>
-        </div>
+        <ClipboardText text={result.password} className="w-full" onCopy={() => toasts.add({ title: "One-time password copied", variant: "success" })} />
         <div className="mt-6 flex justify-end">
           <Button variant="primary" onClick={onClose}>
             Done

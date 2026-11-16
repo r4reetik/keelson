@@ -6,7 +6,7 @@
 import type { Evaluation } from "../core/engine.ts";
 import type { EngineOptions, ProgressEvent } from "../core/types.ts";
 import type { CheckMeta } from "../core/checks/define.ts";
-import type { Coverage, PermissionProbe, ScanSnapshot, TokenInfo } from "../shared/api.ts";
+import type { Coverage, LinkKey, PermissionProbe, ScanSnapshot, TokenInfo } from "../shared/api.ts";
 import type { ProviderId, ProviderInfo } from "../shared/providers.ts";
 import type { Account } from "../store/repo.ts";
 
@@ -49,4 +49,9 @@ export interface Provider {
   scan(input: ScanInput): Promise<ScanOutput>;
   /** Domains an account's latest snapshot shows it owns: they count as internal email domains for the entity's other accounts. */
   ownedDomains(snapshot: ScanSnapshot): string[];
+  /**
+   * Lists from the entity's other accounts that this provider starts from (Sonar). When it is added, the entity's
+   * accounts whose latest scan predates one of them are scanned again first.
+   */
+  reads?: LinkKey[];
 }

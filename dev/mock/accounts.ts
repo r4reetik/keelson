@@ -8,6 +8,8 @@ import { MOCK_ACCOUNT, MOCK_TOKEN } from "./cloudflare.ts";
 import { MOCK_VERCEL_TEAM, MOCK_VERCEL_TOKEN, MOCK_VERCEL_TOKEN_2, MOCK_VERCEL_USER } from "./vercel.ts";
 import { MOCK_AWS_ACCOUNT, MOCK_AWS_TOKEN } from "./aws.ts";
 import { MOCK_GITHUB_ACCOUNT, MOCK_GITHUB_TOKEN } from "./github.ts";
+import { MOCK_LEGACY_DOMAIN } from "./internet.ts";
+import { accountIdForEntity } from "../../src/shared/providers.ts";
 import { DAY_MS, isoDate } from "../../src/shared/time.ts";
 import type { ProviderId } from "../../src/shared/providers.ts";
 
@@ -54,6 +56,16 @@ export function seedGithub(repo: Repo, vault: TokenVault, o: { entity?: string |
     entity: o.entity ?? "Mock Group",
     provider: "github",
   });
+}
+
+/**
+ * Adds Sonar (the internet account) to an entity the way the Accounts page would, with the mock Shodan key or
+ * none, and gives the entity a domain of its own that no connected account serves.
+ */
+export function seedInternet(repo: Repo, vault: TokenVault, o: { entity?: string | number; key?: string } = {}) {
+  const entity = typeof o.entity === "number" ? repo.entities.get(o.entity)! : repo.entities.list().find((e) => e.name === (o.entity ?? "Mock Group"))!;
+  repo.entities.update(entity.id, { ...entity, orgDomains: [...new Set([...(entity.orgDomains || []), MOCK_LEGACY_DOMAIN])] });
+  return seedAccount(repo, vault, { id: accountIdForEntity(entity.id), token: o.key ?? "", name: "Internet", entity: entity.id, provider: "internet" });
 }
 
 /** An in-memory repo and vault with live probes off, so scans touch only the mocked APIs. */

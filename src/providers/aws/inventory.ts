@@ -25,6 +25,8 @@ import type {
   AwsInterface,
   AwsInventory,
   AwsLoadBalancer,
+  AwsRule,
+  AwsTargetGroup,
   AwsPolicy,
   AwsRecord,
   AwsRegion,
@@ -528,6 +530,7 @@ function toInterface(n: XmlNode): AwsInterface {
   return {
     id: text(n, "networkInterfaceId") ?? "",
     publicIp: text(n, "association", "publicIp"),
+    privateIp: text(n, "privateIpAddress"),
     securityGroups: items(n, "groupSet").flatMap((g) => text(g, "groupId") ?? []),
     kind,
     owner: instance ?? (description || null),
@@ -627,6 +630,17 @@ async function readRegion(client: AwsClient, region: string): Promise<AwsRegion>
 
   const securityGroups = groups ? groups.map(toSecurityGroup) : null;
   if (securityGroups) await resolvePrefixLists(client, region, securityGroups);
+  // A listener whose rules couldn't be read keeps null, so routing is never guessed from half of it.
+  const targetGroups = loadBalancers?.length
+    ? await client
+        .read("lbRouting", () => readRouting(client, region, loadBalancers))
+        .then((g) => {
+          if (!g) for (const l of loadBalancers.flatMap((lb) => lb.listeners ?? [])) if (l.rules === undefined) l.rules = null;
+          return g;
+        })
+    : loadBalancers
+      ? []
+      : null;
 
   const instances = reservations ? reservations.flatMap((r) => items(r, "instancesSet").map(toInstance)).filter((i) => i.id) : null;
   const running = (instances ?? []).filter((i) => i.running);
@@ -654,6 +668,7 @@ async function readRegion(client: AwsClient, region: string): Promise<AwsRegion>
     }),
     databases,
     loadBalancers,
+    targetGroups,
     functions,
     interfaces: network?.interfaces ?? null,
     addresses: network?.addresses ?? null,
@@ -702,6 +717,9 @@ async function readLoadBalancers(client: AwsClient, region: string): Promise<Aws
         protocol: text(l, "Protocol") ?? "",
         sslPolicy: text(l, "SslPolicy"),
         redirects: items(l, "DefaultActions").some((a) => text(a, "Type") === "redirect"),
+        arn: text(l, "ListenerArn") ?? undefined,
+        // Application load balancers' rules are read with the routing; the others route by their default actions alone.
+        rules: text(lb, "Type") === "application" ? undefined : [toRule("default", [], items(l, "DefaultActions"))],
       })),
     });
   });
@@ -720,16 +738,114 @@ async function readLoadBalancers(client: AwsClient, region: string): Promise<Aws
       vpcId: text(lb, "VPCId"),
       securityGroups: groups(lb),
       accessLogs: bool(find(attributes, "AccessLog"), "Enabled"),
+      instances: items(lb, "Instances").flatMap((i) => text(i, "InstanceId") ?? []),
       // A classic listener can't redirect, and its TLS policy is a named policy rather than a version: neither is judged.
+      // It sends everything to the registered instances, on the listener's instance port.
       listeners: items(lb, "ListenerDescriptions").map((l) => ({
         port: port(text(l, "Listener", "LoadBalancerPort")),
         protocol: text(l, "Listener", "Protocol") ?? "",
         sslPolicy: null,
         redirects: false,
+        instancePort: port(text(l, "Listener", "InstancePort")),
+        rules: [{ ...EMPTY_RULE, priority: "default", action: "forward" as const, targetGroups: ["classic"] }],
       })),
     });
   });
   return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Target groups in a region that are read with their targets: each costs a request. */
+const MAX_TARGET_GROUPS = 200;
+
+/**
+ * Where each load balancer sends requests: its application load balancers' listener rules, and its target groups
+ * with what is registered in them. Fills in the listeners' rules and returns the target groups. Rules that couldn't
+ * be read are left null on their listener.
+ */
+async function readRouting(client: AwsClient, region: string, loadBalancers: AwsLoadBalancer[]): Promise<AwsTargetGroup[]> {
+  const elb = "elasticloadbalancing";
+  const paged = { param: "Marker", element: "NextMarker" };
+  const listeners = loadBalancers.filter((lb) => lb.type === "application").flatMap((lb) => lb.listeners ?? []);
+  await pool(listeners, ITEM_CONCURRENCY, async (l) => {
+    if (!l.arn) return;
+    const rules = await queryAll(client, elb, region, "DescribeRules", "Rules", paged, { ListenerArn: l.arn, PageSize: "400" });
+    l.rules = rules
+      .map((r) => toRule(text(r, "Priority") ?? "default", items(r, "Conditions"), items(r, "Actions")))
+      .sort((a, b) => rulePlace(a) - rulePlace(b));
+  });
+  if (!loadBalancers.some((lb) => lb.type !== "classic")) return [];
+  const nodes = await queryAll(client, elb, region, "DescribeTargetGroups", "TargetGroups", paged, { PageSize: "400" });
+  const groups: AwsTargetGroup[] = nodes.map((g) => ({
+    arn: text(g, "TargetGroupArn") ?? "",
+    name: text(g, "TargetGroupName") ?? "",
+    protocol: text(g, "Protocol"),
+    port: port(text(g, "Port")),
+    type: text(g, "TargetType") ?? "instance",
+    targets: null,
+  }));
+  // Groups no load balancer uses can't be reached through one, so they aren't asked about.
+  const used = new Set(nodes.filter((g) => items(g, "LoadBalancerArns").length).map((g) => text(g, "TargetGroupArn")));
+  await pool(groups.filter((g) => used.has(g.arn)).slice(0, MAX_TARGET_GROUPS), ITEM_CONCURRENCY, async (g) => {
+    const doc = await client.query(elb, region, "DescribeTargetHealth", { TargetGroupArn: g.arn });
+    g.targets = items(find(doc, "TargetHealthDescriptions")).map((t) => ({
+      id: text(t, "Target", "Id") ?? "",
+      port: port(text(t, "Target", "Port")),
+      health: text(t, "TargetHealth", "State"),
+    }));
+  });
+  return groups;
+}
+
+const EMPTY_RULE: AwsRule = {
+  priority: "default",
+  hosts: [],
+  paths: [],
+  conditions: [],
+  action: "other",
+  authenticates: false,
+  detail: null,
+  targetGroups: [],
+};
+
+/** Rules in the order the load balancer tries them: by priority number, the default last. */
+const rulePlace = (r: AwsRule) => (r.priority === "default" ? Number.MAX_SAFE_INTEGER : Number(r.priority) || 0);
+
+/** A listener rule from its conditions and actions. Header and query string values are never kept: they can be secrets. */
+function toRule(priority: string, conditions: XmlNode[], actions: XmlNode[]): AwsRule {
+  const values = (c: XmlNode, config: string) => {
+    const v = items(c, config, "Values").map((x) => x.text.trim());
+    return v.length ? v : items(c, "Values").map((x) => x.text.trim());
+  };
+  const rule: AwsRule = { ...EMPTY_RULE, priority, hosts: [], paths: [], conditions: [], targetGroups: [] };
+  for (const c of conditions) {
+    const field = text(c, "Field");
+    if (field === "host-header") rule.hosts.push(...values(c, "HostHeaderConfig").map((h) => h.toLowerCase()));
+    else if (field === "path-pattern") rule.paths.push(...values(c, "PathPatternConfig"));
+    else if (field === "source-ip") rule.conditions.push(`source IP ${values(c, "SourceIpConfig").join(", ")}`);
+    else if (field === "http-header") rule.conditions.push(`header ${text(c, "HttpHeaderConfig", "HttpHeaderName") ?? ""}`.trim());
+    else if (field === "http-request-method") rule.conditions.push(`method ${values(c, "HttpRequestMethodConfig").join(", ")}`);
+    else if (field === "query-string") rule.conditions.push("query string");
+    else if (field) rule.conditions.push(field);
+  }
+  const ordered = [...actions].sort((a, b) => Number(text(a, "Order") ?? 0) - Number(text(b, "Order") ?? 0));
+  for (const a of ordered) {
+    const type = text(a, "Type") ?? "";
+    if (type.startsWith("authenticate-")) rule.authenticates = true;
+    else if (type === "forward") {
+      rule.action = "forward";
+      const weighted = items(a, "ForwardConfig", "TargetGroups").flatMap((g) => text(g, "TargetGroupArn") ?? []);
+      rule.targetGroups = weighted.length ? weighted : [text(a, "TargetGroupArn") ?? ""].filter(Boolean);
+    } else if (type === "redirect") {
+      rule.action = "redirect";
+      const proto = text(a, "RedirectConfig", "Protocol");
+      const host = text(a, "RedirectConfig", "Host");
+      rule.detail = host && host !== "#{host}" ? `${(proto ?? "#{protocol}").toLowerCase()}://${host}` : proto === "HTTPS" ? "HTTPS" : proto;
+    } else if (type === "fixed-response") {
+      rule.action = "fixed-response";
+      rule.detail = text(a, "FixedResponseConfig", "StatusCode");
+    }
+  }
+  return rule;
 }
 
 async function readFunctions(client: AwsClient, region: string): Promise<AwsFunction[]> {

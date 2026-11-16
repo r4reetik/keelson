@@ -253,6 +253,12 @@ export const NO_RELATED: Related = {
   githubPages: null,
   githubOrgs: null,
   githubRepos: null,
+  cloudflareZones: null,
+  cloudflareDns: null,
+  route53Zones: null,
+  route53Dns: null,
+  awsLoadBalancers: null,
+  awsExposure: null,
   unknown: [],
 };
 

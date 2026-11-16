@@ -3,10 +3,10 @@
 // axis; "All changes" lists every triage change and scan outcome, newest first.
 
 import { useMemo, useState } from "react";
-import { Badge, Button, Empty, Input, Pagination, Select, Tabs } from "@cloudflare/kumo";
+import { Badge, Button, Empty, Input, Pagination, Select, Tabs, Link } from "@cloudflare/kumo";
 import { CaretRightIcon, ClipboardTextIcon } from "@phosphor-icons/react";
 import { useScopedApi, useShell } from "../shell.tsx";
-import { ago, clampPage, dateOnly, link, navigate, num, setParams, useLocation, type FindingEvent, type TriagedFinding, type TriagedResponse } from "../lib.ts";
+import { ago, clampPage, dateOnly, navigate, num, setParams, useLocation, type FindingEvent, type TriagedFinding, type TriagedResponse } from "../lib.ts";
 import { ListCard, NoRows, Page, PageState, PlatformMark, Row, SeverityBadge, Stat, StatusBadge } from "../components/ui.tsx";
 import { FindingDialog } from "../components/triage.tsx";
 import { describeEvent, LANE_LABEL, LaneLegend, laneSegments, StatusLane, Timeline, type LaneState } from "../components/history.tsx";
@@ -231,11 +231,11 @@ export function TriagedPage() {
 
 /** The finding title as a real link: a click opens the dialog (or the page once it's gone), a modifier click opens the page. */
 function TitleLink({ f, onOpen }: { f: TriagedFinding; onOpen: (f: TriagedFinding) => void }) {
-  const l = link(`/findings/${f.fingerprint}`);
   return (
-    <a
-      href={l.href}
-      className="text-kumo-default hover:text-kumo-link focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-kumo-brand focus-visible:outline-none"
+    <Link
+      variant="plain"
+      href={`/findings/${f.fingerprint}`}
+      className="focus-visible:rounded-sm"
       onClick={(e) => {
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
         e.preventDefault();
@@ -243,7 +243,7 @@ function TitleLink({ f, onOpen }: { f: TriagedFinding; onOpen: (f: TriagedFindin
       }}
     >
       {f.title}
-    </a>
+    </Link>
   );
 }
 
@@ -289,15 +289,16 @@ function TriagedRow({
   return (
     <li className="py-3 pr-4 pl-3">
       <div className="flex items-start gap-2">
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
+          shape="square"
+          className="mt-0.5 shrink-0"
           aria-expanded={expanded}
           aria-label={expanded ? "Hide history" : "Show history"}
           onClick={onToggle}
-          className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-kumo-subtle hover:bg-kumo-tint focus-visible:ring-2 focus-visible:ring-kumo-brand focus-visible:outline-none"
-        >
-          <CaretRightIcon className={`transition-transform ${expanded ? "rotate-90" : ""}`} />
-        </button>
+          icon={<CaretRightIcon className={`transition-transform ${expanded ? "rotate-90" : ""}`} />}
+        />
         <div className={`flex min-w-0 flex-1 flex-col gap-2 ${GRID}`}>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -328,9 +329,9 @@ function TriagedRow({
         <div className="mt-3 ml-9 rounded-lg bg-kumo-elevated p-4 ring ring-kumo-line">
           <Timeline events={f.events} />
           <div className="mt-4">
-            <a {...link(`/findings/${f.fingerprint}`)} className="text-sm text-kumo-link">
+            <Link variant="plain" href={`/findings/${f.fingerprint}`} className="text-sm">
               Open the finding page
-            </a>
+            </Link>
           </div>
         </div>
       )}

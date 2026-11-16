@@ -260,13 +260,14 @@ const instance = (id: string, name: string, o: { ip?: string; sg: string[]; toke
     ),
   );
 
-const eni = (id: string, groups: string[], o: { ip?: string; instance?: string; description?: string }) =>
+const eni = (id: string, groups: string[], o: { ip?: string; privateIp?: string; instance?: string; description?: string }) =>
   x(
     "item",
     x("networkInterfaceId", id),
     x("description", o.description ?? ""),
     x("interfaceType", "interface"),
     x("groupSet", ...groups.map((g) => x("item", x("groupId", g)))),
+    o.privateIp ? x("privateIpAddress", o.privateIp) : "",
     o.ip ? x("association", x("publicIp", o.ip)) : "",
     o.instance ? x("attachment", x("instanceId", o.instance)) : "",
   );
@@ -308,7 +309,7 @@ const ec2: Record<string, (region: string) => string> = {
       "networkInterfaceSet",
       ...(r === WORK
         ? [
-            eni("eni-0web0000000000001", [SG.admin, SG.web], { ip: MOCK_AWS_IP, instance: WEB }),
+            eni("eni-0web0000000000001", [SG.admin, SG.web], { ip: MOCK_AWS_IP, privateIp: "10.0.1.10", instance: WEB }),
             eni("eni-0worker00000000001", [SG.web], { instance: "i-0worker0000000001" }),
             eni("eni-0alb0000000000001", [SG.web], { ip: LB_IP, description: "ELB app/web-alb/0001" }),
             eni("eni-0rds0000000000001", [SG.db], { ip: DB_IP, description: "RDSNetworkInterface" }),
@@ -377,8 +378,88 @@ const CLASSIC_DNS = `internal-legacy-elb-123456789.${WORK}.elb.amazonaws.com`;
 export const MOCK_AWS_API_DOMAIN = "d5apigwmockexample.cloudfront.net";
 export const MOCK_AWS_ELB = ELB_DNS;
 const ELB_ARN = `arn:aws:elasticloadbalancing:${WORK}:${MOCK_AWS_ACCOUNT}:loadbalancer/app/web-alb/0001`;
+const TG = (name: string, n: string) => `arn:aws:elasticloadbalancing:${WORK}:${MOCK_AWS_ACCOUNT}:targetgroup/${name}/${n}`;
+const TG_WEB = TG("web", "0001");
+const TG_ADMIN = TG("admin", "0002");
+const listenerArn = (port: number) => `arn:aws:elasticloadbalancing:${WORK}:${MOCK_AWS_ACCOUNT}:listener/app/web-alb/0001/${port}`;
 const listener = (port: number, protocol: string, extra = "") =>
-  x("member", x("Port", port), x("Protocol", protocol), extra, x("DefaultActions", x("member", x("Type", "forward"))));
+  x(
+    "member",
+    x("ListenerArn", listenerArn(port)),
+    x("Port", port),
+    x("Protocol", protocol),
+    extra,
+    x("DefaultActions", x("member", x("Type", "forward"), x("TargetGroupArn", TG_WEB))),
+  );
+const forward = (arn: string, order = 1) => x("member", x("Type", "forward"), x("Order", order), x("TargetGroupArn", arn));
+const condition = (field: string, config: string, ...values: string[]) =>
+  x("member", x("Field", field), x(config, x("Values", ...values.map((v) => x("member", v)))));
+/**
+ * The web load balancer's routing on 443: /admin on api.mock-aws.example signs visitors in first, beta.mock-aws.example
+ * is routed though no DNS record points at it, other names need a secret header, and the rest goes to the web group. Both groups hold web-1,
+ * whose public address and open 443 let anyone skip the load balancer.
+ */
+const rules = (listener: string) =>
+  x(
+    "Rules",
+    ...(listener === listenerArn(443)
+      ? [
+          x(
+            "member",
+            x("Priority", "10"),
+            x("Conditions", condition("host-header", "HostHeaderConfig", "api.mock-aws.example"), condition("path-pattern", "PathPatternConfig", "/admin/*")),
+            x("Actions", x("member", x("Type", "authenticate-oidc"), x("Order", 1)), forward(TG_ADMIN, 2)),
+          ),
+          x(
+            "member",
+            x("Priority", "20"),
+            x("Conditions", condition("host-header", "HostHeaderConfig", "beta.mock-aws.example")),
+            x("Actions", forward(TG_WEB)),
+          ),
+          x(
+            "member",
+            x("Priority", "30"),
+            x(
+              "Conditions",
+              condition("host-header", "HostHeaderConfig", "*.mock-aws.example"),
+              // A header condition's value can be a shared secret: Keelson keeps the header's name only.
+              x(
+                "member",
+                x("Field", "http-header"),
+                x("HttpHeaderConfig", x("HttpHeaderName", "X-Mock-Verify"), x("Values", x("member", "mock-secret-value"))),
+              ),
+            ),
+            x("Actions", forward(TG_WEB)),
+          ),
+        ]
+      : []),
+    x("member", x("Priority", "default"), x("IsDefault", true), x("Conditions", ""), x("Actions", forward(TG_WEB))),
+  );
+const targetGroups = () =>
+  x(
+    "TargetGroups",
+    ...[
+      [TG_WEB, "web"],
+      [TG_ADMIN, "admin"],
+    ].map(([arn, name]) =>
+      x(
+        "member",
+        x("TargetGroupArn", arn),
+        x("TargetGroupName", name),
+        x("Protocol", "HTTPS"),
+        x("Port", 443),
+        x("TargetType", "instance"),
+        x("LoadBalancerArns", x("member", ELB_ARN)),
+      ),
+    ),
+  );
+const targetHealth = (group: string) =>
+  x(
+    "TargetHealthDescriptions",
+    ...(group === TG_WEB ? [WEB, "i-0worker0000000001"] : [WEB]).map((id) =>
+      x("member", x("Target", x("Id", id), x("Port", 443)), x("TargetHealth", x("State", "healthy"))),
+    ),
+  );
 
 const BUCKETS: Record<string, { region: string; block: boolean; public: boolean; policy?: object }> = {
   "mock-backups": { region: "us-east-1", block: true, public: false },
@@ -907,7 +988,8 @@ export function installMockAws(o: MockOptions = {}): () => void {
           x("Scheme", "internal"),
           x("VPCId", VPC),
           x("SecurityGroups", x("member", SG.web)),
-          x("ListenerDescriptions", x("member", x("Listener", x("Protocol", "TCP"), x("LoadBalancerPort", 8443)))),
+          x("ListenerDescriptions", x("member", x("Listener", x("Protocol", "TCP"), x("LoadBalancerPort", 8443), x("InstancePort", 8443)))),
+          x("Instances", x("member", x("InstanceId", "i-0worker0000000001"))),
         );
         return xml(x("DescribeLoadBalancersResponse", x("LoadBalancerDescriptions", region === WORK ? classic : "")));
       }
@@ -924,6 +1006,9 @@ export function installMockAws(o: MockOptions = {}): () => void {
         );
       if (action === "DescribeListeners")
         return xml(x("DescribeListenersResponse", x("Listeners", listener(80, "HTTP"), listener(443, "HTTPS", x("SslPolicy", "ELBSecurityPolicy-2016-08")))));
+      if (action === "DescribeRules") return xml(x("DescribeRulesResponse", rules(q.get("ListenerArn") ?? "")));
+      if (action === "DescribeTargetGroups") return xml(x("DescribeTargetGroupsResponse", region === WORK ? targetGroups() : x("TargetGroups", "")));
+      if (action === "DescribeTargetHealth") return xml(x("DescribeTargetHealthResponse", targetHealth(q.get("TargetGroupArn") ?? "")));
       const lb = x(
         "member",
         x("LoadBalancerArn", ELB_ARN),

@@ -2,9 +2,9 @@
 // Shows the finding with its triage and a timeline of every scan and change.
 // When the finding has been resolved, the page says so and shows its last state.
 
-import { Badge, Button } from "@cloudflare/kumo";
+import { Badge, Button, Link } from "@cloudflare/kumo";
 import { ArrowLeftIcon } from "@phosphor-icons/react";
-import { HttpError, dateTime, link, navigate, scopeKeyFor, useApi, type FindingDetail, type Triage } from "../lib.ts";
+import { HttpError, dateTime, navigate, scopeKeyFor, useApi, type FindingDetail, type Triage } from "../lib.ts";
 import { useShell } from "../shell.tsx";
 import { Card, Page, PageState } from "../components/ui.tsx";
 import { CopyLinkButton, FindingBody, FindingHeader, TriagePanel } from "../components/triage.tsx";
@@ -91,9 +91,9 @@ export function FindingPage({ params }: { params: Record<string, string> }) {
           </p>
           {data.last && (
             <p className="mt-2 text-sm">
-              <a {...link(`/findings?check=${data.last.checkId}&status=all`)} className="text-kumo-link">
+              <Link variant="plain" href={`/findings?check=${data.last.checkId}&status=all`}>
                 Other findings from this check
-              </a>
+              </Link>
             </p>
           )}
         </Card>

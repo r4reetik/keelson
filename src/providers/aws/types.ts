@@ -138,6 +138,8 @@ export interface AwsInterface {
   kind: string;
   /** The instance ID, or AWS's description of the owner. */
   owner: string | null;
+  /** Its primary private address, which a load balancer's IP target names. */
+  privateIp?: string | null;
 }
 
 export interface AwsDatabase {
@@ -164,6 +166,45 @@ export interface AwsListener {
   sslPolicy: string | null;
   /** The default action sends visitors to HTTPS. */
   redirects: boolean;
+  arn?: string;
+  /** Classic load balancers: the port on the instances that the listener forwards to. */
+  instancePort?: number | null;
+  /**
+   * How the listener routes requests, in the order the load balancer tries them, the default last. Read from
+   * DescribeRules for application load balancers, from the default actions for the others. Undefined: not read;
+   * null: couldn't be read.
+   */
+  rules?: AwsRule[] | null;
+}
+
+/** One listener rule, reduced to what decides where a request goes. A header condition keeps its name, never its values. */
+export interface AwsRule {
+  /** The rule's priority, or "default". */
+  priority: string;
+  /** Host header values it matches, as AWS writes them (with * and ? wildcards); empty: any host. */
+  hosts: string[];
+  paths: string[];
+  /** Its other conditions, by kind: "source IP 10.0.0.0/8", "header X-Origin-Verify", "query string", "method POST". */
+  conditions: string[];
+  action: "forward" | "redirect" | "fixed-response" | "other";
+  /** Visitors sign in through Cognito or an OpenID Connect provider before the request is forwarded. */
+  authenticates: boolean;
+  /** A redirect's destination ("HTTPS", "https://other.example") or a fixed response's status code. */
+  detail: string | null;
+  /** The target groups it forwards to, by ARN. A classic load balancer's single route uses "classic". */
+  targetGroups: string[];
+}
+
+/** A target group and what is registered in it. */
+export interface AwsTargetGroup {
+  arn: string;
+  name: string;
+  protocol: string | null;
+  port: number | null;
+  /** "instance", "ip", "lambda" or "alb". */
+  type: string;
+  /** Registered targets and their health state; null when they couldn't be read (or past the limit). */
+  targets: { id: string; port: number | null; health: string | null }[] | null;
 }
 
 export interface AwsLoadBalancer {
@@ -180,6 +221,8 @@ export interface AwsLoadBalancer {
   /** How it handles requests that could be read two ways (desync mitigation): "monitor", "defensive", "strictest". */
   desync?: string | null;
   listeners: AwsListener[] | null;
+  /** Classic load balancers: the instances registered with it. */
+  instances?: string[];
 }
 
 export interface AwsFunction {
@@ -341,6 +384,8 @@ export interface AwsRegion {
   vpcs: { id: string; isDefault: boolean; flowLogs: boolean | null }[] | null;
   databases: AwsDatabase[] | null;
   loadBalancers: AwsLoadBalancer[] | null;
+  /** Target groups of the region's load balancers; null when unread, undefined when not read at all. */
+  targetGroups?: AwsTargetGroup[] | null;
   functions: AwsFunction[] | null;
   /** Every network interface in the region; null when unreadable. */
   interfaces: AwsInterface[] | null;

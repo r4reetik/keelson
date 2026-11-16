@@ -100,5 +100,7 @@ export const maskToken = (t: string): string => {
   // A private key always ends in "-----", which tells nothing apart; the App ID before it isn't secret and does (GitHub).
   const app = /^([^:\s]{1,40}):[\s\S]*-----BEGIN [A-Z ]+-----/.exec(t);
   if (app) return `App ${app[1]}`;
+  // An optional credential left empty (Sonar without a Shodan key).
+  if (!t) return "None";
   return t.length > 8 ? `…${t.slice(-4)}` : "…";
 };
