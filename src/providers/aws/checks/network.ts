@@ -7,19 +7,9 @@
 import { defineChecks, ruleText, usedBy } from "./define.ts";
 import type { AwsInterface, AwsRegion, AwsSecurityGroup } from "../types.ts";
 import type { Severity } from "../../../core/types.ts";
+import { DATABASE_PORTS } from "../../../core/ports.ts";
 
 const ADMIN_PORTS: Record<number, string> = { 22: "SSH", 3389: "RDP" };
-export const DATABASE_PORTS: Record<number, string> = {
-  1433: "SQL Server",
-  1521: "Oracle",
-  3306: "MySQL",
-  5432: "PostgreSQL",
-  5439: "Redshift",
-  6379: "Redis",
-  9200: "Elasticsearch",
-  11211: "Memcached",
-  27017: "MongoDB",
-};
 
 type Rule = AwsSecurityGroup["open"][number];
 const isAll = (r: Rule) => r.protocol === "-1";

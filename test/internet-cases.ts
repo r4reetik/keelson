@@ -50,7 +50,7 @@ export const host = (extra: Partial<Host> = {}): Host => ({
   resolved: null,
   servedBy: "Cloudflare (proxied)",
   loadBalancer: null,
-  awsAddress: null,
+  cloudAddress: null,
   ...extra,
 });
 
@@ -137,6 +137,24 @@ export const INTERNET_CASES: Record<InternetCheckId, () => InternetInventory> = 
     internetInventory({
       hosts: [host({ name: "www.example.com", loadBalancer: LB_DNS }), host({ name: "old.example.com", servedBy: "Vercel" })],
       loadBalancers: [loadBalancer({ listeners: [{ port: 443, protocol: "HTTPS", routes: [route({ rule: "1", hosts: ["old.example.com"] }), route()] }] })],
+    }),
+  // The same three, behind an Alibaba Cloud load balancer.
+  "XP-025": () =>
+    internetInventory({
+      loadBalancers: [
+        loadBalancer({ provider: "alibaba", listeners: [{ port: 443, protocol: "HTTPS", routes: [route({ targets: [target({ openOnPort: true })] })] }] }),
+      ],
+    }),
+  "XP-026": () => internetInventory({ loadBalancers: [loadBalancer({ provider: "alibaba", internetFacing: false })] }),
+  "XP-027": () =>
+    internetInventory({
+      hosts: [host({ name: "www.example.com", loadBalancer: LB_DNS }), host({ name: "old.example.com", servedBy: "Vercel" })],
+      loadBalancers: [
+        loadBalancer({
+          provider: "alibaba",
+          listeners: [{ port: 443, protocol: "HTTPS", routes: [route({ rule: "1", hosts: ["old.example.com"] }), route()] }],
+        }),
+      ],
     }),
 };
 

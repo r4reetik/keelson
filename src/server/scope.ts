@@ -21,6 +21,7 @@ import type {
   ProjectRow,
   RegionRow,
   RepoRow,
+  ResourcesView,
   SurfaceView,
   ProviderScore,
   ScanMeta,
@@ -231,7 +232,19 @@ export function projects(scans: AccountScan[]): ProjectRow[] | null {
 
 export function regions(scans: AccountScan[]): RegionRow[] | null {
   if (!scans.some((s) => s.scan.snap.regions)) return null;
-  return scans.flatMap(({ account, scan }) => tag(scan.snap.regions, account));
+  return scans.flatMap(({ account, scan }) => tag(scan.snap.regions, account).map((r) => ({ ...r, provider: account.provider })));
+}
+
+/** Every account's cloud resources (Alibaba Cloud), rows and regions tagged with their account. */
+export function resources(scans: AccountScan[]): ResourcesView | null {
+  const views = scans.filter((s) => s.scan.snap.resources);
+  if (!views.length) return null;
+  return {
+    rows: views.flatMap(({ account, scan }) => tag(scan.snap.resources!.rows, account)),
+    regions: views.flatMap(({ account, scan }) => tag(scan.snap.resources!.regions, account)),
+    emptyRegions: views.reduce((n, { scan }) => n + scan.snap.resources!.emptyRegions, 0),
+    skippedRegions: [...new Set(views.flatMap(({ scan }) => scan.snap.resources!.skippedRegions))].sort(),
+  };
 }
 
 export function repos(scans: AccountScan[]): RepoRow[] | null {

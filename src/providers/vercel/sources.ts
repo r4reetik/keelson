@@ -1,6 +1,6 @@
 // Every Vercel data source a scan reads. Like Cloudflare's registry (src/core/sources.ts),
 // each source has a coverage label, what grants it, and an optional probe for the
-// Add accounts dialog. Vercel tokens can't be limited to reading: a token can do what its
+// Add accounts flow. Vercel tokens can't be limited to reading: a token can do what its
 // creator's team role allows, so `permission` names the role that can read it.
 
 export interface VercelSource {

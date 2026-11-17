@@ -3,7 +3,7 @@
 # Permissions
 
 Keelson only reads, on every provider. Each provider's section lists the data a scan reads and what grants it:
-a token permission on Cloudflare, a team role on Vercel, IAM actions on AWS, an App permission on GitHub, and for Sonar, public sources and Shodan.
+a token permission on Cloudflare, a team role on Vercel, IAM actions on AWS, RAM actions on Alibaba Cloud, an App permission on GitHub, and for Sonar, public sources and Shodan.
 
 ## Cloudflare
 
@@ -52,7 +52,7 @@ skipped rather than passed. Add accounts tests a token against each source befor
 | mTLS certificates | Account · SSL and Certificates · Read | TLS-014 |
 | Load balancer pools | Account · Load Balancing: Monitors and Pools · Read | DNS-009 |
 | Zone settings | Zone · Zone Settings · Read | TLS-001, TLS-002, TLS-003, TLS-004, TLS-005, TLS-006, TLS-007, TLS-009, TLS-012, WAF-006, WAF-007, WAF-011, TRF-006 |
-| DNS records | Zone · DNS · Read | ZT-008, TLS-010, WAF-015, DNS-001, DNS-002, DNS-003, DNS-004, DNS-005, DNS-007, DNS-008, EML-001, EML-002, EML-003, EML-004, EML-005, EML-006, EML-007, EML-008, EML-009, EML-011, ATS-001, ATS-002, ATS-003, ATS-006, ATS-007, ATS-008, TRF-009, XP-001, XP-002, XP-004, XP-007, XP-008, XP-009 |
+| DNS records | Zone · DNS · Read | ZT-008, TLS-010, WAF-015, DNS-001, DNS-002, DNS-003, DNS-004, DNS-005, DNS-007, DNS-008, EML-001, EML-002, EML-003, EML-004, EML-005, EML-006, EML-007, EML-008, EML-009, EML-011, ATS-001, ATS-002, ATS-003, ATS-006, ATS-007, ATS-008, TRF-009, XP-001, XP-002, XP-004, XP-007, XP-008, XP-016, XP-017, XP-009 |
 | DNSSEC | Zone · DNS · Read | DNS-006 |
 | Edge certificates | Zone · SSL and Certificates · Read | TLS-008, TLS-010, TLS-015 |
 | Origin certificates | Zone · SSL and Certificates · Read | TLS-011, TLS-014, ATS-002 |
@@ -152,7 +152,7 @@ for example) is skipped and shown as not readable on the Regions page: nothing t
 | API Gateway custom domain names (every enabled region) | `apigateway:GET` | Supporting data for other checks |
 | GuardDuty detectors (every enabled region) | `guardduty:ListDetectors`, `guardduty:GetDetector` | AMO-001 |
 | CloudFront distributions | `cloudfront:ListDistributions` | AED-001, AED-002, AED-003, AED-004, AED-007, AED-010, ADN-001 |
-| Route 53 hosted zones and records | `route53:ListHostedZones`, `route53:ListResourceRecordSets` | ADN-001, ADN-002, ADN-003, XP-005 |
+| Route 53 hosted zones and records | `route53:ListHostedZones`, `route53:ListResourceRecordSets` | ADN-001, ADN-002, ADN-003, XP-005, XP-021 |
 | AWS's published address ranges (ip-ranges.amazonaws.com) | `None: a public file`, `read without the access key` | ADN-003 |
 | IAM server certificates | `iam:ListServerCertificates` | AED-012 |
 | S3 bucket policies (reduced to the accounts they allow, never stored) | `s3:GetBucketPolicy` | AS3-004 |
@@ -186,6 +186,62 @@ for example) is skipped and shown as not readable on the Regions page: nothing t
 | Amazon MQ brokers (every enabled region) | `mq:ListBrokers`, `mq:DescribeBroker` | AMQ-004 |
 | MSK (Kafka) clusters (every enabled region) | `kafka:ListClustersV2` | AMQ-005 |
 | EFS file systems (every enabled region) | `elasticfilesystem:DescribeFileSystems` | ADB-014 |
+
+## Alibaba Cloud
+
+An AccessKey belongs to one Alibaba Cloud account, so each account needs its own. In each account, create a RAM user for Keelson with
+**Using permanent AccessKey to access** and no console access, give it a custom policy with exactly the actions below (Add accounts
+shows it ready to paste), and create an AccessKey for it. Alibaba Cloud's system **ReadOnlyAccess** policy isn't enough of a limit:
+it also reads the objects in your OSS buckets and the values of your KMS secrets, which Keelson never needs. STS tokens (the ones that
+start with STS.) aren't accepted, because they expire within hours, and the main account's own AccessKey is reported as a finding.
+
+Keelson signs every request itself (Alibaba Cloud's V3 signature, and OSS's V4) and sends only GET requests. Alibaba Cloud's APIs
+accept GET for changes too, so the client also refuses any action that isn't a read named in the policy before sending it, and
+`test/alibaba.test.ts` fails on anything else. It never asks for a secret's value or an object in a bucket, never stores a policy
+document, and scans environment variables and start-up scripts for credentials in memory, keeping only the variable's name and the
+kind found. It keeps only the last four characters of an AccessKey ID.
+
+Regional sources are read in every region ECS lists. A region that refuses the AccessKey is skipped and counted on the Resources
+page, and a product the account never opened, or that a region doesn't offer, reads as empty rather than as a gap.
+
+Keelson's policy grows when a check needs a new read. A policy made from an earlier version is a coverage gap for those reads
+(the Overview names the missing actions): copy the current policy from Add accounts and replace the old one in RAM.
+
+| Source | RAM actions | Checks that read it |
+|---|---|---|
+| Account identity and alias | `ram:GetAccountAlias` | LID-001 |
+| Main account's AccessKeys and MFA (RAM's security practice report) | `ram:GetAccountSecurityPracticeReport` | LID-013 |
+| RAM users, their AccessKeys, MFA and console access | `ram:ListUsers`, `ram:ListAccessKeys`, `ram:GetLoginProfile`, `ram:GetUserMFAInfo`, `ram:GetAccessKeyLastUsed` | LID-002, LID-015, LID-003, LID-004, LID-005, LID-006, LID-007 |
+| RAM password policy | `ram:GetPasswordPolicy` | LID-006 |
+| RAM security settings: MFA at sign-in, and whether users manage their own AccessKeys | `ram:GetSecurityPreference` | LID-014 |
+| RAM policies and who they're attached to (documents reduced to what they allow, never stored) | `ram:ListPolicies`, `ram:GetPolicy`, `ram:ListEntitiesForPolicy`, `ram:ListUsersForGroup` | LID-007, LID-009, LID-011, LEC-007 |
+| RAM roles and their trust policies | `ram:ListRoles`, `ram:GetRole`, `ram:ListOIDCProviders` | LID-008, LID-010, LID-012, XP-022, XP-023, LEC-007 |
+| OSS Block Public Access for the account | `oss:GetPublicAccessBlock` | LOS-001, LOS-002, LOS-003 |
+| OSS buckets | `oss:ListBuckets` | LOS-001, LOS-002, LOS-003, LDN-001 |
+| OSS bucket ACLs and Block Public Access | `oss:GetBucketAcl`, `oss:GetBucketPublicAccessBlock` | LOS-002, LOS-003 |
+| OSS bucket policies (reduced to who they allow, never stored) | `oss:GetBucketPolicy` | LOS-002, LOS-004 |
+| Enabled regions | `ecs:DescribeRegions` | Supporting data for other checks |
+| Security groups and their rules (every available region) | `ecs:DescribeSecurityGroups`, `ecs:DescribeSecurityGroupAttribute` | LNW-001, LNW-002, LNW-003, LEC-007, LEC-009, XP-018 |
+| ECS instances (every available region) | `ecs:DescribeInstances`, `ecs:DescribeInstanceRamRole` | LNW-004, LEC-001, LEC-002, LEC-004, LEC-007, LEC-009, LMO-002, LMO-003 |
+| Network interfaces and EIPs (every available region) | `ecs:DescribeNetworkInterfaces`, `vpc:DescribeEipAddresses` | LNW-001, LNW-002, LNW-003, LEC-009, LDN-002, XP-018 |
+| Instance start-up scripts (scanned for credentials, never stored) (every available region) | `ecs:DescribeUserData` | LEC-004 |
+| ECS launch templates (start-up scripts scanned for credentials, never stored) (every available region) | `ecs:DescribeLaunchTemplates`, `ecs:DescribeLaunchTemplateVersions` | LEC-005, LEC-006 |
+| Cloud disks and encryption by default (every available region) | `ecs:DescribeDisks`, `ecs:DescribeDiskEncryptionByDefaultStatus` | LEC-002 |
+| Custom images and who they're shared with (every available region) | `ecs:DescribeImages`, `ecs:DescribeImageSharePermission` | LEC-008 |
+| VPCs and flow logs (every available region) | `vpc:DescribeVpcs`, `vpc:DescribeFlowLogs` | LMO-002 |
+| Load balancers (ALB, NLB, CLB) and listeners (every available region) | `slb:DescribeLoadBalancers`, `slb:DescribeLoadBalancerAttribute`, `slb:DescribeLoadBalancerHTTPListenerAttribute`, `slb:DescribeLoadBalancerHTTPSListenerAttribute`, `alb:ListLoadBalancers`, `alb:ListListeners`, `alb:ListRules`, `nlb:ListLoadBalancers`, `nlb:ListListeners` | LNW-005, LLB-001, LLB-002, LDN-001, LMO-002, XP-018 |
+| CLB listeners' ports and access control lists (every available region) | `slb:DescribeLoadBalancerListeners` | Supporting data for other checks |
+| Load balancer rules, server groups and their servers (every available region) | `alb:ListServerGroups`, `alb:ListServerGroupServers`, `slb:DescribeVServerGroupAttribute` | Supporting data for other checks |
+| ApsaraDB RDS instances, their whitelists, TLS and encryption (every available region) | `rds:DescribeDBInstances`, `rds:DescribeDBInstanceIPArrayList`, `rds:DescribeDBInstanceNetInfo`, `rds:DescribeDBInstanceSSL`, `rds:DescribeDBInstanceTDE` | LDB-001, LDB-002, LDB-003, LMO-002 |
+| Tair (Redis) instances: endpoints, whitelists, password-free access and TLS (every available region) | `kvstore:DescribeInstances`, `kvstore:DescribeInstanceAttribute`, `kvstore:DescribeSecurityIps`, `kvstore:DescribeDBInstanceNetInfo`, `kvstore:DescribeInstanceSSL` | LDB-004 |
+| ApsaraDB for MongoDB instances: endpoints, whitelists, password-free access and TLS (every available region) | `dds:DescribeDBInstances`, `dds:DescribeSecurityIps`, `dds:DescribeShardingNetworkAddress`, `dds:DescribeDBInstanceSSL` | LDB-004 |
+| Function Compute functions and triggers (environment variables scanned for credentials, never stored) (every available region) | `fc:ListFunctions`, `fc:ListTriggers` | LCN-002, LCN-003 |
+| KMS keys and secrets (names and dates, never values) (every available region) | `kms:ListKeys`, `kms:DescribeKey`, `kms:ListSecrets`, `kms:DescribeSecret` | LKM-001, LKM-002, LKM-003 |
+| Container Service (ACK) clusters | `cs:GetClusters` | LCN-001 |
+| ActionTrail trails | `actiontrail:DescribeTrails` | LMO-001 |
+| Security Center agents | `yundun-sas:DescribeCloudCenterInstances` | LMO-003 |
+| CDN domains | `cdn:DescribeUserDomains` | LLB-003, LDN-001 |
+| Alibaba Cloud DNS domains and records | `alidns:DescribeDomains`, `alidns:DescribeDomainRecords` | LDN-001, LDN-002, XP-019, XP-020, XP-024 |
 
 ## GitHub
 
@@ -235,7 +291,7 @@ Keelson runs, when installed, and aren't GitHub permissions: without one, its so
 ## Internet (Sonar)
 
 Sonar looks at each entity from outside. It isn't a platform with an API: Keelson adds one internet account per entity, and it
-starts from what the entity's other accounts know (their domains, DNS records and the addresses AWS holds), so it is scanned after them.
+starts from what the entity's other accounts know (their domains, DNS records and the addresses AWS and Alibaba Cloud hold), so it is scanned after them.
 It sends nothing to the entity's own hosts. It sends the entity's domain names to crt.sh (certificate transparency logs) and to
 Shodan, and its public addresses to Shodan, and looks names up in public DNS over HTTPS.
 
@@ -245,10 +301,10 @@ accepts its key in the address of each request; Keelson never puts it in an erro
 
 | Source | What it needs | Checks that read it |
 |---|---|---|
-| Domains, DNS records and addresses of the entity's other accounts | None: read from their latest scans. Every account in the entity needs a scan since Sonar was added. | NDS-001, XP-012, XP-015 |
+| Domains, DNS records and addresses of the entity's other accounts | None: read from their latest scans. Every account in the entity needs a scan since Sonar was added. | NDS-001, XP-012, XP-015, XP-027 |
 | Certificate transparency logs (crt.sh) | None: the logs are public | NCT-001 |
 | Public DNS lookups | None: public DNS over HTTPS | NCT-001 |
 | What Shodan has seen on the entity's addresses | a Shodan API key for service details, or none for Shodan's free InternetDB | NSV-001, NSV-002, NSV-003, XP-012 |
 | Subdomains Shodan has seen | a Shodan API key on a plan with query credits | Finding hostnames and addresses for other checks |
-| Load balancers, their rules and targets, and security groups in the entity's AWS accounts | None: read from the AWS accounts' latest scans. Each needs a scan since this was added. | XP-013, XP-014, XP-015 |
+| Load balancers, their rules and targets, and security groups in the entity's AWS accounts | None: read from the AWS accounts' latest scans. Each needs a scan since this was added. | XP-013, XP-014, XP-015, XP-025, XP-026, XP-027 |
 | Subdomains Amass found (OWASP Amass, passive) | Amass 5 installed where Keelson runs: on the PATH, or its path in KEELSON_AMASS (not in the Docker image yet) | Finding hostnames and addresses for other checks |

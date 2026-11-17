@@ -15,7 +15,7 @@ import type { AwsClient, Json } from "./client.ts";
 import { secretInUserData } from "./inventory.ts";
 import { allowsAnyone } from "./policy.ts";
 import { HOME_REGION } from "./sources.ts";
-import { at, bool, find, items, text, type XmlNode } from "./xml.ts";
+import { at, bool, find, items, text, type XmlNode } from "../../core/xml.ts";
 import { secretInVariables, secretKindIn } from "../../core/secret-patterns.ts";
 import type { AwsDatabase, AwsKafka, AwsKey, AwsKubernetes, AwsRegion, AwsSearchDomain, AwsTaskDefinition, AwsTrail, AwsWebAcl, FoundSecret } from "./types.ts";
 

@@ -5,15 +5,16 @@
 // here connects to the entity's hosts.
 //
 // Which addresses Shodan is asked about, and so which can produce findings: the ones an
-// AWS account in the entity holds, and the ones the entity's DNS points at directly (or
-// through a CNAME that stays under its domains). Left out: private addresses, Cloudflare's,
-// Vercel's and GitHub Pages' shared addresses, addresses AWS was seen to release (someone
-// else's now), and AWS addresses no AWS account in the entity holds (most are vendors').
+// AWS or Alibaba Cloud account in the entity holds, and the ones the entity's DNS points at
+// directly (or through a CNAME that stays under its domains). Left out: private addresses,
+// Cloudflare's, Vercel's and GitHub Pages' shared addresses, addresses a cloud was seen to
+// release (someone else's now), and AWS addresses no AWS account in the entity holds (most
+// are vendors').
 
 import { doh, pool, type DohAnswer } from "../../core/cloudflare.ts";
 import { inCloudflare, isInternal } from "../../core/cloudflare-ranges.ts";
 import { inPrefixes, ipToInt, type Prefixes } from "../../core/aws-ranges.ts";
-import { awsEndpointOf, pointsAtGithubPages, pointsAtVercel } from "../../core/links.ts";
+import { alibabaEndpointOf, awsEndpointOf, pointsAtGithubPages, pointsAtVercel } from "../../core/links.ts";
 import { InternetError, type CrtEntry, type InternetClient } from "./client.ts";
 import { AmassError, amass as amassRunner } from "./amass.ts";
 import { LINK_PROVIDER, type DnsHostRecord, type LinkKey } from "../../shared/api.ts";
@@ -32,8 +33,8 @@ const TYPE_A = 1,
   TYPE_CNAME = 5,
   TYPE_CAA = 257;
 
-/** The AWS lists that let a hostname be followed to its load balancer and targets; while one is missing, that part is a gap. */
-export const ROUTING_INPUTS: LinkKey[] = ["awsLoadBalancers", "awsExposure"];
+/** The cloud lists that let a hostname be followed to its load balancer and targets; while one is missing, that part is a gap. */
+export const ROUTING_INPUTS: LinkKey[] = ["awsLoadBalancers", "awsExposure", "alibabaLoadBalancers", "alibabaExposure"];
 
 /** The lists this view is built from; while one is missing for an account in the entity, the view isn't complete. */
 export const INPUTS: LinkKey[] = [
@@ -43,6 +44,10 @@ export const INPUTS: LinkKey[] = [
   "route53Dns",
   "awsAddresses",
   "awsReleased",
+  "alidnsZones",
+  "alidnsDns",
+  "alibabaAddresses",
+  "alibabaReleased",
   "vercelDomains",
   "githubPages",
 ];
@@ -70,20 +75,23 @@ export async function discover(client: InternetClient, input: DiscoverInput): Pr
       new InternetError(0, `A ${who} account in this entity hasn't been scanned since Sonar was added. Scan it, then scan this again.`),
     );
   } else client.note("related", true);
-  if (ROUTING_INPUTS.some((k) => related.unknown.includes(k)))
+  const routingMissing = ROUTING_INPUTS.filter((k) => related.unknown.includes(k));
+  if (routingMissing.length) {
+    const who = [...new Set(routingMissing.map((k) => PROVIDER_INFO[LINK_PROVIDER[k]].label))].join(" and ");
     client.note(
       "routing",
       false,
-      new InternetError(0, "An AWS account in this entity hasn't been scanned since load balancer routing was added. Scan it, then scan this again."),
+      new InternetError(0, `A ${who} account in this entity hasn't been scanned since load balancer routing was added. Scan it, then scan this again.`),
     );
-  else client.note("routing", true);
-  const loadBalancers = related.awsLoadBalancers ?? [];
+  } else client.note("routing", true);
+  const loadBalancers = [...(related.awsLoadBalancers ?? []), ...(related.alibabaLoadBalancers ?? [])];
   const lbByName = new Map(loadBalancers.map((lb) => [lb.dnsName, lb]));
 
-  const records = [...(related.cloudflareDns ?? []), ...(related.route53Dns ?? [])];
+  const records = [...(related.cloudflareDns ?? []), ...(related.route53Dns ?? []), ...(related.alidnsDns ?? [])];
   const zones = new Map<string, ProviderId>([
     ...(related.cloudflareZones ?? []).map((z) => [lower(z), "cloudflare"] as const),
     ...(related.route53Zones ?? []).map((z) => [lower(z), "aws"] as const),
+    ...(related.alidnsZones ?? []).map((z) => [lower(z), "alibaba"] as const),
   ]);
 
   // Domains: the zones as they are, everything else by its registrable name; a domain under another is dropped.
@@ -211,10 +219,15 @@ export async function discover(client: InternetClient, input: DiscoverInput): Pr
     }),
   );
 
-  const held = new Set(related.awsAddresses ?? []);
+  /** Who holds each address the entity's cloud accounts have. */
+  const holder = new Map<string, ProviderId>([
+    ...(related.awsAddresses ?? []).map((ip) => [ip, "aws"] as const),
+    ...(related.alibabaAddresses ?? []).map((ip) => [ip, "alibaba"] as const),
+  ]);
+  const held = new Set(holder.keys());
   // Only with AWS accounts in the entity: then an AWS address none of them holds is someone else's.
   const ec2 = related.awsAddresses ? input.ec2 : null;
-  const released = new Set((related.awsReleased ?? []).map((r) => r.ip));
+  const released = new Set([...(related.awsReleased ?? []), ...(related.alibabaReleased ?? [])].map((r) => r.ip));
   const hosts: Host[] = [];
   // Names that don't resolve, or that weren't looked up past the limit.
   let unresolved = 0;
@@ -227,9 +240,15 @@ export async function discover(client: InternetClient, input: DiscoverInput): Pr
       unresolved++;
       continue;
     }
-    const lb = [...recs.filter((r) => r.type === "CNAME" || r.type === "ALIAS").map((r) => r.target), ...(res?.cnames ?? [])]
-      .map((t) => awsEndpointOf(t))
-      .find((e) => e?.kind === "elb" && lbByName.has(e.name));
+    const names = [...recs.filter((r) => r.type === "CNAME" || r.type === "ALIAS").map((r) => r.target), ...(res?.cnames ?? [])];
+    // A load balancer by its DNS name (AWS, or Alibaba Cloud's ALB and NLB), or a CLB, which has none, by its address.
+    const lb =
+      names.map((t) => awsEndpointOf(t)).find((e) => e?.kind === "elb" && lbByName.has(e.name)) ??
+      names.map((t) => alibabaEndpointOf(t)).find((e) => e?.kind === "slb" && lbByName.has(e.name)) ??
+      recs
+        .filter((r) => r.type === "A")
+        .map((r) => ({ name: r.target }))
+        .find((e) => lbByName.has(e.name));
     const direct = [...recs.filter((r) => r.type === "A").map((r) => r.target), ...(res?.cnames.every((c) => !!domainOf(c)) ? res.addresses : [])].find((ip) =>
       held.has(ip),
     );
@@ -240,9 +259,12 @@ export async function discover(client: InternetClient, input: DiscoverInput): Pr
       records: recs,
       resolved: res,
       // A proxied hostname is answered by Cloudflare; its load balancer is the origin, shown as its path.
-      servedBy: lb && !recs.some((r) => r.proxied) ? "AWS load balancer" : servedBy(recs, res, held, ec2),
+      servedBy:
+        lb && !recs.some((r) => r.proxied)
+          ? `${PROVIDER_INFO[lbByName.get(lb.name)?.provider ?? "aws"].label} load balancer`
+          : servedBy(recs, res, holder, ec2),
       loadBalancer: lb?.name ?? null,
-      awsAddress: direct ?? null,
+      cloudAddress: direct ?? null,
     });
   }
   followChains(hosts);
@@ -251,7 +273,7 @@ export async function discover(client: InternetClient, input: DiscoverInput): Pr
   const ownName = (n: string) => !!domainOf(n);
   const addrs = new Map<string, Address>();
   const touch = (ip: string, host?: { name: string; proxied: boolean }) => {
-    const a = addrs.get(ip) ?? addrs.set(ip, { ip, heldBy: held.has(ip) ? "aws" : null, hosts: [], shodan: null }).get(ip)!;
+    const a = addrs.get(ip) ?? addrs.set(ip, { ip, heldBy: holder.get(ip) ?? null, hosts: [], shodan: null }).get(ip)!;
     if (host && !a.hosts.some((h) => h.name === host.name)) a.hosts.push(host);
   };
   for (const ip of held) touch(ip);
@@ -296,7 +318,7 @@ export async function discover(client: InternetClient, input: DiscoverInput): Pr
     unresolved,
     addresses,
     loadBalancers,
-    exposure: related.awsExposure ?? [],
+    exposure: [...(related.awsExposure ?? []), ...(related.alibabaExposure ?? [])],
     amass,
   };
 }
@@ -313,12 +335,12 @@ export function followChains(hosts: Host[]): void {
       .map((t) => byName.get(t))
       .find((x) => x && x !== h);
   for (const h of hosts) {
-    if (h.loadBalancer || h.awsAddress) continue;
+    if (h.loadBalancer || h.cloudAddress) continue;
     let at = next(h);
     for (let hop = 0; at && hop < 5; hop++, at = next(at)) {
-      if (!at.loadBalancer && !at.awsAddress) continue;
+      if (!at.loadBalancer && !at.cloudAddress) continue;
       h.loadBalancer = at.loadBalancer;
-      h.awsAddress = at.awsAddress;
+      h.cloudAddress = at.cloudAddress;
       if (h.servedBy.startsWith("CNAME to") || h.servedBy === "Outside connected accounts") h.servedBy = at.servedBy;
       break;
     }
@@ -328,7 +350,7 @@ export function followChains(hosts: Host[]): void {
 const rank = (a: Address) => (a.heldBy ? 0 : a.hosts.some((h) => h.proxied) ? 1 : 2);
 
 /** What answers for a hostname, in words, from its records or its public DNS answer. */
-function servedBy(recs: DnsHostRecord[], res: { addresses: string[]; cnames: string[] } | null, held: Set<string>, ec2: Prefixes | null): string {
+function servedBy(recs: DnsHostRecord[], res: { addresses: string[]; cnames: string[] } | null, held: Map<string, ProviderId>, ec2: Prefixes | null): string {
   if (recs.some((r) => r.proxied)) return "Cloudflare (proxied)";
   const pairs: [string, string][] = recs.length
     ? recs.map((r) => [r.type === "ALIAS" ? "CNAME" : r.type, r.target])
@@ -337,7 +359,8 @@ function servedBy(recs: DnsHostRecord[], res: { addresses: string[]; cnames: str
     if (pointsAtVercel(type, target)) return "Vercel";
     if (pointsAtGithubPages(type, target)) return "GitHub Pages";
     if (type === "CNAME" && awsEndpointOf(target)) return "AWS";
-    if (type === "A" && held.has(target)) return "AWS";
+    if (type === "CNAME" && alibabaEndpointOf(target)) return "Alibaba Cloud";
+    if (type === "A" && held.has(target)) return PROVIDER_INFO[held.get(target)!].label;
   }
   const ip = pairs.find(([t]) => t === "A")?.[1];
   if (ip && isInternal(`${ip}/32`)) return "Private address";
@@ -444,6 +467,16 @@ const SHARED = [
   "cloudfront.net",
   "amazonaws.com",
   "awsapprunner.com",
+  "aliyuncs.com",
+  "aliyuncsslb.com",
+  "aliyuncsslbintl.com",
+  "alikunlun.com",
+  "alikunlun.net",
+  "kunlunsl.com",
+  "kunlunca.com",
+  "kunlungr.com",
+  "kunluncan.com",
+  "fcapp.run",
   "amplifyapp.com",
   "herokuapp.com",
   "netlify.app",

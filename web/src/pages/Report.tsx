@@ -113,6 +113,7 @@ export function ReportPage() {
                   data.zones ? plural(data.zones.length, "zone") : null,
                   data.projects ? plural(data.projects.length, "project") : null,
                   data.regions ? plural(data.regions.filter((r) => r.name !== "Global" && !r.skipped).length, "region") : null,
+                  data.resources ? plural(data.resources.length, "cloud resource") : null,
                 ]
                   .filter(Boolean)
                   .join(", ") || "0 resources"}

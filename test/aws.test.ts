@@ -25,7 +25,7 @@ import { seedAccount, seedAws, seedVercel, testRepo } from "../dev/mock/accounts
 import { AWS_CHECKS } from "../src/providers/aws/catalog.ts";
 import { parseCredentials, READ_ACTION, READ_ACTIONS } from "../src/providers/aws/client.ts";
 import { signGet, signPost } from "../src/providers/aws/sigv4.ts";
-import { parseXml, items, text, bool, find } from "../src/providers/aws/xml.ts";
+import { parseXml, items, text, bool, find } from "../src/core/xml.ts";
 import { PROVIDER } from "../src/providers/index.ts";
 import { ACCOUNT_ID_PATTERN, PROVIDERS, PROVIDER_INFO, providerForId, providerList, providerOfUrl, zoneWord } from "../src/shared/providers.ts";
 import { makeApp } from "./helpers/app.ts";
@@ -532,7 +532,7 @@ test("every provider says what the app needs to know about it", () => {
   assert.equal(providerForId("team_MockWeb0000000000000001"), "vercel");
   assert.equal(providerForId("gh_1000001"), "github", "a GitHub ID isn't mistaken for an AWS or Vercel one");
   assert.equal(providerForId("ext_3"), "internet", "Sonar's account is named after its entity");
-  assert.equal(providerList(), "Cloudflare, Vercel, AWS and GitHub");
+  assert.equal(providerList(), "Cloudflare, Vercel, AWS, Alibaba Cloud and GitHub");
   assert.equal(providerList(["cloudflare", "vercel"], "or"), "Cloudflare or Vercel");
   assert.equal(providerList(["aws"]), "AWS");
   assert.equal(zoneWord(["cloudflare"]), "Zone");

@@ -28,7 +28,7 @@ export async function verifyShodanKey(key: string): Promise<TokenInfo> {
   }
 }
 
-/** What a key (or none) gives, in the Add accounts dialog's terms. */
+/** What a key (or none) gives, in the Add accounts flow's terms. */
 async function probeShodan(key: string): Promise<PermissionProbe[]> {
   const powers = (ids: string[]) =>
     `${ids.length} check${ids.length === 1 ? "" : "s"}, e.g. ${INTERNET_CHECKS.filter((c) => ids.includes(c.id))

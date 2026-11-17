@@ -17,12 +17,14 @@ export default defineChecks(
       attackPath: true,
       title: "Origin of a proxied hostname can be found on Shodan",
       why: "The hostname is proxied through Cloudflare to hide its origin, but Shodan lists the origin's address with the entity's hostnames, usually from the certificate the origin answers with. Anyone can search Shodan for the hostname, find the origin and send traffic straight to it, past the WAF, rate limits and Access.",
-      fix: "1. Let only Cloudflare reach the origin: in AWS, a security group that admits only Cloudflare's ranges (a managed prefix list keeps it current); elsewhere, the firewall. 2. Better, use a Cloudflare Tunnel so the origin has no open port. 3. Use Authenticated Origin Pulls, so the origin refuses connections without Cloudflare's client certificate. 4. Move the origin to a new address once it is locked, since the old one is known.",
+      fix: "1. Let only Cloudflare reach the origin: in AWS or Alibaba Cloud, a security group that admits only Cloudflare's ranges (a prefix list keeps it current); elsewhere, the firewall. 2. Better, use a Cloudflare Tunnel so the origin has no open port. 3. Use Authenticated Origin Pulls, so the origin refuses connections without Cloudflare's client certificate. 4. Move the origin to a new address once it is locked, since the old one is known.",
     },
   },
   ({ inv, related }, report) => {
     if (!related.cloudflareDns) return;
-    const open = new Set((related.awsOrigins ?? []).filter((o) => o.kind === "ip" && o.web === "open").map((o) => o.name));
+    const open = new Set(
+      [...(related.awsOrigins ?? []), ...(related.alibabaOrigins ?? [])].filter((o) => o.kind === "ip" && o.web === "open").map((o) => o.name),
+    );
     for (const a of inv.addresses) {
       const proxied = a.hosts.filter((h) => h.proxied);
       if (!proxied.length || !a.shodan) continue;
@@ -40,7 +42,7 @@ export default defineChecks(
                 chain: [
                   { label: "Cloudflare DNS", value: `${h.name} is proxied to the origin ${a.ip}` },
                   { label: "Shodan", value: `${a.ip} is listed with ${names.slice(0, 5).join(", ")}${seenWhen(a)}` },
-                  ...(open.has(a.ip) ? [{ label: "AWS security groups", value: `${a.ip} admits anyone on ports 80 and 443` }] : []),
+                  ...(open.has(a.ip) ? [{ label: "Security groups", value: `${a.ip} admits anyone on ports 80 and 443` }] : []),
                 ],
               }
             : null,

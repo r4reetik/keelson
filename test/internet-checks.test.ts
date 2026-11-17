@@ -34,7 +34,29 @@ test("every internet check fails on its case", () => {
 });
 
 test("the well-watched entity passes every check it evaluates", () => {
-  const ev = judge(internetInventory());
+  // Its hostnames reach an AWS load balancer and an Alibaba Cloud one, so both clouds' routing checks have something to pass.
+  const ali = "alb-shop.cn-hangzhou.alb.aliyuncs.com";
+  const base = internetInventory();
+  const ev = judge(
+    internetInventory({
+      hosts: [...base.hosts, host({ name: "shop.example.com", loadBalancer: ali })],
+      loadBalancers: [
+        ...base.loadBalancers,
+        loadBalancer({
+          provider: "alibaba",
+          name: "shop",
+          dnsName: ali,
+          listeners: [
+            {
+              port: 443,
+              protocol: "HTTPS",
+              routes: [route({ rule: "1", hosts: ["shop.example.com"], targets: [target({ publicIp: "203.0.113.31" })] }), route()],
+            },
+          ],
+        }),
+      ],
+    }),
+  );
   assert.deepEqual(
     ev.findings.filter((f) => !f.pass).map((f) => `${f.checkId} ${f.resource}`),
     [],

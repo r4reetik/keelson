@@ -23,6 +23,7 @@ import { isoDate } from "../../../src/shared/time.ts";
 import { AccountName, ConfidenceBadge, FormGrid, PlatformMark, ReopenedBadge, SeverityBadge, StatusBadge } from "./ui.tsx";
 import { useShell } from "../shell.tsx";
 import { DEPENDENCY_EVIDENCE_KEYS, DependencyEvidenceView } from "./dependencies.tsx";
+import { LocatedSection } from "./located.tsx";
 
 type Editable = Pick<Triage, "status" | "owner" | "note" | "dueDate" | "acceptUntil">;
 /** Statuses where a due date means nothing: the finding is out of the queue. */
@@ -100,6 +101,8 @@ export function FindingBody({ f }: { f: Finding }) {
   return (
     <div className="flex flex-col gap-4 text-sm">
       {f.detail && <Section label="What we found">{f.detail}</Section>}
+      {/* What the finding names, found (or not) in the entity's other accounts. */}
+      <LocatedSection fingerprint={f.fingerprint} />
       {/* A dependency's upgrade and where it's used are what to act on, so they come before the explanation. */}
       <DependencyEvidenceView f={f} />
       {f.why && <Section label="Why it matters">{f.why}</Section>}

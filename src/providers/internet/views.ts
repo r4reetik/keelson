@@ -105,6 +105,7 @@ export function surfaceView(inv: InternetInventory, failures: Result[]): Surface
         const targets = targetsOf(lb.dnsName);
         const named = [...new Set(lb.listeners.flatMap((l) => (l.routes ?? []).flatMap((r) => r.hosts.filter((x) => !/[*?]/.test(x)))))];
         return {
+          provider: lb.provider ?? "aws",
           name: lb.name,
           awsAccount: lb.account,
           region: lb.region,
@@ -117,8 +118,8 @@ export function surfaceView(inv: InternetInventory, failures: Result[]): Surface
           listeners: lb.listeners.map((l) => listenerRow(l, l.routes)),
           findings: on(
             (f) =>
-              (f.checkId === "XP-013" && targets.has(f.resource)) ||
-              ((f.checkId === "XP-014" || f.checkId === "XP-015") && (hosts.includes(f.resource) || named.includes(f.resource))),
+              (["XP-013", "XP-025"].includes(f.checkId) && targets.has(f.resource)) ||
+              (["XP-014", "XP-015", "XP-026", "XP-027"].includes(f.checkId) && (hosts.includes(f.resource) || named.includes(f.resource))),
           ),
         };
       })
@@ -131,7 +132,7 @@ export function surfaceView(inv: InternetInventory, failures: Result[]): Surface
     // Through a network load balancer in front of an application one, the application one's rules decide.
     const chain = h.loadBalancer ? chainOf(inv, h.loadBalancer) : [];
     const lb = chain.at(-1);
-    const held = h.awsAddress ? exposure.get(h.awsAddress) : undefined;
+    const held = h.cloudAddress ? exposure.get(h.cloudAddress) : undefined;
     if (!lb && !held) return null;
     return {
       loadBalancer: lb?.name ?? null,

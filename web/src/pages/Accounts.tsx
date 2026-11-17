@@ -1,8 +1,8 @@
 // Accounts and the entities (companies or teams) that own them. This is where
 // people decide how accounts are grouped, named and shown: which entities appear
 // in "All accounts", the order of entities and accounts, display names, and
-// each entity's email domains and alert destinations. It is also where the first
-// account is added: the Overview's "Add accounts" opens it with ?add=1.
+// each entity's email domains and alert destinations. Adding accounts has its own
+// pages (AddAccounts.tsx); links from before them (?add=1) are sent there.
 
 import { useEffect, useState } from "react";
 import { Badge, Button, Dialog, DropdownMenu, Input, Select, SensitiveInput, Switch, Table, Tooltip, useKumoToastManager } from "@cloudflare/kumo";
@@ -27,7 +27,6 @@ import {
   capitalize,
   navigate,
   plural,
-  setParams,
   useLocation,
   isProvider,
   PLATFORMS,
@@ -41,13 +40,12 @@ import {
   type Severity,
 } from "../lib.ts";
 import { AccountName, DialogHeader, ListCard, NoRows, Page, PageState, Terms } from "../components/ui.tsx";
-import { ConnectForm, CredentialFields, joinCredential, ProviderPicker, TokenHelp, type Connected } from "../components/connect.tsx";
+import { CredentialFields, joinCredential } from "../components/connect.tsx";
 
 type Account = AccountRow;
 type Entity = AccountsResponse["entities"][number];
 
 type Modal =
-  | { kind: "add"; entityId?: number; provider?: ProviderId }
   | { kind: "new-entity" }
   | { kind: "rename-entity"; entity: Entity }
   | { kind: "entity-settings"; entity: Entity }
@@ -57,25 +55,24 @@ type Modal =
   | null;
 
 const TITLE = "Accounts";
+/** The Add accounts flow: the catalog, or one platform's steps, for an entity when one is given. */
+const addPath = (provider?: ProviderId, entityId?: number) => `/accounts/add${provider ? `/${provider}` : ""}${entityId != null ? `?entity=${entityId}` : ""}`;
 /** "Cloudflare accounts, Vercel teams and AWS accounts". */
 const SCANNED = PLATFORMS.map((p) => `${PROVIDER_INFO[p].label} ${PROVIDER_INFO[p].accounts}`);
 const DESCRIPTION = `The ${SCANNED.slice(0, -1).join(", ")} and ${SCANNED[SCANNED.length - 1]} Keelson scans, grouped by the company or team that owns them. An entity can hold accounts on several platforms, has its own email domains and alerts, and you choose which entities appear together in All accounts. Sonar adds an Internet account to an entity, to see it from outside.`;
 
 export function AccountsPage() {
-  const { dataVersion, status, refreshSession, setScope, startScan, can, limited, empty } = useShell();
+  const { dataVersion, status, refreshSession, setScope, startScan, can, limited } = useShell();
   const { data, error, loading, reload } = useApi<{ entities: Entity[] }>("/api/accounts", [dataVersion, status?.running, status?.accountId]);
   const toasts = useKumoToastManager();
   const [modal, setModal] = useState<Modal>(null);
-  // ?add=1 (from the Overview before anything is connected) opens Add accounts once, then leaves the address.
+  // Links from before Add accounts had its own pages (?add=1, &provider=, &entity=) go there instead.
   const { params } = useLocation();
-  // ?add=1&provider=internet (from the Attack surface page) opens it on that platform, and &entity=<id> for that entity.
   const asked = params.has("add") && can("accounts");
   const askedProvider = params.get("provider");
   const askedEntity = Number(params.get("entity")) || undefined;
   useEffect(() => {
-    if (!asked) return;
-    setModal({ kind: "add", provider: isProvider(askedProvider) ? askedProvider : undefined, entityId: askedEntity });
-    setParams({ add: null, provider: null, entity: null });
+    if (asked) navigate(`${addPath(isProvider(askedProvider) ? askedProvider : undefined, askedEntity)}`, { replace: true });
   }, [asked, askedProvider, askedEntity]);
 
   if (error || !data) return <PageState title={TITLE} description={DESCRIPTION} error={error} loading={loading} empty={false} retry={reload} />;
@@ -110,7 +107,7 @@ export function AccountsPage() {
           New entity
         </Button>
       )}
-      <Button variant="primary" icon={<PlusIcon />} onClick={() => setModal({ kind: "add" })}>
+      <Button variant="primary" icon={<PlusIcon />} onClick={() => navigate(addPath())}>
         Add accounts
       </Button>
     </>
@@ -146,30 +143,6 @@ export function AccountsPage() {
         />
       ))}
 
-      {modal?.kind === "add" && (
-        <AddAccountsDialog
-          entities={entities}
-          entityId={modal.entityId}
-          provider={modal.provider}
-          onClose={close}
-          onConnected={async (r, provider) => {
-            close();
-            await refresh();
-            const info = PROVIDER_INFO[provider];
-            toasts.add({
-              title: !r.added.length
-                ? "Credential replaced"
-                : info.perEntity
-                  ? `Sonar is watching ${plural(r.added.length, info.account, info.accounts)}`
-                  : `${plural(r.added.length, info.account, info.accounts)} added`,
-              description: empty ? "The first scan has started. Its findings show up on the Overview." : "Scans have started.",
-              variant: "success",
-            });
-            // The first accounts: back to the Overview, which now shows the scan running.
-            if (empty) navigate("/");
-          }}
-        />
-      )}
       {modal?.kind === "new-entity" && (
         <NameDialog
           title="New entity"
@@ -355,11 +328,11 @@ function EntityCard({
             <span className="flex flex-wrap gap-1">
               {/* Sonar needs the entity's other accounts to start from, so it is offered once there are some. */}
               {e.accounts.length > 0 && !e.accounts.some((a) => PROVIDER_INFO[a.provider].perEntity) && (
-                <Button size="sm" variant="ghost" icon={<BroadcastIcon />} onClick={() => onModal({ kind: "add", entityId: e.id, provider: "internet" })}>
+                <Button size="sm" variant="ghost" icon={<BroadcastIcon />} onClick={() => navigate(addPath("internet", e.id))}>
                   Watch from the internet
                 </Button>
               )}
-              <Button size="sm" variant="ghost" icon={<PlusIcon />} onClick={() => onModal({ kind: "add", entityId: e.id })}>
+              <Button size="sm" variant="ghost" icon={<PlusIcon />} onClick={() => navigate(addPath(undefined, e.id))}>
                 Add accounts
               </Button>
             </span>
@@ -790,58 +763,6 @@ function EntitySettingsDialog({
             Save
           </Button>
         </div>
-      </Dialog>
-    </Dialog.Root>
-  );
-}
-
-/**
- * Adds accounts on any platform. It starts on the platform most of the accounts here
- * are on, so someone who uses one platform rarely has to change it.
- */
-function AddAccountsDialog({
-  entities,
-  entityId,
-  provider: initial,
-  onClose,
-  onConnected,
-}: {
-  entities: Entity[];
-  entityId?: number;
-  provider?: ProviderId;
-  onClose: () => void;
-  onConnected: (r: Connected, provider: ProviderId) => void;
-}) {
-  const { limited } = useShell();
-  const all = entities.flatMap((e) => e.accounts);
-  const count = (p: ProviderId) => all.filter((a) => a.provider === p).length;
-  // The first provider wins a tie, since sort is stable.
-  // Sonar is added to entities that already have accounts, so it is never the first choice.
-  const [provider, setProvider] = useState<ProviderId>(() => initial ?? [...PLATFORMS].sort((a, b) => count(b) - count(a))[0]);
-  const info = PROVIDER_INFO[provider];
-  return (
-    <Dialog.Root open onOpenChange={(o: boolean) => !o && onClose()}>
-      <Dialog size="xl" className="max-h-[90vh] overflow-y-auto p-6">
-        <DialogHeader
-          title="Add accounts"
-          description={
-            info.perEntity
-              ? `Choose the platform, add a ${info.credential} if you have one, and pick the ${info.accounts} to watch.`
-              : `Choose the platform, add its ${info.credential}, pick the ${info.accounts} it should scan, and choose the entity they belong to.`
-          }
-        />
-        <div className="mb-6 flex flex-col gap-6">
-          <ProviderPicker value={provider} onChange={setProvider} />
-          <TokenHelp provider={provider} />
-        </div>
-        <ConnectForm
-          key={provider}
-          provider={provider}
-          entities={entities}
-          defaultEntityId={entityId}
-          newEntity={!limited}
-          onConnected={(r) => onConnected(r, provider)}
-        />
       </Dialog>
     </Dialog.Root>
   );

@@ -23,7 +23,7 @@ A false positive or missed finding in a check is not a vulnerability; use the
 ## Threat model
 
 Keelson holds the credentials of the platforms you connect (Cloudflare API tokens, Vercel access tokens,
-AWS access keys, GitHub App private keys, a Shodan API key), and a database describing accounts' configuration, including member email addresses. It is designed to:
+AWS access keys, Alibaba Cloud AccessKeys, GitHub App private keys, a Shodan API key), and a database describing accounts' configuration, including member email addresses. It is designed to:
 
 - **Only read.** The scanner issues GET requests, plus Cloudflare GraphQL analytics queries (GraphQL is sent
   as POST, as Cloudflare requires, and only ever queries). Use a Cloudflare token with read permissions;
@@ -32,6 +32,11 @@ AWS access keys, GitHub App private keys, a Shodan API key), and a database desc
   For AWS, give the access key's user only the managed SecurityAudit policy; Keelson sends signed GET requests,
   and to services whose APIs only accept POST (CloudTrail, KMS, ECS and others) only the read actions it names
   (Describe, List, Get). The client refuses any other action before sending it, and tests fail on anything else.
+  For Alibaba Cloud, give a RAM user the custom policy Keelson shows, which names only the read actions it sends.
+  Every request is a signed GET, but Alibaba Cloud's APIs also accept GET for changes, so the client refuses any
+  action that isn't a Describe, List or Get named in that policy before sending it, and tests fail on anything else.
+  Keelson never asks for an object in an OSS bucket or a secret's value, which Alibaba Cloud's ReadOnlyAccess policy
+  would allow.
   For GitHub, register the App with read-only permissions. On each scan Keelson signs a short-lived JWT with the
   App's private key and sends one POST to GitHub, for an installation token limited to the read permissions it
   needs, so a token Keelson holds can't write even if the App can. Every other request is GET, and tests fail on
@@ -40,7 +45,10 @@ AWS access keys, GitHub App private keys, a Shodan API key), and a database desc
   webhook URLs are stored without their paths, query strings or headers. AWS policy documents are reduced to
   what they allow and Lambda environment variables are dropped as the answer is read; neither is stored. Instance
   start-up scripts (user data) are scanned for credentials in memory and dropped: only the kind of credential found
-  is stored, never the script or the value. GitHub secret scanning alerts are read with `hide_secret` and the value
+  is stored, never the script or the value. The same holds for Alibaba Cloud: RAM and OSS policy documents are
+  reduced to what they allow, Function Compute environment variables, instance start-up scripts and launch templates
+  are scanned in memory and dropped, an ALB rule's header condition keeps only the header's name, and of an AccessKey
+  ID only the last four characters are kept. GitHub secret scanning alerts are read with `hide_secret` and the value
   field is dropped regardless; GitHub webhook URLs keep only their scheme and host, and deploy keys only their title.
 - **Contact only what it needs.** Besides the APIs of the platforms you connect and public DNS, the optional takeover check
   sends one GET to your own hostnames that point at known cloud providers, and the update check reads

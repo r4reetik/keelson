@@ -18,6 +18,7 @@ import cost from "./cost.ts";
 import vercelLinks from "./vercel-links.ts";
 import awsLinks from "./aws-links.ts";
 import githubLinks from "./github-links.ts";
+import alibabaLinks from "./alibaba-links.ts";
 import type { CheckModule } from "./define.ts";
 
 export const MODULES = [
@@ -36,6 +37,7 @@ export const MODULES = [
   cost,
   vercelLinks,
   awsLinks,
+  alibabaLinks,
   githubLinks,
 ] as const;
 

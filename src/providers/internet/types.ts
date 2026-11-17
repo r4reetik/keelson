@@ -58,10 +58,10 @@ export interface Host {
   resolved: { addresses: string[]; cnames: string[] } | null;
   /** What answers for it, in words: "Cloudflare (proxied)", "Vercel", "AWS", "Outside connected accounts"… */
   servedBy: string;
-  /** The DNS name of the AWS load balancer it reaches (by CNAME, alias, or as a proxied hostname's origin), when an AWS account in the entity has it. */
+  /** The DNS name of the AWS or Alibaba Cloud load balancer it reaches (by CNAME, alias, or as a proxied hostname's origin; a CLB by its address), when an account in the entity has it. */
   loadBalancer: string | null;
-  /** The address it points at directly that an AWS account in the entity holds. */
-  awsAddress: string | null;
+  /** The address it points at directly that an AWS or Alibaba Cloud account in the entity holds. */
+  cloudAddress: string | null;
 }
 
 export interface ShodanService {
@@ -91,7 +91,7 @@ export interface ShodanView {
 
 export interface Address {
   ip: string;
-  /** "aws" when one of the entity's AWS accounts holds it; null when only the entity's DNS points at it. */
+  /** The cloud ("aws", "alibaba") whose account in the entity holds it; null when only the entity's DNS points at it. */
   heldBy: ProviderId | null;
   /** The entity's hostnames that point at it, and whether Cloudflare proxies them (then it is their origin). */
   hosts: { name: string; proxied: boolean }[];
@@ -108,9 +108,9 @@ export interface InternetInventory {
   /** Names found in the logs or Shodan that no longer resolve: counted, not listed. */
   unresolved: number;
   addresses: Address[];
-  /** The entity's AWS load balancers with their routing, from its AWS accounts' latest scans; empty without AWS. */
+  /** The entity's AWS and Alibaba Cloud load balancers with their routing, from those accounts' latest scans; empty without either. */
   loadBalancers: AwsLoadBalancerLink[];
-  /** The public addresses its AWS accounts hold, and what their security groups let anyone reach. */
+  /** The public addresses its AWS and Alibaba Cloud accounts hold, and what their security groups let anyone reach. */
   exposure: AwsExposureLink[];
   /** How Amass ran, when it did: how many names it found that nothing else had. */
   amass: { names: number; added: number; minutes: number } | null;

@@ -1,6 +1,6 @@
 // Sonar: each entity's external attack surface. Its hostnames (from the entity's DNS,
 // certificate logs, Shodan, load balancer rules and Amass) and what serves them, each
-// followed into AWS (load balancer, matching rules, targets); the load balancers; the
+// followed into AWS or Alibaba Cloud (load balancer, matching rules, targets); the load balancers; the
 // public addresses with what Shodan has seen open there and what security groups let
 // anyone reach; and its domains with where their DNS lives and who issues their
 // certificates. The internet's counterpart of Zones and Regions.
@@ -52,6 +52,9 @@ function Findings({ counts }: { counts: SeverityCounts }) {
 const SCHEME = (internetFacing: boolean) => (internetFacing ? <Badge variant="neutral">Internet-facing</Badge> : <Badge variant="outline">Internal</Badge>);
 
 const TYPE: Record<string, string> = { application: "Application", network: "Network", gateway: "Gateway", classic: "Classic" };
+/** Each cloud's names for its kinds of load balancer; rows stored before Alibaba Cloud have no cloud and are AWS's. */
+const LB_TYPE: Record<"aws" | "alibaba", Record<string, string>> = { aws: TYPE, alibaba: { application: "ALB", network: "NLB", classic: "CLB" } };
+const typeOf = (lb: { provider?: "aws" | "alibaba"; type: string }) => LB_TYPE[lb.provider ?? "aws"][lb.type] ?? lb.type;
 
 const WEB: Record<string, string> = { open: "Anyone on 80/443", cloudflare: "Only Cloudflare", other: "Some public ranges" };
 
@@ -115,7 +118,7 @@ function Routes({ listeners }: { listeners: SurfaceListener[] }) {
   );
 }
 
-/** A hostname's or load balancer's path into AWS, in a dialog. */
+/** A hostname's or load balancer's path into the cloud that serves it, in a dialog. */
 function RouteDialog({
   title,
   points,
@@ -142,8 +145,8 @@ function RouteDialog({
           title={title}
           description={
             lb
-              ? `${TYPE[lb.type] ?? lb.type} load balancer ${lb.name} in ${lb.awsAccount}, ${lb.region}. Rules are listed in the order the load balancer tries them.`
-              : "Where requests for this hostname go in AWS."
+              ? `${typeOf(lb)} load balancer ${lb.name} in ${lb.awsAccount}, ${lb.region}. Rules are listed in the order the load balancer tries them.`
+              : "Where requests for this hostname go in the cloud account that serves it."
           }
         />
         {lb && (
@@ -224,7 +227,7 @@ export function SurfacePage() {
             <Button
               variant="primary"
               icon={<BroadcastIcon />}
-              onClick={() => navigate(`/accounts?add=1&provider=internet${one && entity != null ? `&entity=${entity}` : ""}`)}
+              onClick={() => navigate(`/accounts/add/internet${one && entity != null ? `?entity=${entity}` : ""}`)}
             >
               Watch from the internet
             </Button>
@@ -332,7 +335,7 @@ export function SurfacePage() {
                 <Table.Row>
                   <Table.Head sticky="left">Hostname</Table.Head>
                   <Table.Head className="whitespace-nowrap">Served by</Table.Head>
-                  <Table.Head className="whitespace-nowrap">Path in AWS</Table.Head>
+                  <Table.Head className="whitespace-nowrap">Path in the cloud</Table.Head>
                   <Table.Head className="whitespace-nowrap">Points at</Table.Head>
                   <Table.Head className="whitespace-nowrap">Found in</Table.Head>
                   <Table.Head className="whitespace-nowrap">Open findings</Table.Head>
@@ -405,7 +408,7 @@ export function SurfacePage() {
                           {b.name}
                         </Link>
                         <div className="text-xs text-kumo-subtle">
-                          {TYPE[b.type] ?? b.type} · {b.awsAccount} · {b.region}
+                          {typeOf(b)} · {b.awsAccount} · {b.region}
                         </div>
                       </Table.Cell>
                       <Table.Cell className="whitespace-nowrap">{SCHEME(b.internetFacing)}</Table.Cell>
@@ -594,7 +597,7 @@ function pathSummary(r: HostRoute): string {
       r.listeners.reduce((sum, l) => sum + (l.routes?.length ?? 0), 0),
       "rule",
     )}`;
-  return r.address ? r.address.resource : "AWS";
+  return r.address ? r.address.resource : "Cloud account";
 }
 
 /** A target behind the hostname's load balancer can be reached without it. */

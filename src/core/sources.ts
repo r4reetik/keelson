@@ -1,6 +1,6 @@
 // Every data source a scan reads, in one place. A source has a coverage label
 // (shown when it can't be read), the token permission that grants it, and an
-// optional probe for the Add accounts dialog. Checks declare the sources they need
+// optional probe for the Add accounts flow. Checks declare the sources they need
 // (`requires`), so the UI can say exactly which checks a missing permission skips.
 
 export interface Source {

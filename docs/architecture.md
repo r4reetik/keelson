@@ -12,6 +12,9 @@ flowchart LR
   subgraph AWS
     AREST[Query and REST APIs<br/>signed GET, plus named read actions over POST]
   end
+  subgraph Alibaba Cloud
+    LREST[RPC, ROA and OSS APIs<br/>signed GET, named read actions only]
+  end
   subgraph GitHub
     GREST[REST API<br/>read-only App token, GET only]
   end
@@ -23,12 +26,14 @@ flowchart LR
   PROV --> INV[Cloudflare inventory<br/>inventory.ts, analytics.ts]
   PROV --> VINV[Vercel inventory<br/>providers/vercel]
   PROV --> AINV[AWS inventory<br/>providers/aws]
+  PROV --> LINV[Alibaba Cloud inventory<br/>providers/alibaba]
   PROV --> GINV[GitHub inventory<br/>providers/github]
   INV --> REST & GQL & DOH & HOSTS
   VINV --> VREST
   AINV --> AREST
+  LINV --> LREST
   GINV --> GREST
-  INV & VINV & AINV & GINV --> ENG[Engine<br/>check modules]
+  INV & VINV & AINV & LINV & GINV --> ENG[Engine<br/>check modules]
   ENG --> DB[(SQLite<br/>scans, findings,<br/>history, triage)]
   DB --> API[HTTP API<br/>Hono]
   API --> WEB[Web app<br/>React + Kumo]
@@ -37,11 +42,11 @@ flowchart LR
 
 ## Providers
 
-Every account belongs to one provider (Cloudflare, Vercel, AWS or GitHub), recorded on the account. The scanner, the account
-routes and the Add accounts dialog only talk to a provider through the `Provider` interface in `src/providers/types.ts`:
+Every account belongs to one provider (Cloudflare, Vercel, AWS, Alibaba Cloud or GitHub), recorded on the account. The scanner, the account
+routes and the Add accounts flow only talk to a provider through the `Provider` interface in `src/providers/types.ts`:
 verify a credential, list the accounts it reaches, probe what it can read, and scan an account. `src/providers/index.ts`
 lists them. Cloudflare's code predates providers and lives in `src/core`, wrapped by `src/providers/cloudflare.ts`;
-Vercel's lives in `src/providers/vercel/`, AWS's in `src/providers/aws/` and GitHub's in `src/providers/github/`, and new providers get their own folder
+Vercel's lives in `src/providers/vercel/`, AWS's in `src/providers/aws/`, Alibaba Cloud's in `src/providers/alibaba/` and GitHub's in `src/providers/github/`, and new providers get their own folder
 the same way.
 
 What the app says about a provider (its label, what it calls an account and a credential, the credential's fields,
@@ -62,7 +67,12 @@ user, users with their keys and MFA, roles and policies), S3, CloudFront and Rou
 instances, EBS settings, VPCs, databases, load balancers, functions and GuardDuty in every enabled region
 (about twelve requests per region, plus a few per user, bucket, load balancer and function). A region that
 refuses the access key is skipped and recorded, rather than failing the scan. AWS has no client library here:
-`src/providers/aws/sigv4.ts` signs each GET, and `xml.ts` reads the XML answers. A GitHub scan signs a JWT with the
+`src/providers/aws/sigv4.ts` signs each GET, and `src/core/xml.ts` reads the XML answers. An Alibaba Cloud scan reads RAM
+(through IMS for users, their AccessKeys and last sign-ins), the main account's security practice report, OSS, CDN,
+ActionTrail, Security Center and Alibaba Cloud DNS once, and security groups (one request each for their rules),
+instances, interfaces and EIPs, disks, images, launch templates, VPCs, RDS, ALB, NLB and CLB load balancers, Function
+Compute, KMS and ACK clusters in every region ECS lists. `src/providers/alibaba/sign.ts` signs each GET (Alibaba Cloud's
+V3 signature for the RPC and ROA APIs, and OSS's V4), tested against Alibaba Cloud's published examples. A GitHub scan signs a JWT with the
 App's private key (`node:crypto`), finds the App's installation on the organization, and asks for an installation
 token limited to read permissions; with it, it reads the organization's settings, owners, Actions policy, webhooks
 and installed Apps, then each repository's default branch protection and rulesets, deploy keys, webhooks and Pages
@@ -89,7 +99,7 @@ alerts, and keeps each repository's SBOM ([below](#dependencies-a-software-bill-
 The scanner never changes anything: REST calls are GET, GraphQL is POST but only ever queries, GitHub's
 installation token request is the one other POST (it creates a token that can only read), and
 `test/integration.test.ts` (Cloudflare), `test/vercel.test.ts` (Vercel), `test/aws.test.ts` (AWS) and
-`test/github.test.ts` (GitHub) fail on any other request. AWS services whose APIs only accept POST (CloudTrail, KMS, Config, ECS and others) are read with POST, but only for the read actions named in `READ_ACTIONS` (`src/providers/aws/client.ts`): `rpc()` refuses any other before sending it, and `test/aws.test.ts` fails on a POST for any action that isn't on the list.
+`test/github.test.ts` (GitHub) fail on any other request, and `test/alibaba.test.ts` (Alibaba Cloud) on any request that isn't a signed GET for a read action its policy names. AWS services whose APIs only accept POST (CloudTrail, KMS, Config, ECS and others) are read with POST, but only for the read actions named in `READ_ACTIONS` (`src/providers/aws/client.ts`): `rpc()` refuses any other before sending it, and `test/aws.test.ts` fails on a POST for any action that isn't on the list.
 
 ## Dependencies: a software bill of materials per repository
 
@@ -147,7 +157,7 @@ also queues the entity's accounts whose latest scan predates the lists it reads 
    is deleted. The engine listens on port 4000 while it runs, and an engine that stops mid-run stops the scan's use of
    Amass with its own error. Names no
    connected DNS lists are looked up in public DNS.
-3. **Into AWS.** Each hostname's CNAME, alias or proxied origin is matched with the entity's AWS load balancers
+3. **Into the cloud.** Each hostname's CNAME, alias or proxied origin is matched with the entity's AWS and Alibaba Cloud load balancers (a CLB, which has no DNS name, by its address)
    (`awsLoadBalancers`: each listener's rules in the order the load balancer tries them, the target groups they forward
    to and the targets registered there, with each target's public address and whether its security groups let anyone
    reach its port), and an A record with the addresses AWS holds (`awsExposure`: what has each address and the inbound
@@ -177,7 +187,9 @@ distribution none of its AWS accounts has. Each scan stores a few `links` in its
 record; Vercel, the domains its projects serve; AWS, its CloudFront domain names, load balancer names, buckets,
 public addresses, account ID, and who its web origins' security groups let in on ports 80 and 443 (`awsOrigins`:
 anyone, only Cloudflare's ranges, or other public ranges; never the ranges themselves); GitHub, the custom domains of
-its Pages sites. Cloudflare and AWS also share their zones and host records (`cloudflareDns`, `route53Dns`), and AWS
+its Pages sites; Alibaba Cloud, the same kinds of list as AWS under `alibaba…` names (its OSS buckets, ALB and NLB names
+and CDN domains, its addresses and released ones, its origins, load balancers and exposure, in AWS's shapes), and
+Cloudflare also its records that point at Alibaba Cloud (`toAlibaba`). Cloudflare, AWS and Alibaba Cloud also share their zones and host records (`cloudflareDns`, `route53Dns`, `alidnsDns`), and AWS
 its load balancers' routing and what its public addresses let anyone reach (`awsLoadBalancers`, `awsExposure`), for Sonar.
 A list is left out when its scan couldn't read all of it. When an account is
 scanned, the scanner merges every list from the latest scans of the other accounts in the same entity and passes
@@ -187,7 +199,15 @@ set aside (`related.unknown` names it), and the checks that need it are skipped.
 taken for "nothing there". These checks (IDs `XP-…`) never look outside the
 entity, and are skipped when the entity has no scanned account on the other provider. One Cloudflare check that
 isn't an `XP-` check also reads them: ATS-001 (an exposed origin address) rates an origin that is one of the
-entity's AWS endpoints by its security groups, and rates every other origin as it would without AWS.
+entity's AWS or Alibaba Cloud endpoints by its security groups, and rates every other origin as it would without them.
+
+The same lists answer "where is this?" for any finding (`src/server/locate.ts`, `GET /api/finding/:fp/located`). The
+public addresses and known hostnames a finding names (in its resource, detail or evidence) are followed through the
+DNS records of the entity's Cloudflare, Route 53 and Alibaba Cloud DNS zones, CNAMEs and load balancers to what holds
+them: an instance, a load balancer, a Vercel project, a Pages site. An address no account holds is "not in your
+accounts" when every cloud account in the entity lists its addresses, and "released" when one was seen to let it go.
+When the finding is about a port (RDP, SSH, a database), the holder's open inbound rules or listeners say whether it
+really is reachable. The finding view shows this as "In your infrastructure". It reads the finding's own entity only.
 
 ## Scoring
 
@@ -241,13 +261,14 @@ src/
   providers/            the Provider interface, the registry, Cloudflare's adapter and the full check catalog
     vercel/             Vercel: read-only client, sources, inventory, checks, views, token checks
     aws/                AWS: signed read-only client, sources, inventory, checks, views, access key checks
+    alibaba/            Alibaba Cloud: signed GET-only client, sources, inventory, policy reduction, checks, views, AccessKey checks
     github/             GitHub: App client (JWT, read-only installation token), sources, inventory, checks, views, App checks
     internet/           Sonar: crt.sh and Shodan client, discovery from the entity's accounts, checks, views
   store/                SQLite: migrations (db.ts) and one repository per concern
   server/               Hono app: routes/, guards, validation, presentation
   shared/               API types and logic shared with the web app (no Node, no DOM)
 web/src/                React app: routes.tsx lists every page
-dev/mock/               mocked Cloudflare, Vercel, AWS and GitHub APIs, and crt.sh and Shodan, for tests and `npm run dev -- --mock`
+dev/mock/               mocked Cloudflare, Vercel, AWS, Alibaba Cloud and GitHub APIs, and crt.sh and Shodan, for tests and `npm run dev -- --mock`
 scripts/                dev runner, and the generator for docs/checks.md and docs/permissions.md
 test/                   node:test suites
 ```

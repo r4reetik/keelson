@@ -1,5 +1,5 @@
 // Credential verification, the organization picker and the permission probe for
-// the Add accounts dialog. The credential is a GitHub App; the organizations it
+// the Add accounts flow. The credential is a GitHub App; the organizations it
 // can read are the ones it's installed on.
 
 import { BAD_FORMAT, GithubClient, parseCredentials, type GithubError } from "./client.ts";

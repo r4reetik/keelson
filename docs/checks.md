@@ -9,7 +9,7 @@ each failure is a finding. Severity is the check's default, and a finding can ra
 and are shown first on the Overview. When the token can't read a source a check needs, the check is skipped, never passed.
 
 Checks marked **Spans providers** (XP-) compare an account with the other accounts in its entity, for example Cloudflare or Route 53
-DNS records with the domains of the entity's Vercel projects, or with the endpoints its AWS accounts have. They read the latest scan
+DNS records with the domains of the entity's Vercel projects, or with the endpoints its AWS and Alibaba Cloud accounts have. They read the latest scan
 of those accounts, and are skipped when the entity has no scanned account on the other provider.
 
 | Provider | Category | Checks |
@@ -20,7 +20,7 @@ of those accounts, and are skipped when the entity has no scanned account on the
 | Cloudflare | [Zero Trust](#cloudflare-zero-trust) | 22 |
 | Cloudflare | [TLS & HTTPS](#cloudflare-tls--https) | 15 |
 | Cloudflare | [WAF & bots](#cloudflare-waf--bots) | 23 |
-| Cloudflare | [DNS](#cloudflare-dns) | 14 |
+| Cloudflare | [DNS](#cloudflare-dns) | 16 |
 | Cloudflare | [Email](#cloudflare-email) | 11 |
 | Cloudflare | [Platform](#cloudflare-platform) | 6 |
 | Cloudflare | [Monitoring](#cloudflare-monitoring) | 4 |
@@ -40,10 +40,19 @@ of those accounts, and are skipped when the entity has no scanned account on the
 | AWS | [Secrets](#aws-secrets) | 10 |
 | AWS | [TLS & HTTPS](#aws-tls--https) | 11 |
 | AWS | [WAF & bots](#aws-waf--bots) | 4 |
-| AWS | [DNS](#aws-dns) | 4 |
+| AWS | [DNS](#aws-dns) | 5 |
 | AWS | [Platform](#aws-platform) | 15 |
 | AWS | [Monitoring](#aws-monitoring) | 8 |
 | AWS | [Change risk](#aws-change-risk) | 2 |
+| Alibaba Cloud | [Attack surface](#alibaba-cloud-attack-surface) | 13 |
+| Alibaba Cloud | [Identity & access](#alibaba-cloud-identity--access) | 20 |
+| Alibaba Cloud | [Secrets](#alibaba-cloud-secrets) | 5 |
+| Alibaba Cloud | [TLS & HTTPS](#alibaba-cloud-tls--https) | 4 |
+| Alibaba Cloud | [WAF & bots](#alibaba-cloud-waf--bots) | 1 |
+| Alibaba Cloud | [DNS](#alibaba-cloud-dns) | 5 |
+| Alibaba Cloud | [Platform](#alibaba-cloud-platform) | 4 |
+| Alibaba Cloud | [Monitoring](#alibaba-cloud-monitoring) | 3 |
+| Alibaba Cloud | [Change risk](#alibaba-cloud-change-risk) | 1 |
 | GitHub | [Identity & access](#github-identity--access) | 9 |
 | GitHub | [Deployments](#github-deployments) | 5 |
 | GitHub | [Secrets](#github-secrets) | 3 |
@@ -51,9 +60,9 @@ of those accounts, and are skipped when the entity has no scanned account on the
 | GitHub | [Platform](#github-platform) | 4 |
 | GitHub | [Supply chain](#github-supply-chain) | 7 |
 | GitHub | [Change risk](#github-change-risk) | 5 |
-| Internet | [Attack surface](#internet-attack-surface) | 6 |
+| Internet | [Attack surface](#internet-attack-surface) | 8 |
 | Internet | [TLS & HTTPS](#internet-tls--https) | 1 |
-| Internet | [DNS](#internet-dns) | 2 |
+| Internet | [DNS](#internet-dns) | 3 |
 
 ## Cloudflare
 
@@ -63,11 +72,11 @@ of those accounts, and are skipped when the entity has no scanned account on the
 
 **Severity:** High · **Attack path** · **Reads:** DNS records, Public DNS lookups · [Cloudflare docs](https://developers.cloudflare.com/fundamentals/security/protect-your-origin-server/)
 
-Cloudflare only protects traffic that goes through it. Once an attacker knows the origin address, they can attack it directly, around the WAF and DDoS protection. When the origin is a load balancer or address in one of the entity's AWS accounts, its security groups decide how bad that is: critical when they let anyone in, low when they admit only Cloudflare's ranges.
+Cloudflare only protects traffic that goes through it. Once an attacker knows the origin address, they can attack it directly, around the WAF and DDoS protection. When the origin is a load balancer or address in one of the entity's AWS or Alibaba Cloud accounts, its security groups decide how bad that is: critical when they let anyone in, low when they admit only Cloudflare's ranges.
 
 **How to fix**
 
-Move the exposed record behind the proxy or to another address, change the origin IP, and allow only Cloudflare's IP ranges (or a Tunnel) at the origin. On AWS, that means replacing 0.0.0.0/0 on ports 80 and 443 in the origin's security group with Cloudflare's ranges.
+Move the exposed record behind the proxy or to another address, change the origin IP, and allow only Cloudflare's IP ranges (or a Tunnel) at the origin. On AWS or Alibaba Cloud, that means replacing 0.0.0.0/0 on ports 80 and 443 in the origin's security group with Cloudflare's ranges.
 
 #### ATS-002: Proxied origins can be reached without Cloudflare
 
@@ -1097,6 +1106,30 @@ The address is in AWS's EC2 range, but none of the entity's AWS accounts holds i
 2. If it is an AWS account of yours, add it to this entity so its addresses are tracked.
 3. If it is a vendor's, mark the finding as accepted.
 4. If nobody knows, delete the record.
+
+#### XP-016: DNS record points at an Alibaba Cloud resource that no Alibaba Cloud account in the entity has
+
+**Severity:** Medium · **Spans providers** · **Reads:** DNS records · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/oss/user-guide/map-custom-domain-names-5)
+
+The record names an OSS bucket, load balancer or CDN domain that none of the entity's Alibaba Cloud accounts has. A deleted bucket's name can be registered by anyone, and links to its own address then load their files. A missing load balancer or CDN domain can't be claimed, so that record is dead, or points into an Alibaba Cloud account Keelson doesn't see.
+
+**How to fix**
+
+1. If the site moved or was retired, delete the DNS record in Cloudflare.
+2. If it should be live, recreate the resource or point the record at the current one.
+3. If the resource belongs to an Alibaba Cloud account that isn't in Keelson, add that account to this entity, or mark the finding as a false positive.
+
+#### XP-017: DNS record points at an Alibaba Cloud address the entity released
+
+**Severity:** High · **Attack path** · **Spans providers** · **Reads:** DNS records · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/eip/user-guide/release-an-eip)
+
+Keelson saw this address in one of the entity's Alibaba Cloud accounts on an earlier scan, and it is gone now: the instance was released or the EIP was given back. Alibaba Cloud hands released addresses to other customers, and whoever gets this one receives your hostname's traffic, through Cloudflare's proxy too, and can obtain a certificate for it.
+
+**How to fix**
+
+1. If the server is gone, delete the DNS record in Cloudflare.
+2. If it moved, point the record at its current address, and give the server an EIP so the address can't change again.
+3. If the address moved to an Alibaba Cloud account that isn't in Keelson, add that account to this entity.
 
 #### XP-009: DNS record points at GitHub Pages, but no Pages site in the entity uses it
 
@@ -2687,6 +2720,18 @@ The record sends visitors to Vercel, yet none of the entity's Vercel projects ha
 2. If it should be live, add the hostname to the right Vercel project under Settings → Domains.
 3. If it belongs to a Vercel team that isn't in Keelson, add that team to this entity, or mark the finding as a false positive.
 
+#### XP-021: Route 53 record points at an Alibaba Cloud resource or address the entity doesn't have
+
+**Severity:** High · **Attack path** · **Spans providers** · **Reads:** Route 53 hosted zones and records · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/oss/user-guide/map-custom-domain-names-5)
+
+The record names an OSS bucket, load balancer or CDN domain that none of the entity's Alibaba Cloud accounts has, or an address Keelson saw leave them. Alibaba Cloud hands released addresses to other customers, and a deleted bucket's name can be registered again, so someone else may answer for your hostname.
+
+**How to fix**
+
+1. If the site moved or was retired, delete the record in Route
+2. If it should be live, recreate the resource or point the record at the current one.
+3. If the resource belongs to an Alibaba Cloud account that isn't in Keelson, add that account to this entity.
+
 ### AWS: Platform
 
 #### AEC-001: Instance still allows IMDSv1
@@ -2947,6 +2992,626 @@ When the waiting period ends, the key is gone and every piece of data encrypted 
 **How to fix**
 
 If anything may still use the key, cancel the deletion in KMS → the key → Key actions → Cancel key deletion, and disable it instead while you check its CloudTrail usage.
+
+## Alibaba Cloud
+
+### Alibaba Cloud: Attack surface
+
+#### LOS-001: OSS Block Public Access is off for the account
+
+**Severity:** Medium · **Reads:** OSS Block Public Access for the account, OSS buckets · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/oss/user-guide/block-public-access)
+
+Without the account-wide block, any bucket can be made public by one ACL or policy change, now or later. With it on, a mistake on a single bucket can't expose data.
+
+**How to fix**
+
+In the OSS console → Block Public Access (on the overview page), turn it on for the account. Buckets that must be public (a static site, for example) are better served through CDN with origin fetch from a private bucket.
+
+#### LOS-002: OSS bucket is public
+
+**Severity:** High · **Attack path** · **Reads:** OSS Block Public Access for the account, OSS buckets, OSS bucket ACLs and Block Public Access, OSS bucket policies (reduced to who they allow, never stored) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/oss/user-guide/oss-bucket-acl)
+
+Anyone on the internet can list and download the bucket's objects, with no record of who did. Public buckets are the most common source of leaked data in object storage, because whatever is uploaded later is public too. A bucket anyone can also write to can be filled with malware served from your name, overwritten or emptied, and runs up your bill.
+
+**How to fix**
+
+1. If the bucket shouldn't be public, open it in OSS → Permission Control and turn on Block Public Access.
+2. Set its ACL to private and remove statements that allow "*" from its bucket policy.
+3. If it serves a website, put CDN in front with private origin fetch, then make the bucket private.
+
+#### LOS-003: OSS bucket has no Block Public Access of its own
+
+**Severity:** Low · **Reads:** OSS Block Public Access for the account, OSS buckets, OSS bucket ACLs and Block Public Access · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/oss/user-guide/block-public-access)
+
+The bucket is private today, but neither it nor the account blocks public access, so one ACL or policy change makes it public.
+
+**How to fix**
+
+1. If the bucket serves a website or downloads through Alibaba Cloud CDN, turn on access to private OSS buckets in the CDN domain's origin settings, then make the bucket private.
+2. Otherwise set its ACL to private and remove the policy statement for "*".
+3. Then turn on Block Public Access for the bucket, in OSS → the bucket → Permission Control.
+
+#### LNW-001: Security group opens SSH or RDP to the internet
+
+**Severity:** High · **Attack path** · **Reads:** Security groups and their rules, Network interfaces and EIPs · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ecs/user-guide/security-group-rules)
+
+Remote administration ports are scanned and brute-forced around the clock. An exposed SSH or RDP port turns one weak password or unpatched service into a foothold.
+
+**How to fix**
+
+1. Edit the group's inbound rules and replace 0.0.0.0/0 with your office or VPN range.
+2. Better: remove the rule and connect with Session Manager (Workbench) or Cloud Assistant, which need no inbound port.
+3. If nothing uses the group, delete it.
+
+#### LNW-002: Security group opens a database port to the internet
+
+**Severity:** High · **Reads:** Security groups and their rules, Network interfaces and EIPs · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ecs/user-guide/security-group-rules)
+
+A database reachable from the internet is protected by its password alone, and exposed to every bug in its network protocol.
+
+**How to fix**
+
+Edit the group's inbound rules so the database port is allowed only from the security group of the application that uses it, not from 0.0.0.0/0. If nothing uses the group, delete it.
+
+#### LNW-003: Security group allows all traffic from the internet
+
+**Severity:** Critical · **Attack path** · **Reads:** Security groups and their rules, Network interfaces and EIPs · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ecs/user-guide/security-group-rules)
+
+Every port of everything that uses this group is reachable by anyone: admin interfaces, databases, debug ports and services nobody remembers are listening.
+
+**How to fix**
+
+Edit the group's inbound rules: delete the rule that allows all traffic from 0.0.0.0/0 or ::/0, and add rules for the specific ports the service needs. If nothing uses the group, delete it.
+
+#### LNW-005: Internet-facing load balancer forwards an admin or database port to anyone
+
+**Severity:** High · **Attack path** · **Reads:** Load balancers (ALB, NLB, CLB) and listeners · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/slb/classic-load-balancer/user-guide/access-control)
+
+The load balancer passes connections from the whole internet to SSH, RDP or a database behind it. The servers' security groups don't stop it: they must let the load balancer's own addresses in, and the load balancer lets everyone through. This exposure doesn't show in the security groups' rules.
+
+**How to fix**
+
+1. Remove the listener if nothing outside needs the port; reach servers through Workbench or a VPN instead.
+2. Otherwise turn on access control for the listener (CLB → the instance → Listener → Access Control) with a whitelist of the addresses that need it, or, for an NLB, attach a security group that allows only those addresses.
+
+#### LNW-004: Instance runs in the classic network
+
+**Severity:** Medium · **Reads:** ECS instances · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ecs/user-guide/migrate-ecs-instances-from-the-classic-network-to-a-vpc)
+
+The classic network is shared between Alibaba Cloud customers. Instances on it aren't isolated in a VPC of your own, so other tenants' instances sit on the same network and only security groups stand between them.
+
+**How to fix**
+
+Migrate the instance to a VPC (ECS console → the instance → Migrate to VPC), then check its security groups.
+
+#### LEC-009: Internet-facing Linux instance signs in with a password over SSH
+
+**Severity:** Medium · **Attack path** · **Reads:** ECS instances, Security groups and their rules, Network interfaces and EIPs · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ecs/user-guide/ssh-key-pairs)
+
+The instance has no SSH key pair, so it was set up to sign in with a password, which Alibaba Cloud's public Linux images accept over SSH. Its security group lets the whole internet reach port 22, where passwords are guessed around the clock, and one weak or reused password is a shell on the server.
+
+**How to fix**
+
+1. In the ECS console → the instance → Bind Key Pair, attach an SSH key pair: Alibaba Cloud then turns password sign-in off on its Linux images.
+2. Restrict port 22 to your office or VPN range, or remove it and connect with Workbench or Cloud Assistant, which need no inbound port.
+
+#### LEC-008: Custom image is shared outside the entity
+
+**Severity:** Medium · **Reads:** Custom images and who they're shared with · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ecs/user-guide/share-a-custom-image)
+
+Whoever the image is shared with can start an instance from it and read everything on its disks: application code, configuration, and any credential that was on the server when the image was made.
+
+**How to fix**
+
+1. If the account is yours, add it to this entity in Keelson.
+2. Otherwise open the image in ECS → Images → Share Image and remove the account, or stop sharing it with everyone.
+
+#### LDB-001: Database whitelist admits every address
+
+**Severity:** Critical · **Attack path** · **Reads:** ApsaraDB RDS instances, their whitelists, TLS and encryption · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/rds/apsaradb-rds-for-mysql/configure-an-ip-address-whitelist-for-an-apsaradb-rds-for-mysql-instance)
+
+ApsaraDB instances (RDS, Tair and MongoDB) accept connections only from the addresses in their whitelist. This one admits 0.0.0.0/0, so with a public endpoint anyone on the internet can try its passwords and its protocol's bugs; without one, every host that can reach the network can.
+
+**How to fix**
+
+1. In the instance's console → Whitelist Settings, replace 0.0.0.0/0 with the addresses or security groups of the applications that connect.
+2. Release the public endpoint if nothing outside Alibaba Cloud needs it.
+
+#### LCN-001: ACK cluster's API server has a public endpoint
+
+**Severity:** Medium · **Reads:** Container Service (ACK) clusters · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ack/ack-managed-and-ack-dedicated/user-guide/control-public-access-to-the-api-server-of-a-cluster)
+
+The Kubernetes API server answers on the internet. Its authentication is all that stands between anyone and the cluster, and a leaked kubeconfig or a vulnerability in the API server is exploitable from anywhere.
+
+**How to fix**
+
+In the ACK console → the cluster → Basic Information, unbind the EIP from the API server and reach it through the VPC (a bastion, VPN or Cloud Shell). If it must stay public, restrict its SLB with an access control list.
+
+#### LCN-003: Function's HTTP trigger needs no authentication
+
+**Severity:** Medium · **Reads:** Function Compute functions and triggers (environment variables scanned for credentials, never stored) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/functioncompute/fc-3-0/user-guide/http-triggers-overview)
+
+Anyone who finds the trigger's URL can call the function as often as they like, and every bug in it is reachable from the internet.
+
+**How to fix**
+
+If the function isn't meant to be public, set the HTTP trigger's authentication to Signature or JWT. If it is, make sure it checks its callers itself and limit what its RAM role can do.
+
+### Alibaba Cloud: Identity & access
+
+#### LID-001: Main account has an AccessKey
+
+**Severity:** Critical · **Reads:** Account identity and alias · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ram/use-cases/ensure-security-of-alibaba-cloud-resources)
+
+The main account (root) can do everything in Alibaba Cloud, and no policy limits its AccessKey. Anyone who obtains it, from a laptop, a script or a CI variable, owns the account. Alibaba Cloud recommends that the main account have no AccessKey at all.
+
+**How to fix**
+
+1. Move whatever uses the main account's AccessKey to a RAM user with only the permissions it needs (for Keelson, the read-only policy from the Add accounts flow).
+2. Sign in as the main account, open AccessKey management, and disable, then delete, its AccessKeys.
+
+#### LID-013: Main account has no MFA
+
+**Severity:** Critical · **Reads:** Main account's AccessKeys and MFA (RAM's security practice report) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/account/user-guide/enable-the-account-protection-feature)
+
+The main account can do everything, including closing the account and every RAM user's access. With a password alone, one phished or reused password hands all of it over.
+
+**How to fix**
+
+Sign in as the main account, open Security Settings, and bind a virtual MFA device or a passkey. Keep the recovery details somewhere only the account's owners can reach.
+
+#### LID-002: RAM user can sign in to the console without MFA
+
+**Severity:** High · **Reads:** RAM users, their AccessKeys, MFA and console access · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ram/user-guide/bind-an-mfa-device-to-a-ram-user)
+
+The user's console password is the only thing protecting their access. A reused or phished password is enough to sign in. When the account requires MFA at sign-in, a user without a device is asked to bind one at their next sign-in, so whoever signs in first with the password, the user or an attacker, binds it.
+
+**How to fix**
+
+Bind an MFA device to the user in RAM → Users → the user → Authentication, or have them bind one now. Then require MFA at sign-in for every user under RAM → Settings → Security Settings.
+
+#### LID-014: RAM users can create their own AccessKeys
+
+**Severity:** Medium · **Reads:** RAM security settings: MFA at sign-in, and whether users manage their own AccessKeys · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ram/user-guide/manage-security-settings-of-ram-users)
+
+Any RAM user, or anyone holding their console session, can create an AccessKey for themselves. The key works without MFA and outside any sign-in network limits, lasts until someone deletes it, and nobody reviewed it being made.
+
+**How to fix**
+
+In RAM → Settings → Security Settings → RAM user security settings, turn off Manage AccessKeys. Administrators then create keys for the program users that need them.
+
+#### LID-015: RAM user is used both by a person and by programs
+
+**Severity:** Low · **Reads:** RAM users, their AccessKeys, MFA and console access · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ram/user-guide/create-a-ram-user)
+
+The user signs in to the console and also has an active AccessKey. Alibaba Cloud recommends separate users for people and programs: the key skips the person's MFA, it is copied into scripts tied to someone who will leave, and the person's access can't be reviewed apart from what the programs need.
+
+**How to fix**
+
+Create a RAM user with OpenAPI access only for the program, give it only the permissions the program needs, move the program to its AccessKey, and delete the person's AccessKey.
+
+#### LID-003: AccessKey is older than 90 days
+
+**Severity:** Medium · **Reads:** RAM users, their AccessKeys, MFA and console access · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ram/user-guide/create-an-accesskey-pair)
+
+Long-lived AccessKeys end up in scripts, CI variables and laptops. The longer one lives, the more places it has been copied to, and the longer a leaked copy stays useful.
+
+**How to fix**
+
+Create a new AccessKey for the user, move whatever uses the old one over to it, then disable and delete the old one. Where possible, use a RAM role instead (an ECS instance RAM role, or OIDC from CI).
+
+#### LID-004: AccessKey unused for 90 days
+
+**Severity:** Medium · **Reads:** RAM users, their AccessKeys, MFA and console access · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ram/user-guide/view-the-accesskey-pairs-of-a-ram-user)
+
+An AccessKey nobody uses is still a working credential. If it leaked, nobody would notice it being used.
+
+**How to fix**
+
+Disable the AccessKey in RAM → Users → the user → AccessKey, wait to see if anything breaks, then delete it.
+
+#### LID-005: Console password unused for 90 days
+
+**Severity:** Low · **Reads:** RAM users, their AccessKeys, MFA and console access · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ram/user-guide/manage-console-logon-settings-for-a-ram-user)
+
+A console sign-in that nobody uses is a password that can still be guessed or phished, with no owner watching for it.
+
+**How to fix**
+
+Turn off console access for the user in RAM → Users → the user → Authentication, or delete the user if nobody needs it.
+
+#### LID-006: Password policy is weak
+
+**Severity:** Medium · **Reads:** RAM password policy, RAM users, their AccessKeys, MFA and console access · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ram/user-guide/configure-a-password-policy-for-ram-users)
+
+RAM users who sign in to the console choose their own passwords. Without a minimum length, reuse prevention or a lockout after failed attempts, short or recycled passwords are accepted and can be guessed.
+
+**How to fix**
+
+In RAM → Settings → Security Settings → Password Strength, require at least 14 characters, prevent reuse of recent passwords and lock users out after a few failed attempts in an hour.
+
+#### LID-007: Administrator has a long-lived AccessKey
+
+**Severity:** High · **Reads:** RAM users, their AccessKeys, MFA and console access, RAM policies and who they're attached to (documents reduced to what they allow, never stored) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ram/product-overview/best-practices-for-identity-and-access-control)
+
+This RAM user can do anything in the account, and has an AccessKey that works until someone deletes it. A key leaked from a laptop or a CI variable gives an attacker the whole account.
+
+**How to fix**
+
+Use a RAM role for administrative work (assumed with the user's console sign-in and MFA, or from CI through OIDC), then delete the user's AccessKeys. If a tool needs a key, give it its own user with only the permissions it needs.
+
+#### LID-008: RAM role can be assumed by any Alibaba Cloud account
+
+**Severity:** Critical · **Reads:** RAM roles and their trust policies · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ram/user-guide/edit-the-trust-policy-of-a-ram-role)
+
+The role's trust policy lets the principal "*" assume it without a condition. Anyone with an Alibaba Cloud account can get the role's permissions in yours.
+
+**How to fix**
+
+Open the role in RAM → Roles → Trust Policy and replace "*" with the accounts or services that should assume it. Add a condition on sts:ExternalId for a vendor's account.
+
+#### LID-009: Custom policy allows every action on every resource
+
+**Severity:** Medium · **Reads:** RAM policies and who they're attached to (documents reduced to what they allow, never stored) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ram/user-guide/policy-structure-and-syntax)
+
+The policy is a second AdministratorAccess under another name. Whoever it is attached to is an administrator, which reviews that look for AdministratorAccess will miss.
+
+**How to fix**
+
+Open the policy in RAM → Permissions → Policies and narrow its actions and resources to what its users need, or detach it and use AdministratorAccess where full access is intended.
+
+#### LID-010: RAM role trusts an Alibaba Cloud account outside the entity without a condition
+
+**Severity:** Medium · **Reads:** RAM roles and their trust policies · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ram/user-guide/edit-the-trust-policy-of-a-ram-role)
+
+Another company's Alibaba Cloud account can assume this role with nothing but its own permissions. If that account is a vendor's, any of the vendor's other customers may be able to make it act on your account; if it is an old partner or a forgotten account, it still has the access.
+
+**How to fix**
+
+1. Open the role in RAM → Roles → Trust Policy.
+2. If the other account is one of yours, add it to this entity in Keelson.
+3. If it is a vendor's, add a condition that requires the external ID they gave you (sts:ExternalId).
+4. If nobody uses the role any more, delete it.
+
+#### LID-011: RAM identity can give itself more access
+
+**Severity:** High · **Reads:** RAM policies and who they're attached to (documents reduced to what they allow, never stored) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ram/user-guide/policy-elements)
+
+Its policies let it attach policies, change a policy's version, create AccessKeys or console passwords for others, or hand a role to a new instance or function. Any of these turns its limited access into whatever it chooses, up to administrator.
+
+**How to fix**
+
+Remove the listed actions from the identity's policies, or limit their Resource to what it really manages. Keep RAM administration with a small group of administrators who sign in with MFA.
+
+#### LID-012: GitHub Actions in any repository can assume this RAM role
+
+**Severity:** Critical · **Attack path** · **Reads:** RAM roles and their trust policies · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ram/user-guide/manage-an-oidc-idp)
+
+The role trusts GitHub's OIDC provider without limiting the token's subject to your repositories. A workflow in anyone's repository, on any GitHub account, can get a token GitHub signs and assume the role.
+
+**How to fix**
+
+Open the role in RAM → Roles → Trust Policy and add a condition on oidc:sub naming your organization and repository, for example repo:your-org/your-repo:ref:refs/heads/main or repo:your-org/your-repo:environment:production.
+
+#### XP-022: RAM role trusts GitHub repositories outside the entity
+
+**Severity:** High · **Spans providers** · **Reads:** RAM roles and their trust policies · [GitHub docs](https://docs.github.com/en/actions/security-for-github-actions/security-hardening-your-deployments/about-security-hardening-with-openid-connect)
+
+GitHub Actions in a GitHub organization that isn't one of the entity's can assume this role. That organization's members, and anyone who gets write access to its repositories, get the role's access to your Alibaba Cloud account.
+
+**How to fix**
+
+1. If the organization is yours, add it to this entity in Keelson.
+2. If it belongs to a vendor, confirm they still need the role and limit it to the repository and branch they use.
+3. Otherwise remove it from the role's trust policy.
+
+#### XP-023: Anyone who can push to the repository can assume this RAM role
+
+**Severity:** High · **Attack path** · **Spans providers** · **Reads:** RAM roles and their trust policies · [GitHub docs](https://docs.github.com/en/actions/security-for-github-actions/security-hardening-your-deployments/about-security-hardening-with-openid-connect#example-subject-claims)
+
+The role trusts GitHub Actions from a repository in the entity, either from any branch or pull request, or from a default branch that takes changes without review. Anyone with write access, or a stolen token or deploy key that has it, can push a workflow and act as the role in Alibaba Cloud.
+
+**How to fix**
+
+1. Limit the trust policy's oidc:sub to the protected default branch (repo:org/repo:ref:refs/heads/main) or, better, to a GitHub environment with required reviewers (repo:org/repo:environment:production).
+2. Require a reviewed pull request on that branch in GitHub.
+
+#### LOS-004: Bucket policy lets an Alibaba Cloud account outside the entity in
+
+**Severity:** Medium · **Reads:** OSS bucket policies (reduced to who they allow, never stored) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/oss/user-guide/oss-bucket-policy)
+
+The bucket's policy grants another Alibaba Cloud account access. If it isn't one of yours, that company, and anyone who gets into its account, can reach the bucket.
+
+**How to fix**
+
+1. If the account is yours, add it to this entity in Keelson.
+2. Otherwise edit the bucket's policy in OSS → Permission Control → Bucket Policy and remove the account, or limit it to the paths and actions it needs.
+
+#### LEC-007: Internet-facing instance runs with administrator access
+
+**Severity:** High · **Attack path** · **Reads:** ECS instances, Security groups and their rules, RAM roles and their trust policies, RAM policies and who they're attached to (documents reduced to what they allow, never stored) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ecs/user-guide/attach-an-instance-ram-role-to-an-ecs-instance)
+
+The instance has a public address, its security group lets the internet in, and its RAM role is an administrator. A vulnerability in anything it serves can be turned into the role's credentials, and so into the whole account.
+
+**How to fix**
+
+1. Give the instance a role with only the permissions its software needs.
+2. Require tokens for its metadata service (Security Hardening Mode).
+3. Put it behind a load balancer and remove its public address.
+
+#### LDB-004: Tair or MongoDB lets clients in the VPC connect without a password
+
+**Severity:** High · **Attack path** · **Reads:** Tair (Redis) instances: endpoints, whitelists, password-free access and TLS, ApsaraDB for MongoDB instances: endpoints, whitelists, password-free access and TLS · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/redis/user-guide/enable-password-free-access)
+
+Password-free access is on: any client in the VPC whose address the whitelist admits can read and change every key or document without credentials. One compromised instance, container or function in the VPC is then the whole data store, with nothing in its logs to tell an attacker from the application.
+
+**How to fix**
+
+In the instance's console → Instance Information (Tair) or Database Connections (MongoDB), turn password-free access off and give each application its own account with only the permissions it needs. Narrow the whitelist to the applications' addresses.
+
+### Alibaba Cloud: Secrets
+
+#### LEC-004: Credential in an instance's start-up script
+
+**Severity:** High · **Reads:** Instance start-up scripts (scanned for credentials, never stored), ECS instances · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ecs/user-guide/customize-the-initialization-configuration-for-an-instance)
+
+User data is readable by anyone who can describe the instance, and from inside the instance through the metadata service. A token or key written into it is shared with everyone who has either.
+
+**How to fix**
+
+1. Rotate the credential.
+2. Store it in KMS Secrets Manager and have the script fetch it at boot with the instance's RAM role.
+3. Replace the user data (the instance must be stopped to change it).
+
+#### LEC-006: Credential in a launch template's start-up script
+
+**Severity:** High · **Reads:** ECS launch templates (start-up scripts scanned for credentials, never stored) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ecs/user-guide/customize-the-initialization-configuration-for-an-instance)
+
+The template's user data is readable by anyone who can describe launch templates, and every instance launched from it carries the credential in its metadata.
+
+**How to fix**
+
+1. Rotate the credential.
+2. Store it in KMS Secrets Manager and fetch it at boot with the instance's RAM role.
+3. Create a new template version without it, make that the default, and delete the old versions.
+
+#### LCN-002: Credential in a function's environment variables
+
+**Severity:** High · **Reads:** Function Compute functions and triggers (environment variables scanned for credentials, never stored) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/functioncompute/fc-3-0/user-guide/environment-variables)
+
+Environment variables are readable by anyone who can view the function's configuration, and travel with every copy of it. A token or key there is shared with all of them.
+
+**How to fix**
+
+1. Rotate the credential.
+2. Store it in KMS Secrets Manager and read it at run time with the function's RAM role.
+3. Remove the variable from the function.
+
+#### LKM-001: KMS key doesn't rotate automatically
+
+**Severity:** Low · **Reads:** KMS keys and secrets (names and dates, never values) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/kms/key-management-service/user-guide/configure-key-rotation)
+
+A key that never rotates protects everything encrypted with it with the same material for as long as it lives. Automatic rotation limits how much data one compromised version can expose.
+
+**How to fix**
+
+In the KMS console → Keys → the key → Configure Rotation, turn on automatic rotation (every 365 days or sooner).
+
+#### LKM-003: Secret hasn't changed in over a year
+
+**Severity:** Low · **Reads:** KMS keys and secrets (names and dates, never values) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/kms/user-guide/overview-9)
+
+A credential that never changes stays useful to anyone who copied it, from a log, a laptop or a former colleague, for as long as it lives.
+
+**How to fix**
+
+Turn on automatic rotation for the secret in KMS → Secrets (RAM, RDS and ECS secrets rotate on their own), or rotate it by hand and put a date on the next rotation.
+
+### Alibaba Cloud: TLS & HTTPS
+
+#### LDB-002: Database accepts connections without TLS
+
+**Severity:** Medium · **Reads:** ApsaraDB RDS instances, their whitelists, TLS and encryption · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/rds/apsaradb-rds-for-mysql/configure-ssl-encryption-for-an-apsaradb-rds-for-mysql-instance)
+
+Without TLS, credentials and query results cross the network in plain text. Over a public endpoint that is the internet; inside a VPC it is readable by anything on the path between the application and the database.
+
+**How to fix**
+
+In the instance's console → Data Security (RDS) or TLS Settings (Tair, MongoDB), turn on TLS for the endpoint the applications use, then have the clients connect with TLS.
+
+#### LLB-001: Load balancer serves plain HTTP
+
+**Severity:** Medium · **Reads:** Load balancers (ALB, NLB, CLB) and listeners · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/slb/application-load-balancer/use-cases/redirect-http-requests-to-an-https-listener)
+
+The internet-facing load balancer answers on HTTP without sending visitors to HTTPS, so their requests and cookies cross the network unencrypted.
+
+**How to fix**
+
+In the SLB console → the load balancer → Listener, change the HTTP listener to redirect to the HTTPS listener (ALB: a redirect forwarding rule; CLB: Redirect HTTP to HTTPS).
+
+#### LLB-002: Load balancer accepts TLS 1.0 or 1.1
+
+**Severity:** Medium · **Reads:** Load balancers (ALB, NLB, CLB) and listeners · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/slb/application-load-balancer/user-guide/tls-security-policies)
+
+The listener's TLS security policy still negotiates TLS 1.0 or 1.1, which have known weaknesses and fail PCI DSS.
+
+**How to fix**
+
+In the SLB console → the load balancer → Listener, edit the HTTPS listener and choose tls_cipher_policy_1_2_strict_with_1_3, or tls_cipher_policy_1_2 if old clients must connect.
+
+#### LLB-003: CDN domain serves only plain HTTP
+
+**Severity:** Medium · **Reads:** CDN domains · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/cdn/user-guide/configure-an-ssl-certificate)
+
+The accelerated domain has no HTTPS certificate, so visitors' requests, cookies and the content they get cross the network unencrypted and can be read or changed on the way.
+
+**How to fix**
+
+In the CDN console → Domain Names → the domain → HTTPS, add a certificate (a free one from Certificate Management Service works), then turn on Force HTTPS redirect.
+
+### Alibaba Cloud: WAF & bots
+
+#### XP-018: Alibaba Cloud origin behind Cloudflare accepts traffic from the whole internet
+
+**Severity:** High · **Attack path** · **Spans providers** · **Reads:** Load balancers (ALB, NLB, CLB) and listeners, Security groups and their rules, Network interfaces and EIPs · [Cloudflare docs](https://developers.cloudflare.com/fundamentals/security/protect-your-origin-server/)
+
+Visitors reach this origin through Cloudflare, where your WAF, rate limits and bot rules run. Its security group also lets anyone connect to it directly, and origin addresses are easy to find (certificate logs, old DNS records, internet scans). An attacker who connects directly skips every Cloudflare protection and can flood the origin itself.
+
+**How to fix**
+
+1. In the security group, replace 0.0.0.0/0 on ports 80 and 443 with Cloudflare's address ranges (cloudflare.com/ips); a prefix list keeps them in one place.
+2. Or connect the origin through Cloudflare Tunnel and remove the inbound rule altogether.
+3. Turn on Authenticated Origin Pulls in Cloudflare so the origin can refuse requests that didn't come through your zone.
+
+### Alibaba Cloud: DNS
+
+#### LDN-001: Alibaba Cloud DNS record points at an Alibaba Cloud resource the entity doesn't have
+
+**Severity:** Medium · **Attack path** · **Reads:** Alibaba Cloud DNS domains and records, OSS buckets, Load balancers (ALB, NLB, CLB) and listeners, CDN domains · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/dns/add-a-dns-record)
+
+The record names an OSS bucket, load balancer or CDN domain that none of the entity's Alibaba Cloud accounts has. A deleted bucket's name can be registered by anyone; OSS won't serve your hostname from it without proof that they own the domain, but links to the bucket's own address would load their files. A missing load balancer or CDN domain can't be claimed that way, so that record is dead, or points into an account Keelson doesn't see.
+
+**How to fix**
+
+1. If the site was retired, delete the record in Alibaba Cloud DNS.
+2. If it should be live, recreate the resource or point the record at the current one.
+3. If the resource belongs to an Alibaba Cloud account that isn't in Keelson, add that account to this entity, or mark the finding as a false positive.
+
+#### LDN-002: Alibaba Cloud DNS record points at an address the entity released
+
+**Severity:** High · **Attack path** · **Reads:** Alibaba Cloud DNS domains and records, Network interfaces and EIPs · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/dns/add-a-dns-record)
+
+Keelson saw this address in one of the entity's Alibaba Cloud accounts on an earlier scan, and it is gone now: the instance was released or the EIP was given back. Alibaba Cloud hands released addresses to other customers, and whoever gets this one receives your hostname's traffic and can obtain a certificate for it.
+
+**How to fix**
+
+1. If the server is gone, delete the record in Alibaba Cloud DNS.
+2. If it moved, point the record at its current address, and use an EIP or a load balancer so the address can't change again.
+3. If the address moved to an account that isn't in Keelson, add that account to this entity.
+
+#### XP-019: Alibaba Cloud DNS record points at Vercel, but no Vercel project in the entity serves it
+
+**Severity:** High · **Attack path** · **Spans providers** · **Reads:** Alibaba Cloud DNS domains and records · [Vercel docs](https://vercel.com/docs/domains/working-with-domains/add-a-domain)
+
+The record sends visitors to Vercel, yet none of the entity's Vercel projects has this hostname. Whoever adds it to their own Vercel project first serves your traffic under your domain.
+
+**How to fix**
+
+1. If the site moved or was retired, delete the record in Alibaba Cloud DNS.
+2. If it should be live, add the hostname to the right Vercel project under Settings → Domains.
+3. If it belongs to a Vercel team that isn't in Keelson, add that team to this entity, or mark the finding as a false positive.
+
+#### XP-020: Alibaba Cloud DNS record points at an AWS resource or address the entity doesn't have
+
+**Severity:** High · **Attack path** · **Spans providers** · **Reads:** Alibaba Cloud DNS domains and records · [AWS docs](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/protection-from-dangling-dns.html)
+
+The record names a CloudFront distribution, load balancer or S3 bucket that none of the entity's AWS accounts has, or an address Keelson saw leave them. A missing bucket or CloudFront alias can be claimed by anyone, and a released address is handed to another AWS customer; either way someone else can serve your hostname.
+
+**How to fix**
+
+1. If the site moved or was retired, delete the record in Alibaba Cloud DNS.
+2. If it should be live, recreate the resource or point the record at the current one.
+3. If the resource belongs to an AWS account that isn't in Keelson, add that account to this entity.
+
+#### XP-024: Alibaba Cloud DNS record points at GitHub Pages, but no repository in the entity publishes it
+
+**Severity:** High · **Attack path** · **Spans providers** · **Reads:** Alibaba Cloud DNS domains and records · [GitHub docs](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/verifying-your-custom-domain-for-github-pages)
+
+The record sends visitors to GitHub Pages, yet none of the entity's GitHub organizations has a Pages site with this custom domain. Anyone can add the hostname to a Pages site of their own and serve content under your domain, unless the domain is verified in GitHub.
+
+**How to fix**
+
+1. If the site was retired, delete the record in Alibaba Cloud DNS.
+2. If it should be live, set the custom domain on the right repository's Pages settings.
+3. Verify the domain in your GitHub organization's settings so no one else can use it.
+4. If the site belongs to an organization that isn't in Keelson, add it to this entity.
+
+### Alibaba Cloud: Platform
+
+#### LEC-001: Instance's metadata service answers without a token
+
+**Severity:** Medium · **Reads:** ECS instances · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ecs/user-guide/view-instance-metadata)
+
+In normal mode the metadata service answers any request from the instance, so a server-side request forgery in the application is enough to read the temporary credentials of the instance's RAM role. Security hardening mode requires a token that such a request can't get.
+
+**How to fix**
+
+In the ECS console, open the instance → Modify Instance Metadata Access Mode and choose Security Hardening Mode (tokens required), after checking that the software on it uses a current SDK or Cloud Assistant.
+
+#### LEC-002: Cloud disks aren't encrypted by default
+
+**Severity:** Low · **Reads:** Cloud disks and encryption by default, ECS instances · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ecs/user-guide/encryption-overview)
+
+Unlike some clouds, Alibaba Cloud doesn't encrypt ECS disks unless asked. New disks, and every snapshot and image made from them, are stored unencrypted unless whoever creates them remembers to ask, and a snapshot shared or copied by mistake carries the data in the clear. Encryption by default makes every new disk encrypted with no change to how instances use it.
+
+**How to fix**
+
+1. In the ECS console → Block Storage → Cloud Disks, turn on Account-level Encryption by Default for the region.
+2. Existing disks stay as they are: re-create the ones holding sensitive data from an encrypted snapshot copy during a maintenance window.
+
+#### LEC-005: Launch template lets instances answer metadata requests without a token
+
+**Severity:** Medium · **Reads:** ECS launch templates (start-up scripts scanned for credentials, never stored) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ecs/user-guide/view-instance-metadata)
+
+Every instance launched from this template, by a scaling group or by hand, starts in normal mode, where a server-side request forgery can read its RAM role's credentials.
+
+**How to fix**
+
+Create a new version of the template with Security Hardening Mode for the metadata service, and make it the default version.
+
+#### LDB-003: Database storage isn't encrypted
+
+**Severity:** Low · **Reads:** ApsaraDB RDS instances, their whitelists, TLS and encryption · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/rds/apsaradb-rds-for-mysql/configure-tde-for-an-apsaradb-rds-for-mysql-instance)
+
+Transparent data encryption is off, so the database's files and backups are stored unencrypted, and a copied backup carries the data in the clear. Access to the instance itself matters more: this is the last line, not the first.
+
+**How to fix**
+
+In the RDS console → the instance → Data Security → TDE, turn on TDE with a KMS key. It can't be turned off again, so check the engine version's notes first.
+
+### Alibaba Cloud: Monitoring
+
+#### LMO-001: ActionTrail doesn't record every region
+
+**Severity:** High · **Reads:** ActionTrail trails · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/actiontrail/user-guide/create-a-single-account-trail)
+
+Without a trail that records reads and writes in every region and delivers them to OSS or Log Service, the account keeps only 90 days of events in the console, and nothing at all an investigator can query after that. A break-in would leave no lasting record of what was done.
+
+**How to fix**
+
+In the ActionTrail console → Trails → Create Trail, choose All Regions and All event types (Read and Write), and deliver the events to a private OSS bucket or a Log Service project. Keep the trail turned on.
+
+#### LMO-002: VPC with running resources has no flow logs
+
+**Severity:** Low · **Reads:** VPCs and flow logs, ECS instances, ApsaraDB RDS instances, their whitelists, TLS and encryption, Load balancers (ALB, NLB, CLB) and listeners · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/vpc/user-guide/flow-logs)
+
+Without flow logs, nobody can tell after the fact which addresses talked to what in the VPC: an investigation has no record of connections in or out.
+
+**How to fix**
+
+In the VPC console → Flow Logs, create a flow log for the VPC (or its vSwitches) that delivers to Log Service.
+
+#### LMO-003: Running instance isn't protected by Security Center's agent
+
+**Severity:** Low · **Reads:** Security Center agents, ECS instances · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/security-center/user-guide/install-the-security-center-agent)
+
+Security Center's agent, included for free, detects brute-force logins, web shells and known vulnerabilities on the instance. Without it, a compromise of this server raises no alert.
+
+**How to fix**
+
+In the Security Center console → Assets → Servers, install the agent on the instance (one click for ECS), or with Cloud Assistant across many instances.
+
+### Alibaba Cloud: Change risk
+
+#### LKM-002: KMS key is scheduled for deletion
+
+**Severity:** Medium · **Reads:** KMS keys and secrets (names and dates, never values) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/kms/key-management-service/user-guide/manage-keys-2)
+
+Once the waiting period ends, data encrypted with the key can never be decrypted again: disks, databases, OSS objects and secrets that use it are lost.
+
+**How to fix**
+
+If anything still uses the key, cancel the deletion in the KMS console → Keys → the key → Cancel Deletion. Otherwise let it go, and note who scheduled it.
 
 ## GitHub
 
@@ -3384,7 +4049,7 @@ The hostname is proxied through Cloudflare to hide its origin, but Shodan lists 
 
 **How to fix**
 
-1. Let only Cloudflare reach the origin: in AWS, a security group that admits only Cloudflare's ranges (a managed prefix list keeps it current); elsewhere, the firewall.
+1. Let only Cloudflare reach the origin: in AWS or Alibaba Cloud, a security group that admits only Cloudflare's ranges (a prefix list keeps it current); elsewhere, the firewall.
 2. Better, use a Cloudflare Tunnel so the origin has no open port.
 3. Use Authenticated Origin Pulls, so the origin refuses connections without Cloudflare's client certificate.
 4. Move the origin to a new address once it is locked, since the old one is known.
@@ -3410,6 +4075,27 @@ An internet-facing load balancer has a rule for this hostname, but no DNS record
 **How to fix**
 
 If the application is retired, delete the rule and its target group. If it is still needed, give it a DNS record and the same protection as the entity's other hostnames, or limit the rule to the addresses that use it (a source IP condition).
+
+#### XP-025: Alibaba Cloud load balancer's backend server can be reached without the load balancer
+
+**Severity:** High · **Attack path** · **Spans providers** · **Reads:** Load balancers, their rules and targets, and security groups in the entity's AWS accounts · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/slb/application-load-balancer/user-guide/add-an-alb-instance-to-a-security-group)
+
+The entity's hostname goes through an Alibaba Cloud load balancer, but a backend server behind it has its own public address and security groups that let anyone reach the port it serves on. Anyone who finds that address (Shodan, certificate logs, an old DNS record) skips the load balancer and everything on it: WAF, access control lists and TLS settings.
+
+**How to fix**
+
+1. Let only the load balancer reach its backends: in the server's security group, replace the rule that admits 0.0.0.0/0 on the backend port with one that admits the load balancer's vSwitch range or security group.
+2. Release the server's public address or EIP, so it can only be reached through the load balancer.
+
+#### XP-027: Alibaba Cloud load balancer still routes a hostname that DNS doesn't point at it
+
+**Severity:** Low · **Spans providers** · **Reads:** Load balancers, their rules and targets, and security groups in the entity's AWS accounts, Domains, DNS records and addresses of the entity's other accounts · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/slb/application-load-balancer/user-guide/manage-forwarding-rules-for-a-listener)
+
+An internet-facing ALB has a forwarding rule for this hostname, but no DNS record sends it there any more. The application behind the rule is still reachable by anyone who sends that Host header to the load balancer, and old or staging applications left this way are rarely patched or watched.
+
+**How to fix**
+
+If the application is retired, delete the forwarding rule and its server group. If it is still needed, give it a DNS record and the same protection as the entity's other hostnames, or limit the rule to the addresses that use it (a source IP condition).
 
 ### Internet: TLS & HTTPS
 
@@ -3448,3 +4134,13 @@ The hostname is in public DNS but its load balancer is internal: it answers only
 **How to fix**
 
 Move the record to a private hosted zone (Route 53) that only the VPC resolves, or point it at an internet-facing load balancer if it is meant to be public. Delete it if nothing uses it.
+
+#### XP-026: Public hostname points at an internal Alibaba Cloud load balancer
+
+**Severity:** Low · **Spans providers** · **Reads:** Load balancers, their rules and targets, and security groups in the entity's AWS accounts · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/slb/application-load-balancer/user-guide/create-an-alb-instance)
+
+The hostname is in public DNS but its load balancer is internal (intranet): it answers only inside its VPC. Anyone can read the internal load balancer's name and the private addresses behind it, which maps the internal network, and the hostname doesn't work for anyone outside.
+
+**How to fix**
+
+Move the record to Alibaba Cloud DNS PrivateZone, which only the VPC resolves, or point it at an internet-facing load balancer if it is meant to be public. Delete it if nothing uses it.

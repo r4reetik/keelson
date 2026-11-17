@@ -1,6 +1,6 @@
 // Before any account is connected: the Overview says what Keelson does and how to
-// start, and links to adding accounts on the Accounts page, where the platform
-// choice and its steps live. Other pages that need an account say so in one line.
+// start, and links to the Add accounts flow, where the platform choice and its
+// steps live. Other pages that need an account say so in one line.
 // A role that can't connect accounts is told who can.
 
 import { Button, Link } from "@cloudflare/kumo";
@@ -9,8 +9,8 @@ import { Card, NoRows, Page } from "../components/ui.tsx";
 import { navigate, providerList } from "../lib.ts";
 import { useShell } from "../shell.tsx";
 
-/** Opens the Accounts page with its Add accounts dialog. */
-export const ADD_ACCOUNTS = "/accounts?add=1";
+/** The Add accounts flow: the platform catalog first. */
+export const ADD_ACCOUNTS = "/accounts/add";
 
 export function GetStarted() {
   const { can } = useShell();

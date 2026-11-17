@@ -6,22 +6,8 @@
 // skipped when the entity has none.
 
 import { defineChecks } from "./define.ts";
+import { judgeGithubTrust, pushReasons, shortList as list } from "../../../core/github-trust.ts";
 import { GLOBAL, type AwsRole } from "../types.ts";
-
-/** IAM's StringLike patterns: * is any run of characters, ? is one. */
-const glob = (p: string) =>
-  new RegExp(
-    `^${p
-      .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-      .replace(/\*/g, ".*")
-      .replace(/\?/g, ".")}$`,
-  );
-/** The owner a subject names ("repo:org/app:…" → "org"), or null when it doesn't name one exactly. */
-const ownerOf = (sub: string) => /^repo:([^/*?]+)\//.exec(sub)?.[1] ?? null;
-/** A subject that lets any GitHub owner in: no subject at all, or a wildcard where the owner goes. */
-const anyOwner = (sub: string) => sub === "*" || /^repo:[^/]*[*?]/.test(sub) || /^repo\*/.test(sub);
-/** A branch name nobody would protect, to test whether a pattern lets any branch in. */
-const SOME_BRANCH = "keelson-any-branch";
 
 /** The GitHub subjects a role trusts, or null when GitHub Actions can't assume it. An empty list means any repository. */
 function githubTrust(r: AwsRole): string[] | null {
@@ -29,8 +15,6 @@ function githubTrust(r: AwsRole): string[] | null {
   if (!trusts.length) return null;
   return trusts.some((t) => !t.github!.length) ? [] : trusts.flatMap((t) => t.github!);
 }
-
-const list = (items: string[]) => `${items.slice(0, 3).join(", ")}${items.length > 3 ? ` and ${items.length - 3} more` : ""}`;
 
 export default defineChecks(
   {
@@ -68,58 +52,34 @@ export default defineChecks(
   },
   ({ inv, d, related }, report) => {
     if (!inv.roles) return;
-    const orgs = related.githubOrgs ? new Set(related.githubOrgs) : null;
-    const repos = related.githubRepos;
     for (const r of inv.roles) {
       const subjects = githubTrust(r);
       if (!subjects) continue;
       const where = { zone: GLOBAL, resource: r.name, link: d.role(r.name) };
       const admin = r.admin ? ", and the role has administrator access" : "";
+      const v = judgeGithubTrust(subjects, related.githubOrgs, related.githubRepos);
 
-      const open = !subjects.length ? ["no subject condition"] : subjects.filter(anyOwner);
-      report("AID-012", { ...where, pass: !open.length, detail: open.length ? `Trusts GitHub Actions with ${list(open)}${admin}` : "" });
-      if (open.length) continue;
+      report("AID-012", { ...where, pass: !v.open.length, detail: v.open.length ? `Trusts GitHub Actions with ${list(v.open)}${admin}` : "" });
+      if (v.open.length) continue;
 
-      const owners = [...new Set(subjects.map(ownerOf).filter((o): o is string => !!o))];
-      if (orgs && owners.length) {
-        const outside = owners.filter((o) => !orgs.has(o));
+      if (v.outside)
         report("XP-010", {
           ...where,
-          pass: !outside.length,
-          severity: outside.length && r.admin ? "critical" : undefined,
-          confidence: outside.length ? "likely" : undefined,
-          detail: outside.length ? `GitHub organization${outside.length === 1 ? "" : "s"} ${list(outside)} can assume it${admin}` : "",
+          pass: !v.outside.length,
+          severity: v.outside.length && r.admin ? "critical" : undefined,
+          confidence: v.outside.length ? "likely" : undefined,
+          detail: v.outside.length ? `GitHub organization${v.outside.length === 1 ? "" : "s"} ${list(v.outside)} can assume it${admin}` : "",
         });
-      }
 
-      if (repos) {
-        const patterns = subjects.map(glob);
-        const allows = (sub: string) => patterns.some((p) => p.test(sub));
-        const anyBranch: string[] = [];
-        const unreviewed: string[] = [];
-        let trusted = 0;
-        for (const repo of repos) {
-          const base = `repo:${repo.repo}:`;
-          const fromAny = allows(`${base}ref:refs/heads/${SOME_BRANCH}`) || allows(`${base}pull_request`);
-          const fromDefault = allows(`${base}ref:refs/heads/${repo.defaultBranch.toLowerCase()}`);
-          if (!fromAny && !fromDefault) continue;
-          trusted++;
-          if (fromAny) anyBranch.push(repo.repo);
-          else if (!repo.reviewed) unreviewed.push(`${repo.repo} (${repo.defaultBranch})`);
-        }
-        // A role limited to environments, or to repositories outside the entity, isn't judged here.
-        if (!trusted) continue;
-        const reasons = [
-          anyBranch.length ? `any branch or pull request of ${list(anyBranch)}` : null,
-          unreviewed.length ? `the unreviewed default branch of ${list(unreviewed)}` : null,
-        ].filter(Boolean);
-        report("XP-011", {
-          ...where,
-          pass: !reasons.length,
-          severity: reasons.length && r.admin ? "critical" : undefined,
-          detail: reasons.length ? `GitHub Actions can assume it from ${reasons.join(", and from ")}${admin}` : "",
-        });
-      }
+      // A role limited to environments, or to repositories outside the entity, isn't judged here.
+      if (!v.trusted) continue;
+      const reasons = pushReasons(v);
+      report("XP-011", {
+        ...where,
+        pass: !reasons.length,
+        severity: reasons.length && r.admin ? "critical" : undefined,
+        detail: reasons.length ? `GitHub Actions can assume it from ${reasons.join(", and from ")}${admin}` : "",
+      });
     }
   },
 );

@@ -1,7 +1,7 @@
-// A small XML reader for AWS responses, so Keelson needs no XML dependency.
-// AWS's Query and REST-XML APIs answer with plain element trees: no mixed
-// content, no namespaces that matter, attributes that checks never read. That is
-// all this handles.
+// A small XML reader for AWS and OSS responses, so Keelson needs no XML dependency.
+// AWS's Query and REST-XML APIs and Alibaba Cloud's OSS answer with plain element
+// trees: no mixed content, no namespaces that matter, attributes that checks never
+// read. That is all this handles.
 
 export interface XmlNode {
   name: string;

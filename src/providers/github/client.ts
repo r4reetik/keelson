@@ -75,7 +75,7 @@ export function appJwt(app: GithubApp, now = Date.now()): string {
   return `${unsigned}.${createSign("RSA-SHA256").update(unsigned).sign(app.key, "base64url")}`;
 }
 
-/** One installation of the App, as the Add accounts dialog and the scan need it. */
+/** One installation of the App, as the Add accounts flow and the scan need it. */
 export interface Installation {
   id: number;
   /** The App's own ID, so the scan can tell it apart from other Apps on the organization. */

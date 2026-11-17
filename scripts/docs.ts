@@ -9,6 +9,7 @@ import { CATEGORIES, CHECKS, type CheckDef } from "../src/providers/catalog.ts";
 import { SOURCES, SOURCE_KEYS } from "../src/core/sources.ts";
 import { VERCEL_SOURCES, VERCEL_SOURCE_KEYS } from "../src/providers/vercel/sources.ts";
 import { AWS_SOURCES, AWS_SOURCE_KEYS } from "../src/providers/aws/sources.ts";
+import { ALIBABA_SOURCES, ALIBABA_SOURCE_KEYS } from "../src/providers/alibaba/sources.ts";
 import { GITHUB_SOURCES, GITHUB_SOURCE_KEYS } from "../src/providers/github/sources.ts";
 import { INTERNET_SOURCES, INTERNET_SOURCE_KEYS } from "../src/providers/internet/sources.ts";
 import { PROVIDERS, PROVIDER_INFO, providerOfUrl, type ProviderId } from "../src/shared/providers.ts";
@@ -36,6 +37,7 @@ const SOURCE_REGISTRY: Record<ProviderId, Record<string, { label: string }>> = {
   cloudflare: SOURCES,
   vercel: VERCEL_SOURCES,
   aws: AWS_SOURCES,
+  alibaba: ALIBABA_SOURCES,
   github: GITHUB_SOURCES,
   internet: INTERNET_SOURCES,
 };
@@ -73,7 +75,7 @@ export function checksDoc(): string {
     "and are shown first on the Overview. When the token can't read a source a check needs, the check is skipped, never passed.",
     "",
     "Checks marked **Spans providers** (XP-) compare an account with the other accounts in its entity, for example Cloudflare or Route 53",
-    "DNS records with the domains of the entity's Vercel projects, or with the endpoints its AWS accounts have. They read the latest scan",
+    "DNS records with the domains of the entity's Vercel projects, or with the endpoints its AWS and Alibaba Cloud accounts have. They read the latest scan",
     "of those accounts, and are skipped when the entity has no scanned account on the other provider.",
     "",
     "| Provider | Category | Checks |",
@@ -97,6 +99,14 @@ export function permissionsDoc(): string {
     const s = AWS_SOURCES[k];
     const ids = needs(k, "aws");
     return `| ${s.label}${s.regional ? " (every enabled region)" : ""} | ${s.permission
+      .split(", ")
+      .map((a) => `\`${a}\``)
+      .join(", ")} | ${ids.length ? ids.join(", ") : "Supporting data for other checks"} |`;
+  });
+  const alibabaRows = ALIBABA_SOURCE_KEYS.map((k) => {
+    const s = ALIBABA_SOURCES[k];
+    const ids = needs(k, "alibaba");
+    return `| ${s.label}${s.regional ? " (every available region)" : ""} | ${s.permission
       .split(", ")
       .map((a) => `\`${a}\``)
       .join(", ")} | ${ids.length ? ids.join(", ") : "Supporting data for other checks"} |`;
@@ -128,7 +138,7 @@ export function permissionsDoc(): string {
     "# Permissions",
     "",
     "Keelson only reads, on every provider. Each provider's section lists the data a scan reads and what grants it:",
-    "a token permission on Cloudflare, a team role on Vercel, IAM actions on AWS, an App permission on GitHub, and for Sonar, public sources and Shodan.",
+    "a token permission on Cloudflare, a team role on Vercel, IAM actions on AWS, RAM actions on Alibaba Cloud, an App permission on GitHub, and for Sonar, public sources and Shodan.",
     "",
     "## Cloudflare",
     "",
@@ -182,6 +192,30 @@ export function permissionsDoc(): string {
     "|---|---|---|",
     ...awsRows,
     "",
+    "## Alibaba Cloud",
+    "",
+    "An AccessKey belongs to one Alibaba Cloud account, so each account needs its own. In each account, create a RAM user for Keelson with",
+    "**Using permanent AccessKey to access** and no console access, give it a custom policy with exactly the actions below (Add accounts",
+    "shows it ready to paste), and create an AccessKey for it. Alibaba Cloud's system **ReadOnlyAccess** policy isn't enough of a limit:",
+    "it also reads the objects in your OSS buckets and the values of your KMS secrets, which Keelson never needs. STS tokens (the ones that",
+    "start with STS.) aren't accepted, because they expire within hours, and the main account's own AccessKey is reported as a finding.",
+    "",
+    "Keelson signs every request itself (Alibaba Cloud's V3 signature, and OSS's V4) and sends only GET requests. Alibaba Cloud's APIs",
+    "accept GET for changes too, so the client also refuses any action that isn't a read named in the policy before sending it, and",
+    "`test/alibaba.test.ts` fails on anything else. It never asks for a secret's value or an object in a bucket, never stores a policy",
+    "document, and scans environment variables and start-up scripts for credentials in memory, keeping only the variable's name and the",
+    "kind found. It keeps only the last four characters of an AccessKey ID.",
+    "",
+    "Regional sources are read in every region ECS lists. A region that refuses the AccessKey is skipped and counted on the Resources",
+    "page, and a product the account never opened, or that a region doesn't offer, reads as empty rather than as a gap.",
+    "",
+    "Keelson's policy grows when a check needs a new read. A policy made from an earlier version is a coverage gap for those reads",
+    "(the Overview names the missing actions): copy the current policy from Add accounts and replace the old one in RAM.",
+    "",
+    "| Source | RAM actions | Checks that read it |",
+    "|---|---|---|",
+    ...alibabaRows,
+    "",
     "## GitHub",
     "",
     "Keelson reads GitHub as a GitHub App that you register and own: it isn't tied to a person, and each organization's owners see it under",
@@ -205,7 +239,7 @@ export function permissionsDoc(): string {
     "## Internet (Sonar)",
     "",
     "Sonar looks at each entity from outside. It isn't a platform with an API: Keelson adds one internet account per entity, and it",
-    "starts from what the entity's other accounts know (their domains, DNS records and the addresses AWS holds), so it is scanned after them.",
+    "starts from what the entity's other accounts know (their domains, DNS records and the addresses AWS and Alibaba Cloud hold), so it is scanned after them.",
     "It sends nothing to the entity's own hosts. It sends the entity's domain names to crt.sh (certificate transparency logs) and to",
     "Shodan, and its public addresses to Shodan, and looks names up in public DNS over HTTPS.",
     "",

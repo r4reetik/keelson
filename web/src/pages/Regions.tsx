@@ -1,14 +1,33 @@
 // AWS regions: what runs in each, whether GuardDuty watches it, and its open
-// findings, one row per region plus one for the account's global resources (IAM,
-// S3, CloudFront, Route 53). The AWS counterpart of Zones and Projects.
+// findings, one row per region plus one for each account's global resources (IAM,
+// S3 settings, CloudFront and Route 53). AWS's counterpart of Zones and Projects.
+// Alibaba Cloud has its own page (Resources): its regions and products differ, and
+// a row per region said little there.
 
 import { Badge, Input, Switch, Table, Link } from "@cloudflare/kumo";
 import { useScopedApi, useShell } from "../shell.tsx";
-import { num, plural, SCORED_SEVERITIES, setParams, totalScored, useLocation, type RegionRow, type RegionsResponse } from "../lib.ts";
-import { Flag, ListCard, NoRows, Page, PageState, SeverityBadge, unreadableText } from "../components/ui.tsx";
+import {
+  num,
+  plural,
+  PROVIDER_INFO,
+  providerList,
+  SCORED_SEVERITIES,
+  setParams,
+  totalScored,
+  useLocation,
+  type ProviderId,
+  type RegionRow,
+  type RegionsResponse,
+} from "../lib.ts";
+import { AccountName, Flag, ListCard, NoRows, Page, PageState, SeverityBadge, unreadableText } from "../components/ui.tsx";
 
 const TITLE = "Regions";
-const DESCRIPTION = "Every enabled AWS region: what runs there, whether GuardDuty is on, and its open findings. Global holds IAM, S3, CloudFront and Route 53.";
+
+/** What the page says it lists, for the platforms in view. */
+function describe(providers: ProviderId[]): string {
+  const detection = [...new Set(providers.flatMap((p) => PROVIDER_INFO[p].threatDetection ?? []))];
+  return `Every enabled ${providerList(providers)} region: what runs there,${detection.length ? ` whether ${detection.join(" or ")} is on,` : ""} and its open findings. Global holds each account's identities, object storage, CDN and DNS.`;
+}
 
 const used = (r: RegionRow) => r.resources.reduce((n, x) => n + x.count, 0);
 
@@ -16,6 +35,11 @@ export function RegionsPage() {
   const { multi } = useShell();
   const { params } = useLocation();
   const { data, error, loading, reload } = useScopedApi<RegionsResponse>("/api/regions");
+  // Rows stored before platforms were recorded on them are AWS's, the only cloud there was then.
+  const platformOf = (r: RegionRow): ProviderId => r.provider ?? "aws";
+  const providers = [...new Set((data?.regions ?? []).map(platformOf))];
+  const DESCRIPTION = describe(providers.length ? providers : ["aws"]);
+  const detection = [...new Set(providers.flatMap((p) => PROVIDER_INFO[p].threatDetection ?? []))];
   if (error || !data?.scan || !data.regions) {
     return (
       <PageState
@@ -72,7 +96,7 @@ export function RegionsPage() {
               <Table.Row>
                 <Table.Head sticky="left">Region</Table.Head>
                 <Table.Head>Resources</Table.Head>
-                <Table.Head className="whitespace-nowrap">GuardDuty</Table.Head>
+                {detection.length > 0 && <Table.Head className="whitespace-nowrap">{detection.join(" / ")}</Table.Head>}
                 <Table.Head className="whitespace-nowrap">Open findings</Table.Head>
               </Table.Row>
             </Table.Header>
@@ -87,13 +111,20 @@ export function RegionsPage() {
                       <Link variant="plain" href={href}>
                         {r.name}
                       </Link>
-                      {multi && <div className="max-w-80 truncate text-sm text-kumo-subtle">{r.account}</div>}
+                      {multi && (
+                        <div className="max-w-80 truncate text-sm text-kumo-subtle">
+                          {providers.length > 1 ? <AccountName name={r.account ?? ""} provider={platformOf(r)} /> : r.account}
+                        </div>
+                      )}
                     </Table.Cell>
                     <Table.Cell>
                       {r.skipped ? (
                         <span className="inline-flex items-center gap-2">
                           <Badge variant="warning">Not readable</Badge>
-                          <span className="text-sm text-kumo-subtle">AWS refused the access key here, so nothing in this region was checked.</span>
+                          <span className="text-sm text-kumo-subtle">
+                            {PROVIDER_INFO[platformOf(r)].label} refused the {PROVIDER_INFO[platformOf(r)].credential} here, so nothing in this region was
+                            checked.
+                          </span>
                         </span>
                       ) : present.length ? (
                         <span className="flex max-w-xl flex-wrap gap-x-4 gap-y-1">
@@ -107,9 +138,11 @@ export function RegionsPage() {
                         <span className="text-kumo-subtle">Nothing found</span>
                       )}
                     </Table.Cell>
-                    <Table.Cell className="whitespace-nowrap">
-                      <Flag value={r.guardDuty} />
-                    </Table.Cell>
+                    {detection.length > 0 && (
+                      <Table.Cell className="whitespace-nowrap">
+                        {PROVIDER_INFO[platformOf(r)].threatDetection ? <Flag value={r.guardDuty} /> : <span className="text-kumo-subtle">Not offered</span>}
+                      </Table.Cell>
+                    )}
                     <Table.Cell>
                       <div className="flex items-center gap-3 whitespace-nowrap">
                         {SCORED_SEVERITIES.filter((s) => r.findings[s]).map((s) => (

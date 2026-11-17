@@ -13,7 +13,7 @@
 
 import { AWS_SOURCES, HOME_REGION, type AwsSourceKey } from "./sources.ts";
 import { awsEncode, canonicalQuery, EMPTY_SHA256, signGet, signPost, type AwsCredentials } from "./sigv4.ts";
-import { find, parseXml, text, type XmlNode } from "./xml.ts";
+import { find, parseXml, text, type XmlNode } from "../../core/xml.ts";
 import { CREDENTIAL_SEPARATOR } from "../../shared/providers.ts";
 import type { Coverage } from "../../shared/api.ts";
 

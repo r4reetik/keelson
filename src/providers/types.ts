@@ -1,5 +1,5 @@
 // What every provider gives the rest of Keelson. The scanner, the account routes
-// and the Add accounts dialog only talk to providers through this interface, so adding a
+// and the Add accounts flow only talk to providers through this interface, so adding a
 // provider (Google Cloud, Google Workspace…) means implementing it once and
 // listing it in ./index.ts. See "Adding a provider" in CONTRIBUTING.md.
 

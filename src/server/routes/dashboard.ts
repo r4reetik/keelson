@@ -9,6 +9,7 @@ import { badRequest, notFound } from "../errors.ts";
 import { FINGERPRINT, param, readJson } from "../validate.ts";
 import { requirePermission } from "../middleware.ts";
 import { reaches, viewOf } from "../access.ts";
+import { locate } from "../locate.ts";
 import {
   activity,
   brief,
@@ -20,6 +21,7 @@ import {
   projects,
   providerScores,
   regions,
+  resources,
   repos,
   surface,
   scopeFindings,
@@ -37,10 +39,12 @@ import type {
   Finding,
   FindingBrief,
   FindingDetail,
+  LocatedResponse,
   FindingsResponse,
   Overview,
   ProjectsResponse,
   RegionsResponse,
+  ResourcesResponse,
   ReposResponse,
   SurfaceResponse,
   Report,
@@ -232,6 +236,10 @@ export function dashboardRoutes(r: Routes, { repo, scanner, version }: AppContex
     const s = latestScans(repo, c.get("scope"));
     return c.json({ scan: scanMeta(s), regions: regions(s), coverage: coverage(s) } satisfies RegionsResponse);
   });
+  r.get("/api/resources", (c) => {
+    const s = latestScans(repo, c.get("scope"));
+    return c.json({ scan: scanMeta(s), resources: resources(s), coverage: coverage(s) } satisfies ResourcesResponse);
+  });
   r.get("/api/repos", (c) => {
     const s = latestScans(repo, c.get("scope"));
     return c.json({ scan: scanMeta(s), repos: repos(s), coverage: coverage(s) } satisfies ReposResponse);
@@ -297,6 +305,7 @@ export function dashboardRoutes(r: Routes, { repo, scanner, version }: AppContex
       zones: zones(scans),
       projects: projects(scans),
       regions: regions(scans),
+      resources: resources(scans)?.rows ?? null,
       repos: repos(scans),
       valueCounts: value(scans)?.counts,
       checks: checkStats(scans),
@@ -326,5 +335,40 @@ export function findingRoutes(r: Routes, { repo }: AppContext) {
       last: current ? null : repo.findings.lastBrief(fp, where.scanId, displayName(account)),
       events,
     } satisfies FindingDetail);
+  });
+
+  // Where the finding's addresses and hostnames are in its entity's other accounts. Only that entity's scans are read.
+  r.get("/api/finding/:fp/located", (c) => {
+    const fp = param(c, "fp");
+    if (!FINGERPRINT.test(fp)) throw notFound("Unknown finding");
+    const where = repo.findings.locate(fp);
+    const account = where && repo.accounts.get(where.accountId);
+    if (!where || !account || !reaches(c.get("user"), account.entityId)) throw notFound("This finding no longer exists.");
+    const f =
+      repo.findings.forScan(where.scanId, repo.settings.get().slaDays).find((x) => x.fingerprint === fp) ??
+      repo.findings.lastBrief(fp, where.scanId, displayName(account));
+    if (!f) throw notFound("This finding no longer exists.");
+    const scans = repo.accounts
+      .list()
+      .filter((a) => a.entityId === account.entityId)
+      .flatMap((a) => {
+        const scan = repo.scans.latest(a.id);
+        return scan ? [{ provider: a.provider, accountId: a.id, account: displayName(a), snap: scan.snap }] : [];
+      });
+    const full = f as Partial<Finding>;
+    return c.json(
+      locate(
+        {
+          accountId: account.id,
+          zone: f.zone,
+          title: f.title,
+          checkId: f.checkId,
+          resource: f.resource,
+          detail: full.detail ?? "",
+          evidence: full.evidence ?? null,
+        },
+        scans,
+      ) satisfies LocatedResponse,
+    );
   });
 }

@@ -221,3 +221,24 @@ test("a view can be any set of accounts, named by its shortest key, and separate
   assert.equal(key("cf1", "v3"), null);
   assert.equal(key("v3"), "a:v3");
 });
+
+test("the Add accounts catalog groups and finds every platform from PROVIDER_INFO", async () => {
+  const { PLATFORM_CATEGORIES, PROVIDERS, PROVIDER_INFO, matchesProvider } = await import("../src/shared/providers.ts");
+  for (const p of PROVIDERS) {
+    assert.ok(PROVIDER_INFO[p].category in PLATFORM_CATEGORIES, `${p} is in a catalog group`);
+    assert.ok(PROVIDER_INFO[p].keywords.length > 0, `${p} has search words`);
+    assert.ok(matchesProvider(p, PROVIDER_INFO[p].label), `${p} is found by its name`);
+    assert.ok(matchesProvider(p, ""), "an empty search shows everything");
+  }
+  for (const c of Object.keys(PLATFORM_CATEGORIES))
+    assert.ok(
+      PROVIDERS.some((p) => PROVIDER_INFO[p].category === c),
+      `no empty group: ${c}`,
+    );
+  const found = (q: string) => PROVIDERS.filter((p) => matchesProvider(p, q));
+  assert.deepEqual(found("s3"), ["aws"], "by a service");
+  assert.deepEqual(found("aliyun"), ["alibaba"], "by another name");
+  assert.deepEqual(found("ZERO trust"), ["cloudflare"], "any case, every word");
+  assert.deepEqual(found("cloud"), ["cloudflare", "aws", "alibaba"], "by category too");
+  assert.deepEqual(found("nothing-like-this"), []);
+});

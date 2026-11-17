@@ -30,7 +30,7 @@
   <img src="docs/images/overview.png" alt="The Keelson overview: attack paths, posture score, overdue and unowned findings, and the findings to fix first">
 </picture>
 
-Point Keelson at your Cloudflare accounts, your Vercel teams, your AWS accounts, your GitHub organizations, or any mix of them, and it
+Point Keelson at your Cloudflare accounts, your Vercel teams, your AWS and Alibaba Cloud accounts, your GitHub organizations, or any mix of them, and it
 scans them (one, or dozens across several companies), scores them, and tracks every finding until it's fixed:
 who owns it, when it's due, and which risks were accepted and until when. It runs on your machine or your
 server, and only ever reads. Use it for one platform or several: a company's accounts on every platform sit
@@ -43,7 +43,7 @@ organizations' settings and security alerts; next come the code itself, where th
 reach it, cloud activity such as CloudTrail and VPC flow logs, runtime security, and an AI penetration tester that
 works from all of it. See the [roadmap](#roadmap).
 
-> Keelson is an independent open-source project, not affiliated with or endorsed by Cloudflare, Vercel, AWS or GitHub.
+> Keelson is an independent open-source project, not affiliated with or endorsed by Cloudflare, Vercel, AWS, Alibaba Cloud or GitHub.
 > Its interface is built with [Kumo](https://github.com/cloudflare/kumo), Cloudflare's open-source design system.
 
 ## Quick start
@@ -57,7 +57,7 @@ docker logs keelson
 
 That's the whole install: Keelson ships as this one image, for Intel and Arm, and needs nothing but Docker. Open
 http://localhost:4317 and create the admin account with the setup code that `docker logs keelson` shows. Then
-choose a platform (Cloudflare, Vercel, AWS or GitHub), add its token, access key or GitHub App, pick the accounts,
+choose a platform (Cloudflare, Vercel, AWS, Alibaba Cloud or GitHub), add its token, access key, AccessKey or GitHub App, pick the accounts,
 teams or organizations it should scan, and the first scans run. `127.0.0.1:` keeps it reachable from this machine only; to run it for a team, see
 [below](#run-it-for-a-team-docker).
 
@@ -118,6 +118,27 @@ credentials in memory, and only the variable's name and the kind found are kept.
 
 Per-region settings are only judged where something runs, so an empty region doesn't fill the list.
 
+### Alibaba Cloud
+
+One account per AccessKey, read in every region ECS lists. Keelson asks for a custom RAM policy
+that names only the reads it makes, because Alibaba Cloud's ReadOnlyAccess policy also reads the files in your
+OSS buckets and the values of your secrets. Function Compute environment variables, instance start-up scripts and
+launch templates are scanned for credentials in memory, and only the variable's name and the kind found are kept.
+
+| Area | Examples |
+|---|---|
+| Identity & access | The main account with an AccessKey or without MFA, RAM users who sign in without MFA (rated with whether the account requires MFA at sign-in, and critical when they are administrators), RAM users allowed to create their own AccessKeys, one RAM user used both by a person and by programs, AccessKeys that are old or unused, a weak password policy, administrators holding AccessKeys, users, groups and roles whose policies let them make themselves administrators, roles any Alibaba Cloud account or any GitHub repository can assume, roles and bucket policies that let in an account outside the entity, custom policies that allow everything, internet-facing instances that run with administrator access |
+| Attack surface | Public OSS buckets (ACL or policy, after the bucket's and the account's Block Public Access; critical when anyone can write or ActionTrail delivers the audit log there, and pointing to private origins when Alibaba Cloud CDN serves one), security groups open to the internet on SSH, RDP, database ports or everything (rated by what they are attached to, with drop rules taken into account), CLBs and NLBs that pass SSH, RDP or a database port from anyone (which security groups don't show, since backends must admit the load balancer), internet-facing Linux instances that take SSH passwords, RDS, Tair (Redis) and MongoDB whitelists that admit every address (critical with a public endpoint), Tair and MongoDB that let clients in the VPC connect without a password, ACK clusters with a public API server, Function Compute HTTP triggers that need no authentication, custom images shared outside the entity, instances still in the classic network |
+| Secrets | Credentials in start-up scripts (instances and launch templates) and Function Compute environment variables, KMS keys without rotation or scheduled for deletion, KMS secrets that haven't changed in a year |
+| TLS & HTTPS | ALBs and CLBs that serve plain HTTP or accept TLS 1.0 and 1.1, CDN domains without HTTPS, databases that accept connections without TLS |
+| DNS & origins | Alibaba Cloud DNS records that point at an OSS bucket, load balancer or CDN domain the entity no longer has, or at an address Keelson saw leave the entity's accounts |
+| Platform & monitoring | Instances and launch templates whose metadata service answers without a token, disks not encrypted by default (one finding per region, with how many disks in use aren't), databases without TDE, ActionTrail not recording every region and event, VPCs without flow logs where workloads run, running instances without Security Center's agent |
+
+Compared with Prowler's Alibaba Cloud checks, Keelson leaves out the ones that test compliance wording or a
+purchase rather than exposure: Log Service alert rules for the CIS benchmark, Security Center's paid editions,
+PostgreSQL logging parameters, SQL audit retention, and versioning, logging and HTTPS-only policies on every
+OSS bucket.
+
 ### GitHub
 
 Every organization a GitHub App you register is installed on, and every repository it can read. Keelson reads
@@ -139,15 +160,15 @@ It doesn't read or run your code, and never reads a leaked secret's value.
 ### Sonar: external attack surface
 
 Sonar looks at an entity from outside, starting from what its connected accounts know: their domains, DNS records,
-the addresses AWS holds and the hostnames its load balancers route. It finds more hostnames under those domains in
+the addresses AWS and Alibaba Cloud hold and the hostnames their load balancers route. It finds more hostnames under those domains in
 certificate transparency logs (crt.sh), Shodan and [OWASP Amass](https://owasp.org/www-project-amass/) (when it is
 installed where Keelson runs, on the domains of every connected account), looks them up in public DNS, and asks Shodan
-what it has seen open on the entity's addresses. Each hostname is then followed into AWS: the load balancer its DNS
+what it has seen open on the entity's addresses. Each hostname is then followed into AWS or Alibaba Cloud: the load balancer its DNS
 names, internal or internet-facing, the listener rules that match it, and the targets behind them, down to whether a
 target's own public address and security groups let anyone skip the load balancer. It is passive: nothing is sent to
 your hosts. Turn it on with **Watch from the internet**, on the Attack surface page or an entity's card under
 Accounts; a Shodan API key is optional, and can be added later from the Internet account's menu. The **Attack
-surface** page lists every hostname with what serves it and its path into AWS, every load balancer with its rules and
+surface** page lists every hostname with what serves it and its path into the cloud, every load balancer with its rules and
 targets, every address with its open ports, known vulnerabilities and what its security groups let anyone reach, and
 every domain with where its DNS lives and who issues its certificates.
 
@@ -157,30 +178,37 @@ every domain with where its DNS lives and who issues its certificates.
 | TLS & HTTPS | A recent certificate for the entity's names from an authority its CAA records don't allow |
 | DNS | Domains whose DNS no connected account serves, so their records go unchecked, and public hostnames that point at an internal load balancer |
 
-Shodan's data is from its own scans, so these findings are marked **Likely**. When an AWS account in the entity holds
+Shodan's data is from its own scans, so these findings are marked **Likely**. When an AWS or Alibaba Cloud account in the entity holds
 the address, its security groups are read alongside: a port Shodan saw that no group lets anyone reach any more is
 rated one step lower, and says so. Addresses are only asked about when
-an AWS account in the entity holds them or the entity's DNS points straight at them: not a platform's shared
-addresses, and not an address AWS was seen to release, which belongs to someone else now.
+an AWS or Alibaba Cloud account in the entity holds them or the entity's DNS points straight at them: not a platform's shared
+addresses, and not an address a cloud was seen to release, which belongs to someone else now.
 
 ### Across providers
 
 Checks that compare a company's accounts on different platforms in the same entity:
 
-- **Origins that skip Cloudflare.** A hostname proxied through Cloudflare whose AWS load balancer or instance also
+- **Origins that skip Cloudflare.** A hostname proxied through Cloudflare whose AWS or Alibaba Cloud load balancer or instance also
   accepts web traffic from the whole internet, so an attacker who finds the origin skips your WAF, rate limits and
   bot rules. The same for a Vercel site behind Cloudflare whose *.vercel.app URLs are public.
 - **Dangling records.** A Cloudflare DNS record that points at a CloudFront distribution or S3 bucket that none of
-  the entity's AWS accounts has, a Cloudflare or Route 53 record that points at Vercel when no Vercel project
-  serves it, and a Cloudflare record that points at GitHub Pages when no Pages site in the entity's GitHub
-  organizations uses it. Whoever claims the missing resource serves your hostname.
-- **Released addresses.** Keelson remembers the public addresses each AWS account holds. When one disappears
-  between scans (a deleted instance, a released Elastic IP) and a Cloudflare or Route 53 record still points at it,
-  that record is reported: AWS hands the address to another customer. An AWS address nobody in the entity ever
+  the entity's AWS accounts has, a Cloudflare, Route 53 or Alibaba Cloud DNS record that points at Vercel when no
+  Vercel project serves it, a Cloudflare or Alibaba Cloud DNS record that points at GitHub Pages when no Pages site in
+  the entity's GitHub organizations uses it, and records on one cloud's DNS (or Cloudflare's) that point at an OSS
+  bucket, load balancer or CloudFront distribution the entity's accounts on the other cloud no longer have.
+  Whoever claims the missing resource serves your hostname.
+- **Released addresses.** Keelson remembers the public addresses each AWS and Alibaba Cloud account holds. When one
+  disappears between scans (a deleted instance, a released Elastic IP or EIP) and a Cloudflare, Route 53 or Alibaba
+  Cloud DNS record still points at it, that record is reported: the cloud hands the address to another customer. An AWS address nobody in the entity ever
   held is only noted, at low severity, since it is usually a vendor's server or an account that isn't connected.
-- **Who is inside the entity.** With several AWS accounts in an entity, a role one of them trusts from another is
-  internal; a role that trusts an account outside the entity is reported.
-- **From a GitHub push to AWS.** An AWS role that GitHub Actions can assume is compared with the entity's GitHub
+- **Who is inside the entity.** With several AWS or Alibaba Cloud accounts in an entity, a role one of them trusts
+  from another is internal; a role, bucket policy or shared image that trusts an account outside the entity is reported.
+- **Where a finding is.** Any finding that names an address or a hostname shows where it is in the entity: the DNS
+  record, the CNAME or load balancer it goes through, and the instance, load balancer, Vercel project or Pages site that
+  holds or serves it, with a link to it. A Cloudflare Security Center report of an exposed RDP server, for example, says
+  which instance holds the address and whether its security groups really let anyone reach port 3389, or that none of
+  the entity's AWS and Alibaba Cloud accounts holds it, or that one released it.
+- **From a GitHub push to the cloud.** An AWS or Alibaba Cloud role that GitHub Actions can assume is compared with the entity's GitHub
   organizations: a role that trusts an organization outside the entity is reported, and so is one that anyone who
   can push to the repository can assume, from any branch or from a default branch that takes changes without review.
 
@@ -213,7 +241,8 @@ finding has its own page with a history of each scan and triage change, to share
 - **Triaged.** Everything you've triaged in one place: where each finding stands now, a lane showing how its status moved over time (including when a scan stopped finding it), and a feed of every change.
 - **Zones** (Cloudflare). A settings grid for every zone: TLS, HSTS, DNSSEC, WAF, rate limits, bots and more.
 - **Projects** (Vercel). Every project: who can open its previews and *.vercel.app URLs, fork protection, the firewall and its managed rules, how many secrets are Sensitive.
-- **Regions** (AWS). Every enabled region: what runs there, whether GuardDuty is on, and its open findings, plus the account's global resources.
+- **Regions** (AWS). Every enabled region: what runs there, whether GuardDuty is on, and its open findings, plus each account's global resources.
+- **Resources** (Alibaba Cloud). Every instance, load balancer, bucket, database, function, cluster, security group, RAM user and role, in Alibaba Cloud's words: where it is, how the internet reaches it, and its open findings. Regions are a filter, named, and only the ones in use.
 - **Repositories** (GitHub). Every repository: how its default branch is protected, secret scanning and push protection, open security alerts, what it depends on, its Pages site and its open findings. Each repository's page lists its projects (every part of a monorepo, with its ecosystems, lock file and base images), every package with where it's used, its known vulnerabilities and license, and downloads the SBOM as CycloneDX, SPDX or Syft JSON.
 - **Dependencies** (GitHub). Every package across your repositories' SBOMs, filtered by vulnerability status (exploited, has a fix, no fix yet, malicious), severity, package manager, repository, license risk, direct or not, runtime or development, and the triage of its findings, with each package's repositories and findings a click away. A Vulnerabilities tab lists each CVE with the packages it affects, and a Licenses tab is Grant's report: every license with its risk class. Packages export as CSV.
 - **Activity** (Cloudflare). Seven days of audit log, filtered down to changes, with destructive actions highlighted.
@@ -224,7 +253,7 @@ finding has its own page with a history of each scan and triage change, to share
 
 ## Several accounts and companies
 
-Keelson watches as many Cloudflare accounts, Vercel teams, AWS accounts and GitHub organizations as you add, from one credential or
+Keelson watches as many Cloudflare accounts, Vercel teams, AWS and Alibaba Cloud accounts and GitHub organizations as you add, from one credential or
 many. Accounts are grouped into **entities**: a company, legal entity or team that owns them. An entity can hold
 accounts on every platform. You decide how they're shown, and can
 change it at any time on the **Accounts** page:
@@ -280,6 +309,17 @@ SecurityAudit reads configuration only: it can't change anything and can't read 
 buckets or databases. An access key belongs to one account, so each account needs its own; temporary keys
 (the ones starting with ASIA) aren't accepted because they expire within hours. The IAM actions each source
 needs are in [docs/permissions.md](docs/permissions.md#aws).
+
+### Alibaba Cloud
+
+In Add accounts, choose Alibaba Cloud and copy the policy it shows. In each account's RAM console, create a custom
+policy with it (**Permissions → Policies → Create Policy**, JSON editor), then a RAM user named keelson with
+**Using permanent AccessKey to access** and no console access, give it that policy, and paste its AccessKey ID and
+secret into Keelson. The policy names only the reads Keelson makes; Alibaba Cloud's ReadOnlyAccess policy would also
+let it read the files in your OSS buckets and the values of your KMS secrets. An AccessKey belongs to one account, so
+each account needs its own; STS tokens aren't accepted because they expire within hours, and the main account's own
+AccessKey is reported as a finding. The RAM actions each source needs are in
+[docs/permissions.md](docs/permissions.md#alibaba-cloud).
 
 ### GitHub
 
@@ -381,13 +421,13 @@ history, email domains and alert destinations.
 
 ## Security and privacy
 
-- **Read-only.** The scanner only sends GET requests to every provider, GraphQL analytics queries to Cloudflare (GraphQL is POST by design, and query-only), to GitHub one request for an installation token limited to read permissions, and to AWS services whose APIs only accept POST (CloudTrail, KMS, ECS and others) the read actions Keelson names: Describe, List and Get calls, refused by the client before they're sent if they aren't on its list. Tests run full scans of each provider and fail if any request is anything else. GitHub secret scanning alerts are read without the secret's value, and GitHub webhook URLs are stored without their paths. Vercel environment variables are listed without their values, drain and webhook URLs are stored without their paths or secrets, and AWS policy documents, secrets' values, environment variables and start-up scripts are never stored (Keelson never asks for a secret's value; environment variables and start-up scripts are scanned for credentials in memory, and only the kind found is kept).
+- **Read-only.** The scanner only sends GET requests to every provider, GraphQL analytics queries to Cloudflare (GraphQL is POST by design, and query-only), to GitHub one request for an installation token limited to read permissions, and to AWS services whose APIs only accept POST (CloudTrail, KMS, ECS and others) the read actions Keelson names: Describe, List and Get calls, refused by the client before they're sent if they aren't on its list. Alibaba Cloud's APIs accept GET for changes too, so there the client sends only the Describe, List and Get actions its RAM policy names, and refuses any other. Tests run full scans of each provider and fail if any request is anything else. GitHub secret scanning alerts are read without the secret's value, and GitHub webhook URLs are stored without their paths. Vercel environment variables are listed without their values, drain and webhook URLs are stored without their paths or secrets, and AWS and Alibaba Cloud policy documents, secrets' values, environment variables and start-up scripts are never stored (Keelson never asks for a secret's value; environment variables and start-up scripts are scanned for credentials in memory, and only the kind found is kept).
 - **Local.** Findings and tokens stay in the data directory. The database, tokens and backups are readable by your user only, and so is the directory when Keelson creates it.
   Tokens live in `credentials.json`, apart from the database, which only holds a reference to each one.
 - **Contained.**
   - Tokens are never sent to the browser or written to logs. Each account is only ever scanned with its own token.
   - Webhook URLs are write-only in the UI.
-  - Outbound traffic goes to `api.cloudflare.com`, `api.vercel.com`, `*.amazonaws.com` and `api.github.com` (for the platforms you connect; with AWS connected that includes AWS's public address-range file at `ip-ranges.amazonaws.com`, read without your access key), to `cloudflare-dns.com` (public DNS lookups), to `crt.sh` and Shodan for entities you add Sonar to (below), to any webhook you configure, and to `api.github.com` shortly after start and then daily, to see if there's a newer release (no identifying data; turn it off in Settings or with `KEELSON_UPDATE_CHECK=off`).
+  - Outbound traffic goes to `api.cloudflare.com`, `api.vercel.com`, `*.amazonaws.com`, `*.aliyuncs.com` and `api.github.com` (for the platforms you connect; with AWS connected that includes AWS's public address-range file at `ip-ranges.amazonaws.com`, read without your access key), to `cloudflare-dns.com` (public DNS lookups), to `crt.sh` and Shodan for entities you add Sonar to (below), to any webhook you configure, and to `api.github.com` shortly after start and then daily, to see if there's a newer release (no identifying data; turn it off in Settings or with `KEELSON_UPDATE_CHECK=off`).
   - **Sonar (when you add it to an entity):** the entity's domain names go to `crt.sh` (certificate transparency logs) and Shodan (`api.shodan.io` with a key, `internetdb.shodan.io` without), and its public addresses to Shodan, all with GET requests. Nothing is sent to your hosts. Shodan only accepts a key in the request's address; Keelson never logs it or puts it in an error. Of what Shodan returns, only ports, products, versions, vulnerability IDs and the entity's own hostnames are kept: banners, page content and other companies' hostnames on a shared address are dropped.
   - **Takeover check (on by default):** a `GET /` to each of your own hostnames that points at a cloud provider known for takeovers (S3, GitHub Pages, Heroku, Vercel, Azure…), over HTTPS and then HTTP if that fails, following at most two redirects on the same host. At most 100 hosts per scan, no cookies, the first 64 KB of the answer, and a User-Agent of `Keelson takeover check (+https://github.com/r4reetik/keelson)`. Turn it off under **Settings → Scans → Confirm subdomain takeovers** to keep every request inside Cloudflare's API.
   - There is no telemetry.
@@ -416,8 +456,8 @@ than roughly 20–30. Confirm with the record's owner before deleting anything.
 
 **Can Keelson change anything in my account?** No. The scanner only sends GET requests (and, to Cloudflare,
 GraphQL queries; to GitHub, one request for a read-only token; to AWS services that only accept POST, their
-named read actions), and tests that run full scans fail the build if it ever sends anything else. Give Cloudflare a read-only token, AWS a user with only the SecurityAudit policy and
-GitHub an App with read-only permissions; Vercel has no read-only tokens, so its token can do what its user's role
+named read actions; to Alibaba Cloud, only the read actions its policy names), and tests that run full scans fail the build if it ever sends anything else. Give Cloudflare a read-only token, AWS a user with only the SecurityAudit policy, Alibaba Cloud a RAM user with
+Keelson's read-only policy and GitHub an App with read-only permissions; Vercel has no read-only tokens, so its token can do what its user's role
 allows, and Keelson still only reads.
 
 **Does any data leave my machine?** Only requests to the APIs of the platforms you connect and public DNS, the optional takeover
@@ -445,6 +485,8 @@ Wrong findings are the most useful bug reports we get.
 
 Next, in the tracker you use today: alerts before accepted risks expire, comments on findings, ticketing
 integrations (Jira, Linear, GitHub Issues), saved views, and more platforms (Google Cloud, Google Workspace).
+On Alibaba Cloud, more services next: ApsaraDB for Redis and MongoDB whitelists, WAF and Cloud Firewall, and
+Resource Directory for many accounts at once.
 
 Further out, Keelson grows beyond configuration, keeping the same rules: self-hosted, and read-only unless you
 explicitly allow more:
@@ -471,7 +513,7 @@ and the test suite tells you what's missing.
 
 ```bash
 npm install
-npm run dev -- --mock   # mocked Cloudflare, Vercel, AWS and GitHub data, in three entities
+npm run dev -- --mock   # mocked Cloudflare, Vercel, AWS, Alibaba Cloud and GitHub data, in three entities
 npm run dev             # your real accounts, kept in ./.keelson
 npm run check           # typecheck, lint, tests
 ```

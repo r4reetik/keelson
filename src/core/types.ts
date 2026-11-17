@@ -259,6 +259,16 @@ export const NO_RELATED: Related = {
   route53Dns: null,
   awsLoadBalancers: null,
   awsExposure: null,
+  toAlibaba: null,
+  alibabaEndpoints: null,
+  alibabaAddresses: null,
+  alibabaReleased: null,
+  alibabaAccounts: null,
+  alibabaOrigins: null,
+  alidnsZones: null,
+  alidnsDns: null,
+  alibabaLoadBalancers: null,
+  alibabaExposure: null,
   unknown: [],
 };
 

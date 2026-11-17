@@ -45,14 +45,15 @@ src/
   providers/            the Provider interface (types.ts), the registry (index.ts), every provider's checks (catalog.ts)
     cloudflare.ts       Cloudflare as a provider: an adapter over core/
     vercel/             Vercel: client.ts (GET only), sources.ts, inventory.ts, checks/, views.ts, permissions.ts
-    aws/                AWS: client.ts (signed GET, and POST only for named read actions; sigv4.ts, xml.ts), sources.ts, inventory.ts, services.ts, policy.ts, checks/, views.ts, permissions.ts
+    aws/                AWS: client.ts (signed GET, and POST only for named read actions; sigv4.ts), sources.ts, inventory.ts, services.ts, policy.ts, checks/, views.ts, permissions.ts
+    alibaba/            Alibaba Cloud: client.ts (signed GET for named read actions only; sign.ts), sources.ts, inventory.ts, policy.ts, checks/, views.ts, permissions.ts
     github/             GitHub: client.ts (GitHub App JWT, one read-only token POST, then GET only), sources.ts, inventory.ts, checks/, views.ts, permissions.ts
   store/                SQLite: migrations (db.ts) and one repository per concern behind Repo
   server/               Hono app: routes/, guards in middleware.ts, validation, presentation
   shared/               code shared with the web app: API types, severities, triage, scope, filters; providers.ts says everything the app knows about each provider
 web/src/                React app: routes.tsx lists every page, shell.tsx holds shared state
-dev/mock/               mocked provider APIs (Cloudflare, Vercel, AWS, GitHub) and seeding, for tests and the mock dev server
-test/                   node:test suites; fixtures/ and checks/cases.ts for Cloudflare checks, vercel-cases.ts and aws-cases.ts for the others
+dev/mock/               mocked provider APIs (Cloudflare, Vercel, AWS, Alibaba Cloud, GitHub) and seeding, for tests and the mock dev server
+test/                   node:test suites; fixtures/ and checks/cases.ts for Cloudflare checks, <provider>-cases.ts for the others
 ```
 
 The decisions behind the project, and the rules that follow from them, are in [AGENTS.md](AGENTS.md). Coding agents read it (Claude Code through `CLAUDE.md`), and so should you. It tells an agent how to work on a contributor's fork, so you can hand your agent a task without repeating the rules. Keep your own preferences for the agent in your personal settings (for Claude Code, a git-ignored `CLAUDE.local.md`), not in AGENTS.md. With Claude Code, `.claude/settings.json` already lets `npm run check`, the tests, formatting and the mock dev server run without asking, and blocks the release commands and reading your local scan data. Put permissions of your own in `.claude/settings.local.json`, which git ignores.
@@ -76,20 +77,20 @@ Rules worth knowing:
 
 ### A check for another provider
 
-The same steps, in the provider's folder (`src/providers/vercel/`, `src/providers/aws/`, `src/providers/github/`): a module in `checks/` written with that folder's
+The same steps, in the provider's folder (`src/providers/vercel/`, `src/providers/aws/`, `src/providers/alibaba/`, `src/providers/github/`): a module in `checks/` written with that folder's
 `defineChecks`, a `docs` link to the provider's own documentation, `requires` from `sources.ts`, the read in `inventory.ts` (GET only,
 values dropped), a mock route in `dev/mock/<id>.ts`, and a failing case in `test/<id>-cases.ts`, which `test/<id>-checks.test.ts` checks
-the same way. An AWS finding's `zone` is its region, or "Global" for IAM, S3 settings, CloudFront and Route 53; a per-region setting is
+the same way. An AWS or Alibaba Cloud finding's `zone` is its region, or "Global" for IAM or RAM, object storage settings, the CDN and DNS; a per-region setting is
 only judged where something runs. A GitHub finding's `zone` is its repository, or none for a setting of the whole organization. Checks that compare providers in an entity get an
 `XP-` ID and read `related` (see [docs/architecture.md](docs/architecture.md#checks-that-span-providers)).
 
 ## Adding a provider
 
-Google Cloud, Google Workspace, Alibaba Cloud and others fit the same shape as Vercel, AWS and GitHub:
+Google Cloud, Google Workspace and others fit the same shape as Vercel, AWS, Alibaba Cloud and GitHub:
 
 1. Add it to `src/shared/providers.ts`: its ID, and a `PROVIDER_INFO` entry with its label, its words for an account, a resource and a credential, the credential's fields, its API host and the shape of its account IDs. The UI and the server word everything from that entry, so nothing else should compare a provider's name. Add its mark to `PROVIDER_GLYPH` (`web/src/components/ui.tsx`): the provider's monochrome logo as one 24×24 SVG path, such as the one Simple Icons publishes.
 2. Create `src/providers/<id>/` with a read-only client (GET or the provider's read-only equivalent, recording coverage), a sources registry, an inventory, check modules written with `checksFor<YourContext, YourSourceKey>()`, a catalog and an engine that ends in `summarize` from `src/core/engine.ts`.
-3. Implement `Provider` (`src/providers/types.ts`) in its `index.ts` and list it in `src/providers/index.ts`. The scanner, account routes, Add accounts dialog, provider switch, scores, exports and docs pick it up from there.
+3. Implement `Provider` (`src/providers/types.ts`) in its `index.ts` and list it in `src/providers/index.ts`. The scanner, account routes, Add accounts flow, provider switch, scores, exports and docs pick it up from there.
 4. Add a fictional mock API in `dev/mock/<id>.ts`, seed it in `dev/mock/server.ts`, and tests like `test/aws.test.ts` (only reads, no secret stored) and `test/aws-checks.test.ts` (every check fails on its case).
 5. Give its inventory page a route limited to the provider (`providers` in `web/src/routes.tsx`), write the steps for creating its credential in `web/src/components/connect.tsx` (`TOKEN_HELP`), and add its sources and a section to `scripts/docs.ts`. TypeScript points at each of these: they are records keyed by provider, so a new one doesn't compile until it has an entry.
 6. If it shares hostnames or resources with another provider, add a list to `ProviderLinks` (`src/shared/api.ts`) and an `XP-` check on each side that can judge it.

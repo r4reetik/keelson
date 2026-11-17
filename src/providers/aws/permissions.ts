@@ -1,11 +1,11 @@
 // Access key verification, the account the key belongs to, and the permission
-// probe for the Add accounts dialog. An access key belongs to one AWS account, so the
+// probe for the Add accounts flow. An access key belongs to one AWS account, so the
 // "accounts it can read" are that one.
 
 import { AwsClient, parseCredentials, type AwsError } from "./client.ts";
 import { AWS_SOURCES, AWS_SOURCE_KEYS, HOME_REGION } from "./sources.ts";
 import { AWS_CHECKS } from "./catalog.ts";
-import { find, text } from "./xml.ts";
+import { find, text } from "../../core/xml.ts";
 import type { PermissionProbe, TokenInfo } from "../../shared/api.ts";
 
 const BAD_FORMAT =

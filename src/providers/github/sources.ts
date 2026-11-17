@@ -1,6 +1,6 @@
 // Every GitHub data source a scan reads. Like the other providers' registries,
 // each has a coverage label, the App permission that grants it (as GitHub's App
-// settings name it), and an optional probe for the Add accounts dialog.
+// settings name it), and an optional probe for the Add accounts flow.
 
 import type { GithubClient } from "./client.ts";
 

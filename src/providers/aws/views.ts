@@ -3,10 +3,12 @@
 // origins other providers' checks compare against, and the domains the account owns.
 
 import { countBySeverity } from "../../shared/severity.ts";
-import type { AddressHistory, AwsExposureLink, AwsLoadBalancerLink, AwsOrigin, AwsTargetLink, ProviderLinks, RegionRow } from "../../shared/api.ts";
+import type { AwsExposureLink, AwsLoadBalancerLink, AwsOrigin, AwsTargetLink, ProviderLinks, RegionRow } from "../../shared/api.ts";
 import type { Result } from "../../core/types.ts";
 import { opens, opensWeb } from "./checks/define.ts";
 import { GLOBAL, type AwsInventory, type AwsRegion, type AwsSecurityGroup } from "./types.ts";
+
+export { addressHistory } from "../../core/addresses.ts";
 
 const counted = (pairs: [string, unknown[] | null | undefined][]): RegionRow["resources"] =>
   pairs.flatMap(([label, list]) => (list ? [{ label, count: list.length }] : []));
@@ -220,25 +222,6 @@ export function exposureLinks(inv: AwsInventory): AwsExposureLink[] | null {
       return [{ ip: i.publicIp, account, region: r.name, resource: resourceOf(r, i.kind, i.owner, i.id), open: merged ?? null }];
     }),
   );
-}
-
-const KEEP_RELEASED_DAYS = 180;
-const MAX_RELEASED = 2000;
-
-/**
- * Carries the account's address history one scan forward: an address held at the last complete scan and missing
- * now was released. A released address is forgotten when the account holds it again, or after six months. When
- * this scan couldn't read every region (`current` null) the history is kept as it was.
- */
-export function addressHistory(previous: AddressHistory | null | undefined, current: string[] | null, now: number): AddressHistory {
-  if (!current) return previous ?? { held: [], released: [] };
-  const have = new Set(current);
-  const cutoff = now - KEEP_RELEASED_DAYS * 86_400_000;
-  const released = (previous?.released ?? []).filter((r) => !have.has(r.ip) && Date.parse(r.at) >= cutoff);
-  const known = new Set(released.map((r) => r.ip));
-  const at = new Date(now).toISOString();
-  for (const ip of previous?.held ?? []) if (!have.has(ip) && !known.has(ip)) released.push({ ip, at });
-  return { held: current, released: released.slice(-MAX_RELEASED) };
 }
 
 /**

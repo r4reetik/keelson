@@ -446,6 +446,34 @@ export interface FindingDetail {
   events: FindingEvent[];
 }
 
+/**
+ * An address or hostname a finding names, looked up in the latest scans of the entity's other accounts: what holds
+ * or serves it, and the path there (a DNS record, a CNAME, a load balancer). When the finding is about a port (RDP,
+ * SSH, a database), whether the holder's security groups really let anyone reach it.
+ */
+export interface LocatedItem {
+  /** The address or hostname, as the finding names it. */
+  value: string;
+  kind: "address" | "hostname";
+  /**
+   * found: an account in the entity holds or serves it. released: one held it and let it go. outside: none of the
+   * entity's accounts that list their addresses holds it. unknown: nothing in the entity says either way.
+   */
+  status: "found" | "released" | "outside" | "unknown";
+  /** One line: "Alibaba Cloud: ECS instance web-1 (i-…) in Singapore". */
+  summary: string;
+  /** From the finding's value to what holds it, like an evidence chain. */
+  steps: { label: string; value: string; provider?: ProviderId; link?: string | null }[];
+  /** For a finding about a port: whether the holder lets anyone reach it, from its security groups or listeners. */
+  ports: { port: number; service: string; open: boolean | null; detail: string }[];
+}
+
+export interface LocatedResponse {
+  items: LocatedItem[];
+  /** The platforms whose accounts in the entity were searched. */
+  searched: ProviderId[];
+}
+
 export interface ZoneRow {
   name: string;
   account?: string;
@@ -628,6 +656,8 @@ export interface ReportData {
   zones: ZoneRow[] | null;
   projects: ProjectRow[] | null;
   regions: RegionRow[] | null;
+  /** Alibaba Cloud's resources. */
+  resources: ResourceRow[] | null;
   repos: RepoRow[] | null;
   valueCounts: ValueCounts | undefined;
   checks: Record<string, { evaluated: number; failed: number }>;
@@ -646,15 +676,17 @@ export interface ScanSnapshot {
   probes?: { takeover: { probed: number; unclaimed: number } | null };
   /** Vercel: projects. */
   projects?: ProjectRow[];
-  /** AWS: regions and the account's global resources. */
+  /** AWS: regions and the account's global resources. (Alibaba Cloud scans before Keelson listed its resources carry these too.) */
   regions?: RegionRow[];
+  /** Alibaba Cloud: every resource the checks read, and the regions that hold them. */
+  resources?: ResourcesView;
   /** GitHub: repositories. */
   repos?: RepoRow[];
   /** Internet (Sonar): the entity's domains, hostnames and addresses as seen from outside. */
   surface?: SurfaceView;
-  /** AWS: the public addresses the account held at its last complete scan, and the ones seen to leave it since. */
+  /** AWS and Alibaba Cloud: the public addresses the account held at its last complete scan, and the ones seen to leave it since. */
   addressHistory?: AddressHistory;
-  /** Domains the account owns, when no other part of the snapshot lists them (AWS: public hosted zones). */
+  /** Domains the account owns, when no other part of the snapshot lists them (AWS's public hosted zones, Alibaba Cloud DNS's domains). */
   ownedDomains?: string[];
   /** What other providers' accounts in the same entity need for checks that span providers. */
   links?: ProviderLinks;
@@ -709,11 +741,37 @@ export interface ProviderLinks {
   awsLoadBalancers?: AwsLoadBalancerLink[];
   /** Every public address an AWS account holds, with what owns it and what its security groups let anyone reach. */
   awsExposure?: AwsExposureLink[];
+  /** Cloudflare DNS records whose target is an Alibaba Cloud endpoint (an OSS bucket, a load balancer, a CDN domain). */
+  toAlibaba?: { host: string; zone: string; target: string; kind: AlibabaEndpointKind; name: string; proxied: boolean }[];
+  /** Endpoints an Alibaba Cloud account has: OSS buckets, ALB and NLB DNS names, CDN domains. */
+  alibabaEndpoints?: { kind: AlibabaEndpointKind; name: string }[];
+  /** Public IPv4 addresses an Alibaba Cloud account holds: EIPs, instances' public addresses and load balancers' addresses. */
+  alibabaAddresses?: string[];
+  /** Addresses Keelson saw leave an Alibaba Cloud account between scans, with when. A DNS record that still points at one is dangling. */
+  alibabaReleased?: { ip: string; at: string }[];
+  /** The Alibaba Cloud account's own ID (UID), so its siblings can tell a role trusted inside the entity from one trusted outside it. */
+  alibabaAccounts?: string[];
+  /**
+   * Who can reach each of an Alibaba Cloud account's web origins on ports 80 and 443, from their security groups, in the
+   * same shape as AWS's: a load balancer by its DNS name, or an instance or network interface by its public address.
+   */
+  alibabaOrigins?: AwsOrigin[];
+  /** Alibaba Cloud DNS's domains. */
+  alidnsZones?: string[];
+  /** Alibaba Cloud DNS's host records (A, AAAA, CNAME) that are enabled. */
+  alidnsDns?: DnsHostRecord[];
+  /** An Alibaba Cloud account's load balancers (ALB, NLB, CLB) with their listeners, routing and backend servers, in AWS's shape. */
+  alibabaLoadBalancers?: AwsLoadBalancerLink[];
+  /** Every public address an Alibaba Cloud account holds, with what owns it and what its security groups let anyone reach. */
+  alibabaExposure?: AwsExposureLink[];
 }
 
-/** An AWS load balancer as a hostname that names it reaches it. */
+/** An AWS load balancer as a hostname that names it reaches it. Alibaba Cloud publishes its ALBs, NLBs and CLBs in the same shape. */
 export interface AwsLoadBalancerLink {
+  /** The cloud it is in; absent: AWS. */
+  provider?: "aws" | "alibaba";
   name: string;
+  /** Its DNS name; a CLB, which has none, by its address. */
   dnsName: string;
   /** The AWS account's alias, or its ID without one. */
   account: string;
@@ -814,6 +872,9 @@ export interface AwsOrigin {
 /** The kinds of AWS endpoint a DNS record can point at by name. */
 export type AwsEndpointKind = "cloudfront" | "elb" | "s3";
 
+/** The kinds of Alibaba Cloud endpoint a DNS record can point at by name: an OSS bucket, an ALB or NLB load balancer, a CDN domain. */
+export type AlibabaEndpointKind = "oss" | "slb" | "cdn";
+
 /** Every list in ProviderLinks: the scanner merges each across an entity's accounts. */
 export const LINK_KEYS = [
   "toVercel",
@@ -834,6 +895,16 @@ export const LINK_KEYS = [
   "route53Dns",
   "awsLoadBalancers",
   "awsExposure",
+  "toAlibaba",
+  "alibabaEndpoints",
+  "alibabaAddresses",
+  "alibabaReleased",
+  "alibabaAccounts",
+  "alibabaOrigins",
+  "alidnsZones",
+  "alidnsDns",
+  "alibabaLoadBalancers",
+  "alibabaExposure",
 ] as const satisfies readonly (keyof ProviderLinks)[];
 export type LinkKey = (typeof LINK_KEYS)[number];
 
@@ -857,19 +928,31 @@ export const LINK_PROVIDER: Record<LinkKey, ProviderId> = {
   route53Dns: "aws",
   awsLoadBalancers: "aws",
   awsExposure: "aws",
+  toAlibaba: "cloudflare",
+  alibabaEndpoints: "alibaba",
+  alibabaAddresses: "alibaba",
+  alibabaReleased: "alibaba",
+  alibabaAccounts: "alibaba",
+  alibabaOrigins: "alibaba",
+  alidnsZones: "alibaba",
+  alidnsDns: "alibaba",
+  alibabaLoadBalancers: "alibaba",
+  alibabaExposure: "alibaba",
 };
 
-/** One region of an AWS account as the Regions page shows it, or the account's global resources. */
+/** One region of an AWS or Alibaba Cloud account as the Regions page shows it, or the account's global resources. */
 export interface RegionRow {
-  /** The region ("eu-west-1"), or "Global" for IAM, S3, CloudFront and Route 53. */
+  /** The region ("eu-west-1", "cn-hangzhou"), or "Global" for IAM or RAM, object storage, the CDN and DNS. */
   name: string;
   account?: string;
   accountId?: string;
+  /** The account's platform, added when the rows are served. */
+  provider?: ProviderId;
   /** What was found there, by kind: "Instances", "Buckets"… Kinds that couldn't be read are left out. */
   resources: { label: string; count: number }[];
-  /** Whether GuardDuty is on; null when it couldn't be read or doesn't apply (Global). */
+  /** Whether GuardDuty is on; null when it couldn't be read or doesn't apply (Global, or a platform without it). */
   guardDuty: boolean | null;
-  /** The access key was refused in this region, so nothing there was checked. */
+  /** The credential was refused in this region, so nothing there was checked. */
   skipped: boolean;
   findings: SeverityCounts;
 }
@@ -877,6 +960,56 @@ export interface RegionRow {
 export interface RegionsResponse {
   scan: ScanMeta | null;
   regions: RegionRow[] | null;
+  coverage: Coverage[];
+}
+
+/**
+ * One cloud resource, as the Resources page lists it (Alibaba Cloud): what it is in the cloud's own words, where it
+ * is, whether and how the internet reaches it, and its open findings. Only what the checks already read is shown.
+ */
+export interface ResourceRow {
+  /** The product's own name for it: "ECS instance", "CLB", "OSS bucket", "Tair (Redis)". */
+  kind: string;
+  /** What it is for, which groups kinds on the page. */
+  group: ResourceGroup;
+  id: string;
+  name: string;
+  /** Its region, or "Global" for RAM, OSS settings, CDN and DNS. A bucket has its region. */
+  region: string;
+  /** How the internet reaches it ("Public address 203.0.113.7", "Public endpoint, whitelist 0.0.0.0/0"), or null when it doesn't. */
+  exposure: string | null;
+  /** A few facts the checks read: "Linux", "MySQL 8.0", "Runs as role web", "No MFA". */
+  facts: string[];
+  link: string | null;
+  findings: SeverityCounts;
+  account?: string;
+  accountId?: string;
+}
+
+export type ResourceGroup = "Compute" | "Networking" | "Storage" | "Databases" | "Identity" | "Edge";
+export const RESOURCE_GROUPS: ResourceGroup[] = ["Compute", "Networking", "Storage", "Databases", "Identity", "Edge"];
+
+/** A region with something in it, with its name for people ("Singapore") when the cloud gives one. */
+export interface ResourceRegion {
+  name: string;
+  label: string | null;
+  resources: number;
+  account?: string;
+  accountId?: string;
+}
+
+export interface ResourcesView {
+  rows: ResourceRow[];
+  /** Regions that hold something; empty ones are counted in `emptyRegions`. */
+  regions: ResourceRegion[];
+  emptyRegions: number;
+  /** Regions that refused the credential, so nothing there was read. */
+  skippedRegions: string[];
+}
+
+export interface ResourcesResponse {
+  scan: ScanMeta | null;
+  resources: ResourcesView | null;
   coverage: Coverage[];
 }
 
@@ -1012,13 +1145,15 @@ export interface SurfaceRouteRow {
   targets: { label: string; port: number | null; health: string | null; publicIp: string | null; direct: boolean }[] | null;
 }
 
-/** One of the entity's AWS load balancers, with the hostnames that reach it and its routing. */
+/** One of the entity's AWS or Alibaba Cloud load balancers, with the hostnames that reach it and its routing. */
 export interface SurfaceLoadBalancerRow {
+  /** The cloud it is in; absent in views stored before Alibaba Cloud: AWS. */
+  provider?: "aws" | "alibaba";
   name: string;
   /** The entity's name: Sonar has one account per entity. */
   account?: string;
   accountId?: string;
-  /** The AWS account's alias, or its ID without one. */
+  /** The cloud account's alias, or its ID without one. */
   awsAccount: string;
   region: string;
   type: string;

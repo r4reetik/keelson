@@ -13,6 +13,7 @@ export const SECRET_IN_TEXT: [string, RegExp][] = [
   ["an npm auth token", new RegExp(String.raw`_authToken=${LITERAL}[^\s'"]{8,}`)],
   ["a GitHub token", /\b(gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})/],
   ["an AWS access key", /\bAKIA[0-9A-Z]{16}\b/],
+  ["an Alibaba Cloud AccessKey", /\bLTAI[A-Za-z0-9]{12,30}\b/],
   ["a Slack token", /\bxox[abprs]-[A-Za-z0-9-]{10,}/],
   ["a Stripe secret key", /\b[sr]k_live_[A-Za-z0-9]{16,}/],
   ["a password in a URL", new RegExp(String.raw`[a-z][a-z0-9+.-]*://[^/\s:@]+:${LITERAL}[^@\s/]{3,}@`, "i")],

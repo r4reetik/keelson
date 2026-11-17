@@ -1,6 +1,7 @@
 // Route 53 records that point at something the entity doesn't have: an AWS
 // endpoint (a CloudFront distribution, a load balancer, an S3 bucket), an AWS
-// address, or a Vercel address that no Vercel project in the entity serves.
+// address, a Vercel address that no Vercel project in the entity serves, or an
+// Alibaba Cloud resource or address its Alibaba Cloud accounts don't have.
 //
 // Not every such record can be taken over, and the findings say which: a bucket
 // name or a CloudFront alias can be claimed by someone else, an address that
@@ -9,7 +10,7 @@
 // address nobody here ever held is most likely someone else's server.
 
 import { defineChecks } from "./define.ts";
-import { awsEndpointOf, DANGLING, pointsAtVercel } from "../../../core/links.ts";
+import { ALIBABA_DANGLING, alibabaEndpointOf, awsEndpointOf, DANGLING, pointsAtVercel } from "../../../core/links.ts";
 import { ownAddresses, ownEndpoints } from "../views.ts";
 import { inPrefixes } from "../../../core/aws-ranges.ts";
 import { GLOBAL, type AwsRecord } from "../types.ts";
@@ -65,8 +66,22 @@ export default defineChecks(
       why: "The record sends visitors to Vercel, yet none of the entity's Vercel projects has this hostname. Whoever adds it to their own Vercel project first serves your traffic under your domain.",
       fix: "1. If the site moved or was retired, delete the record in Route 53. 2. If it should be live, add the hostname to the right Vercel project under Settings → Domains. 3. If it belongs to a Vercel team that isn't in Keelson, add that team to this entity, or mark the finding as a false positive.",
     },
+    "XP-021": {
+      spans: ["alibaba"],
+      category: "DNS",
+      severity: "high",
+      docs: "https://www.alibabacloud.com/help/en/oss/user-guide/map-custom-domain-names-5",
+      requires: ["route53"],
+      attackPath: true,
+      title: "Route 53 record points at an Alibaba Cloud resource or address the entity doesn't have",
+      why: "The record names an OSS bucket, load balancer or CDN domain that none of the entity's Alibaba Cloud accounts has, or an address Keelson saw leave them. Alibaba Cloud hands released addresses to other customers, and a deleted bucket's name can be registered again, so someone else may answer for your hostname.",
+      fix: "1. If the site moved or was retired, delete the record in Route 53. 2. If it should be live, recreate the resource or point the record at the current one. 3. If the resource belongs to an Alibaba Cloud account that isn't in Keelson, add that account to this entity.",
+    },
   },
   ({ inv, d, related }, report) => {
+    const aliHave = related.alibabaEndpoints ? new Set(related.alibabaEndpoints.map((e) => `${e.kind}:${e.name}`)) : null;
+    const aliHeld = related.alibabaAddresses ? new Set(related.alibabaAddresses) : null;
+    const aliGone = new Map((related.alibabaReleased ?? []).map((r) => [r.ip, r.at]));
     // Another AWS account in the entity that hasn't shared its list could be the owner: then nothing is judged.
     const own = related.unknown.includes("awsEndpoints") ? null : ownEndpoints(inv);
     const have = own ? new Set([...own, ...(related.awsEndpoints ?? [])].map((e) => `${e.kind}:${e.name}`)) : null;
@@ -133,6 +148,49 @@ export default defineChecks(
                 detail: found ? "" : `A ${ip}, an AWS address that isn't in this entity's AWS accounts`,
                 link,
               });
+          }
+
+        const ali = r.type === "CNAME" ? alibabaEndpointOf(r.targets[0] ?? "") : null;
+        if (ali && aliHave) {
+          const found = aliHave.has(`${ali.kind}:${ali.name}`);
+          const kind = ALIBABA_DANGLING[ali.kind];
+          report("XP-021", {
+            zone: GLOBAL,
+            resource: r.name,
+            pass: found,
+            severity: found ? undefined : kind.severity,
+            detail: found ? "" : `CNAME ${r.targets[0]}, ${kind.a} that isn't in this entity's Alibaba Cloud accounts. ${kind.risk}`,
+            confidence: found ? undefined : "likely",
+            evidence: found
+              ? null
+              : {
+                  chain: [
+                    { label: "Route 53", value: `${r.name} CNAME ${r.targets[0]} (zone ${z.name})` },
+                    { label: `${kind.what[0].toUpperCase()}${kind.what.slice(1)}s in this entity's Alibaba Cloud accounts`, value: `None is ${ali.name}` },
+                  ],
+                },
+            link,
+          });
+        }
+        if (aliHeld && r.type === "A" && !r.alias)
+          for (const ip of r.targets) {
+            const gone = aliGone.get(ip);
+            if (!aliHeld.has(ip) && !gone) continue;
+            report("XP-021", {
+              zone: GLOBAL,
+              resource: r.name,
+              pass: aliHeld.has(ip),
+              detail: aliHeld.has(ip) ? "" : `A ${ip}, which left this entity's Alibaba Cloud accounts on ${gone!.slice(0, 10)}`,
+              evidence: aliHeld.has(ip)
+                ? null
+                : {
+                    chain: [
+                      { label: "Route 53", value: `${r.name} A ${ip} (zone ${z.name})` },
+                      { label: "Last held", value: `Keelson saw ${ip} in the entity's Alibaba Cloud accounts until ${gone!.slice(0, 10)}` },
+                    ],
+                  },
+              link,
+            });
           }
 
         if (served && !r.alias && r.targets.some((t) => pointsAtVercel(r.type, t))) {

@@ -5,10 +5,10 @@
 // Everything the UI and the server say about a provider comes from PROVIDER_INFO,
 // so no screen has to branch on a provider's name.
 
-export const PROVIDERS = ["cloudflare", "vercel", "aws", "github", "internet"] as const;
+export const PROVIDERS = ["cloudflare", "vercel", "aws", "alibaba", "github", "internet"] as const;
 export type ProviderId = (typeof PROVIDERS)[number];
 
-/** One input of a provider's credential. Most providers have one; AWS has a key ID and a secret, a GitHub App its ID and private key. */
+/** One input of a provider's credential. Most providers have one; AWS and Alibaba Cloud have a key ID and a secret, a GitHub App its ID and private key. */
 export interface CredentialField {
   label: string;
   /** Hidden while typing. A key ID is shown, a secret isn't. */
@@ -18,9 +18,25 @@ export interface CredentialField {
   optional?: boolean;
 }
 
+/**
+ * How the Add accounts catalog groups platforms. A new provider picks one (and only rarely needs a new group), so
+ * the catalog grows without anyone laying it out by hand.
+ */
+export const PLATFORM_CATEGORIES = {
+  cloud: { label: "Cloud", description: "Identities, networks, storage, databases and workloads" },
+  edge: { label: "Edge and hosting", description: "DNS, CDN, WAF and where your sites are deployed" },
+  code: { label: "Code", description: "Repositories, their settings, alerts and dependencies" },
+  outside: { label: "From the internet", description: "What anyone can see of an entity from outside" },
+} as const;
+export type PlatformCategory = keyof typeof PLATFORM_CATEGORIES;
+
 export interface ProviderInfo {
   id: ProviderId;
   label: string;
+  /** Its group in the Add accounts catalog. */
+  category: PlatformCategory;
+  /** Other words people search the catalog with: products, former names, the company. */
+  keywords: string[];
   /** What the provider calls an account, singular and plural ("account", "team"). */
   account: string;
   accounts: string;
@@ -52,6 +68,8 @@ export interface ProviderInfo {
   idHint: string;
   /** IDs that are compared lowercase. */
   lowercaseIds: boolean;
+  /** The regional threat detection service whose state the Regions page shows ("GuardDuty"), when the platform has one Keelson reads. */
+  threatDetection?: string;
   /**
    * Keelson makes one account per entity instead of reading accounts from the credential (the internet as seen
    * from outside). Add accounts lists the entities to watch, each account stays in its entity, and it is scanned
@@ -65,6 +83,8 @@ export const CREDENTIAL_SEPARATOR = ":";
 export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
   cloudflare: {
     id: "cloudflare",
+    category: "edge",
+    keywords: ["workers", "zero trust", "waf", "dns", "cdn", "r2", "pages"],
     label: "Cloudflare",
     account: "account",
     accounts: "accounts",
@@ -85,6 +105,8 @@ export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
   },
   vercel: {
     id: "vercel",
+    category: "edge",
+    keywords: ["next.js", "nextjs", "hosting", "deployments", "firewall"],
     label: "Vercel",
     account: "team",
     accounts: "teams",
@@ -104,6 +126,8 @@ export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
   },
   aws: {
     id: "aws",
+    category: "cloud",
+    keywords: ["amazon", "amazon web services", "iam", "s3", "ec2", "route 53", "cloudfront"],
     label: "AWS",
     account: "account",
     accounts: "accounts",
@@ -116,6 +140,7 @@ export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
       { label: "Secret access key", secret: true },
     ],
     credentialKinds: { user: "IAM user key", account: "Root user key" },
+    threatDetection: "GuardDuty",
     dashboard: "console",
     readOnlyCredential: true,
     apiHost: "*.amazonaws.com",
@@ -125,8 +150,36 @@ export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
     idHint: "An AWS account ID is 12 digits.",
     lowercaseIds: false,
   },
+  alibaba: {
+    id: "alibaba",
+    category: "cloud",
+    keywords: ["aliyun", "alicloud", "ram", "oss", "ecs", "slb", "alb"],
+    label: "Alibaba Cloud",
+    account: "account",
+    accounts: "accounts",
+    resource: "region",
+    blurb: "RAM, OSS, security groups, ECS, databases, load balancers and Alibaba Cloud DNS",
+    covers: "RAM, OSS, security groups, ECS, databases, load balancers and Alibaba Cloud DNS",
+    credential: "AccessKey",
+    fields: [
+      { label: "AccessKey ID", secret: false, placeholder: "LTAI…" },
+      { label: "AccessKey secret", secret: true },
+    ],
+    credentialKinds: { user: "RAM user AccessKey", account: "Main account AccessKey" },
+    dashboard: "console",
+    // A RAM user given Keelson's read-only policy can only read configuration.
+    readOnlyCredential: true,
+    apiHost: "*.aliyuncs.com",
+    sites: ["alibabacloud.com", "aliyun.com", "aliyuncs.com"],
+    noAccounts: "Check that the AccessKey is enabled and belongs to a RAM user in the account you want to scan.",
+    needsToRead: "gets the permissions",
+    idHint: "An Alibaba Cloud account ID is 16 digits.",
+    lowercaseIds: false,
+  },
   github: {
     id: "github",
+    category: "code",
+    keywords: ["git", "repositories", "actions", "dependabot", "sbom", "dependencies"],
     label: "GitHub",
     account: "organization",
     accounts: "organizations",
@@ -150,6 +203,8 @@ export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
   },
   internet: {
     id: "internet",
+    category: "outside",
+    keywords: ["sonar", "shodan", "attack surface", "external", "certificate", "crt.sh", "amass"],
     label: "Internet",
     account: "entity",
     accounts: "entities",
@@ -173,11 +228,13 @@ export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
 
 export const isProvider = (v: unknown): v is ProviderId => typeof v === "string" && (PROVIDERS as readonly string[]).includes(v);
 
-/** Account IDs as each provider issues them: Cloudflare's are 32 hex characters, Vercel's are team or user IDs, AWS's are 12 digits, GitHub's are gh_ and the organization's number, and the internet's are ext_ and the entity's number. */
+/** Account IDs as each provider issues them: Cloudflare's are 32 hex characters, Vercel's are team or user IDs, AWS's are 12 digits, Alibaba Cloud's 16, GitHub's are gh_ and the organization's number, and the internet's are ext_ and the entity's number. */
 export const ACCOUNT_ID_PATTERN: Record<ProviderId, RegExp> = {
   cloudflare: /^[0-9a-f]{32}$/,
   vercel: /^(team_)?[A-Za-z0-9]{8,40}$/,
   aws: /^\d{12}$/,
+  // The account's UID (the main account's ID), as GetCallerIdentity and the console show it.
+  alibaba: /^\d{16}$/,
   // GitHub's organization IDs are plain numbers, which would pass for AWS's; the prefix keeps them apart.
   github: /^gh_\d{1,20}$/,
   // One per entity, named after it (accountIdForEntity).
@@ -189,7 +246,7 @@ export const accountIdForEntity = (entityId: number) => `ext_${entityId}`;
 export const entityOfAccountId = (id: string): number | null => (/^ext_(\d{1,9})$/.test(id) ? Number(id.slice(4)) : null);
 
 /** The provider an account ID can belong to, judged by its shape. The strictest shapes are tried first: 12 digits would also pass as a Vercel user ID. */
-const BY_STRICTEST_ID: ProviderId[] = ["cloudflare", "aws", "github", "internet", "vercel"];
+const BY_STRICTEST_ID: ProviderId[] = ["cloudflare", "aws", "alibaba", "github", "internet", "vercel"];
 export const providerForId = (id: string): ProviderId | null => BY_STRICTEST_ID.find((p) => ACCOUNT_ID_PATTERN[p].test(id)) ?? null;
 
 /** Providers that are platforms with accounts of their own, not the per-entity view from outside (Sonar). */
@@ -213,6 +270,15 @@ export function zoneWord(providers: readonly string[]): string {
 
 /** The generic word for where in an account a finding is: a zone, a project or a region. */
 export const LOCATION = "location";
+
+/** Whether a platform matches what someone typed in the catalog's search: its name, words, category or what it checks. */
+export function matchesProvider(p: ProviderId, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const info = PROVIDER_INFO[p];
+  const text = [info.label, info.blurb, info.covers, PLATFORM_CATEGORIES[info.category].label, ...info.keywords].join(" ").toLowerCase();
+  return q.split(/\s+/).every((word) => text.includes(word));
+}
 
 /** The provider whose dashboard or docs a link goes to, by its address. */
 export function providerOfUrl(url: string): ProviderId | null {

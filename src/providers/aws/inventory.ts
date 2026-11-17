@@ -12,7 +12,7 @@
 import { gunzipSync } from "node:zlib";
 import { AwsError, type AwsClient, type Json } from "./client.ts";
 import { AWS_SOURCES, AWS_SOURCE_KEYS, HOME_REGION, type AwsSourceKey } from "./sources.ts";
-import { at, bool, find, items, text, time, type XmlNode } from "./xml.ts";
+import { at, bool, find, items, text, time, type XmlNode } from "../../core/xml.ts";
 import type {
   AwsAdmin,
   AwsBucket,

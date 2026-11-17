@@ -260,6 +260,7 @@ export const AWS_CASES: Record<AwsCheckId, () => AwsInventory> = {
   "ADN-002": () => ({ ...withRecord("old-vm.example.com", "A", "198.51.100.77"), released: [{ ip: "198.51.100.77", at: "2026-05-20T00:00:00.000Z" }] }),
   "ADN-003": () => withRecord("partner.example.com", "A", "198.51.100.77"),
   "XP-005": () => withRecord("docs.example.com", "CNAME", "cname.vercel-dns.com"),
+  "XP-021": () => withRecord("files.example.com", "CNAME", "old-bucket.oss-cn-hangzhou.aliyuncs.com"),
   // The fixture's load balancer uses a group that lets everyone reach 443; a Cloudflare-proxied hostname points at it.
   "XP-006": () => awsInventory(),
   "AID-012": () => withGithubRole([]),
@@ -352,6 +353,7 @@ const GITHUB_ENTITY = {
 export const AWS_CASE_OPTS: Partial<Record<AwsCheckId, Partial<EngineOptions>>> = {
   "XP-010": { related: GITHUB_ENTITY },
   "XP-011": { related: GITHUB_ENTITY },
+  "XP-021": { related: { alibabaEndpoints: [{ kind: "oss", name: "current-bucket" }] } },
   "XP-005": { related: { vercelDomains: [{ host: "app.example.com", project: "web", projectId: "prj_1", protectsDeploymentUrls: true }] } },
   "XP-006": { related: { toAws: [{ host: "shop.example.com", zone: "example.com", target: LB_DNS, kind: "elb", name: LB_DNS, proxied: true }] } },
 };
