@@ -19,6 +19,7 @@ import { useScopedApi, useShell } from "../shell.tsx";
 import {
   clampPage,
   dateOnly,
+  downloadFile,
   filterFindings,
   filtersFromParams,
   num,
@@ -29,6 +30,7 @@ import {
   useLocation,
   withScope,
   FILTER_PARAMS,
+  SEVERITY_LABEL,
   SEVERITY_WEIGHT,
   STATUS_VIEWS,
   STATUS_VIEW_LABEL,
@@ -41,7 +43,8 @@ import {
   zoneWord,
 } from "../lib.ts";
 import { AccountName, ConfidenceBadge, ListCard, Page, PageState, PlatformMark, ReopenedBadge, SeverityBadge, StatusBadge, Tag } from "../components/ui.tsx";
-import { BulkTriageDialog, FindingDialog } from "../components/triage.tsx";
+import { BulkTriageDialog, FindingDialog, permalink } from "../components/triage.tsx";
+import { CopyMenu } from "../components/selection.tsx";
 import { isSettled, effectiveStatus } from "../../../src/shared/triage.ts";
 import { groupBy } from "../../../src/shared/collections.ts";
 
@@ -145,14 +148,7 @@ export function FindingsPage() {
   /** Downloads an export; an error shows as a toast instead of replacing the page with the server's answer. */
   const download = async (url: string) => {
     try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error || `HTTP ${res.status}`);
-      const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") || "")?.[1] || "findings";
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(await res.blob());
-      a.download = name;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      await downloadFile(url, "findings");
     } catch (e) {
       toasts.add({ title: "Couldn't export", description: (e as Error).message, variant: "error" });
     }
@@ -274,6 +270,26 @@ export function FindingsPage() {
             </DropdownMenu.Item>
           </DropdownMenu.Content>
         </DropdownMenu>
+        <CopyMenu
+          items={[
+            { label: "Resources", run: () => ({ lines: selectedFindings.map((f) => f.resource), what: ["resource", "resources"] }) },
+            {
+              label: zoneLabel === "Location" ? "Locations" : `${zoneLabel}s`,
+              run: () => ({ lines: selectedFindings.map((f) => f.zone ?? ""), what: ["location", "locations"] }),
+            },
+            { label: "Links to the findings", run: () => ({ lines: selectedFindings.map((f) => permalink(f.fingerprint)), what: ["link", "links"] }) },
+            {
+              label: "Summary for a ticket",
+              run: () => ({
+                lines: selectedFindings.map(
+                  (f) =>
+                    `${SEVERITY_LABEL[f.severity]}: ${f.title} · ${f.zone ? `${f.zone} · ` : ""}${f.resource}${multi ? ` · ${f.account}` : ""} · ${permalink(f.fingerprint)}`,
+                ),
+                what: ["finding", "findings"],
+              }),
+            },
+          ]}
+        />
         <Button variant="ghost" onClick={() => setSelected(new Set())}>
           Clear selection
         </Button>

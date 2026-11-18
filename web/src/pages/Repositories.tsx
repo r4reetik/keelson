@@ -1,12 +1,14 @@
 // GitHub repositories: how each default branch is protected, whether secret
 // scanning and push protection are on, open security alerts, the Pages site, and
-// open findings. The GitHub counterpart of Zones, Projects and Regions.
+// open findings. The GitHub counterpart of Zones, Projects and Regions. Filter by
+// language or visibility, and pick repositories to copy or download them.
 
-import { Badge, Banner, Input, Switch, Table, Link, Tooltip } from "@cloudflare/kumo";
+import { Badge, Banner, Input, Select, Switch, Table, Link, Tooltip } from "@cloudflare/kumo";
 import { FireIcon, WarningIcon } from "@phosphor-icons/react";
 import { useScopedApi, useShell } from "../shell.tsx";
 import { num, plural, SCORED_SEVERITIES, setParams, totalScored, useLocation, type RepoRow, type ReposResponse } from "../lib.ts";
 import { Flag, ListCard, NoRows, Page, PageState, SeverityBadge, unreadableText } from "../components/ui.tsx";
+import { CopyMenu, DownloadCsvButton, SelectPage, SelectRow, SelectionBar, downloadCsv, useSelection } from "../components/selection.tsx";
 
 const TITLE = "Repositories";
 const DESCRIPTION =
@@ -19,10 +21,18 @@ const ALERTS: [keyof RepoRow["alerts"], string][] = [
   ["codeScanning", "Code scanning"],
 ];
 
+const ALL = "all";
+const VISIBILITY = { public: "Public", private: "Private", internal: "Internal", archived: "Archived" };
+const keyOf = (r: RepoRow) => `${r.accountId ?? ""}/${r.name}`;
+/** "owner/repo" on GitHub, or the bare name when the scan didn't record the organization's login. */
+const fullName = (r: RepoRow) => (r.owner ? `${r.owner}/${r.name}` : r.name);
+const languagesOf = (r: RepoRow) => r.dependencies?.languages.map((l) => l.name) ?? [];
+
 export function RepositoriesPage() {
   const { multi } = useShell();
   const { params } = useLocation();
   const { data, error, loading, reload } = useScopedApi<ReposResponse>("/api/repos");
+  const selection = useSelection(["q", "issues", "language", "visibility"].map((k) => params.get(k)));
   if (error || !data?.scan || !data.repos) {
     return (
       <PageState
@@ -38,9 +48,23 @@ export function RepositoriesPage() {
   }
   const q = (params.get("q") || "").toLowerCase();
   const issuesOnly = params.get("issues") === "1";
+  const language = params.get("language");
+  const visibility = params.get("visibility");
+  // Languages by how many repositories have them, from GitHub's own count of each repository's code.
+  const languageCounts = new Map<string, number>();
+  for (const r of data.repos) for (const l of languagesOf(r)) languageCounts.set(l, (languageCounts.get(l) ?? 0) + 1);
+  const languages = Object.fromEntries([...languageCounts].sort((a, b) => b[1] - a[1]).map(([l, n]) => [l, `${l} (${num(n)})`]));
   const repos = data.repos
-    .filter((r) => (!q || `${r.name} ${r.account || ""}`.toLowerCase().includes(q)) && (!issuesOnly || totalScored(r.findings) > 0))
+    .filter(
+      (r) =>
+        (!q || `${r.name} ${r.account || ""} ${languagesOf(r).join(" ")}`.toLowerCase().includes(q)) &&
+        (!issuesOnly || totalScored(r.findings) > 0) &&
+        (!language || languagesOf(r).includes(language)) &&
+        (!visibility || (visibility === "archived" ? r.archived : r.visibility === visibility && !r.archived)),
+    )
     .sort((a, b) => Number(a.archived) - Number(b.archived) || totalScored(b.findings) - totalScored(a.findings) || a.name.localeCompare(b.name));
+
+  const picked = repos.filter((r) => selection.has(keyOf(r)));
 
   // Dependencies need the App's Contents permission and Anchore's tools: say which is missing, once, instead of in every row.
   const sbomGaps = data.coverage.filter((c) => !c.ok && ["manifests", "syft", "grype", "grant"].includes(c.key ?? ""));
@@ -75,23 +99,96 @@ export function RepositoriesPage() {
       )}
       <ListCard
         toolbar={
-          <>
-            <Input
-              className="w-full min-w-48 sm:w-72"
-              aria-label="Search repositories"
-              placeholder="Search repositories"
-              value={params.get("q") || ""}
-              onChange={(e) => setParams({ q: e.target.value || null })}
-            />
-            <span className="inline-flex items-center gap-2 text-sm text-kumo-subtle">
-              <Switch
-                aria-label="Only repositories with open findings"
-                checked={issuesOnly}
-                onCheckedChange={(v: boolean) => setParams({ issues: v ? "1" : null })}
+          selection.keys.size > 0 ? (
+            <SelectionBar selection={selection} noun={["repository", "repositories"]} total={repos.length} pageKeys={repos.map(keyOf)}>
+              <CopyMenu
+                items={[
+                  { label: "Repositories (owner/repo)", run: () => ({ lines: picked.map(fullName), what: ["repository", "repositories"] }) },
+                  {
+                    label: "Repository links",
+                    run: () => ({
+                      lines: picked.map((r) => (r.owner ? `https://github.com/${r.owner}/${r.name}` : r.name)),
+                      what: ["repository link", "repository links"],
+                    }),
+                  },
+                ]}
               />
-              <span aria-hidden>Only repositories with open findings</span>
-            </span>
-          </>
+              <DownloadCsvButton
+                onClick={() =>
+                  downloadCsv("keelson-repositories", [
+                    [
+                      "repository",
+                      "account",
+                      "visibility",
+                      "archived",
+                      "default branch",
+                      "protection",
+                      "secret scanning",
+                      "push protection",
+                      "languages",
+                      "packages",
+                      "vulnerable packages",
+                      "exploited",
+                      "critical findings",
+                      "high findings",
+                      "medium findings",
+                      "low findings",
+                    ],
+                    ...picked.map((r) => [
+                      fullName(r),
+                      r.account ?? "",
+                      r.visibility,
+                      r.archived,
+                      r.defaultBranch,
+                      r.protection ?? "",
+                      r.secretScanning ?? "",
+                      r.pushProtection ?? "",
+                      languagesOf(r).join(" "),
+                      r.dependencies?.packages ?? "",
+                      r.dependencies?.vulnerable ?? "",
+                      r.dependencies?.exploited ?? "",
+                      r.findings.critical,
+                      r.findings.high,
+                      r.findings.medium,
+                      r.findings.low,
+                    ]),
+                  ])
+                }
+              />
+            </SelectionBar>
+          ) : (
+            <>
+              <Input
+                className="w-full min-w-48 sm:w-72"
+                aria-label="Search repositories"
+                placeholder="Repository or language"
+                value={params.get("q") || ""}
+                onChange={(e) => setParams({ q: e.target.value || null })}
+              />
+              <Select
+                aria-label="Language"
+                className="min-w-36 flex-1 sm:w-52 sm:flex-none"
+                value={language ?? ALL}
+                onValueChange={(v) => setParams({ language: v === ALL ? null : String(v) })}
+                items={{ [ALL]: "Every language", ...languages }}
+              />
+              <Select
+                aria-label="Visibility"
+                className="min-w-36 flex-1 sm:w-40 sm:flex-none"
+                value={visibility ?? ALL}
+                onValueChange={(v) => setParams({ visibility: v === ALL ? null : String(v) })}
+                items={{ [ALL]: "Any visibility", ...VISIBILITY }}
+              />
+              <span className="inline-flex items-center gap-2 text-sm text-kumo-subtle">
+                <Switch
+                  aria-label="Only repositories with open findings"
+                  checked={issuesOnly}
+                  onCheckedChange={(v: boolean) => setParams({ issues: v ? "1" : null })}
+                />
+                <span aria-hidden>Only repositories with open findings</span>
+              </span>
+            </>
+          )
         }
         footer={
           <span>
@@ -108,6 +205,9 @@ export function RepositoriesPage() {
           <Table layout="auto">
             <Table.Header variant="compact">
               <Table.Row>
+                <Table.Head className="w-10">
+                  <SelectPage selection={selection} keys={repos.map(keyOf)} label="Select every repository shown" />
+                </Table.Head>
                 <Table.Head sticky="left">Repository</Table.Head>
                 <Table.Head className="whitespace-nowrap">Default branch</Table.Head>
                 <Table.Head className="whitespace-nowrap">Secret scanning</Table.Head>
@@ -126,6 +226,9 @@ export function RepositoriesPage() {
                 const alerts = ALERTS.filter(([k]) => r.alerts[k]);
                 return (
                   <Table.Row key={`${r.accountId}/${r.name}`}>
+                    <Table.Cell>
+                      <SelectRow selection={selection} id={keyOf(r)} label={`Select ${r.name}`} />
+                    </Table.Cell>
                     <Table.Cell sticky="left" className="whitespace-nowrap">
                       <span className="inline-flex items-center gap-2">
                         <Link variant="plain" href={page ?? href}>

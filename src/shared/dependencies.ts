@@ -188,6 +188,58 @@ export interface LicenseEvidence {
   repositoryLicense: string | null;
 }
 
+/** The language each ecosystem's packages are written for, so packages can be found by language as well as by package manager. */
+const LANGUAGE_OF: Record<string, string> = {
+  npm: "JavaScript and TypeScript",
+  PyPI: "Python",
+  Go: "Go",
+  Maven: "Java and Kotlin",
+  NuGet: "C# and .NET",
+  RubyGems: "Ruby",
+  "crates.io": "Rust",
+  Packagist: "PHP",
+  PEAR: "PHP",
+  Swift: "Swift and Objective-C",
+  CocoaPods: "Swift and Objective-C",
+  pub: "Dart",
+  Hex: "Elixir and Erlang",
+  Erlang: "Elixir and Erlang",
+  Hackage: "Haskell",
+  Conan: "C and C++",
+  vcpkg: "C and C++",
+  Terraform: "Terraform",
+  "GitHub Actions": "GitHub Actions",
+  opam: "OCaml",
+  LuaRocks: "Lua",
+  "SWI-Prolog": "Prolog",
+};
+
+/** The language of an ecosystem's packages; an ecosystem Keelson doesn't know is its own language. */
+export const languageOf = (ecosystem: string): string => LANGUAGE_OF[ecosystem] ?? ecosystem;
+
+/** A repository affected by the packages, vulnerabilities or licenses picked on the Dependencies page. */
+export interface AffectedRepo {
+  accountId: string;
+  account: string;
+  repo: string;
+  /** "owner/repo" on GitHub, when the organization's login is known. */
+  fullName: string;
+  url: string | null;
+  /** The picked packages it uses, with the version that fixes them. */
+  packages: { name: string; version: string; ecosystem: string; upgrade: string | null }[];
+}
+
+/** GET /api/sbom/affected: the repositories behind a selection, across every page of the list. */
+export interface AffectedResponse {
+  repos: AffectedRepo[];
+  /** Packages (at each version) the selection covers. */
+  packages: number;
+  /** The picked rows as they'd be copied: "name@version", advisory IDs, or license expressions. */
+  names: string[];
+  /** CVE IDs among the picked vulnerabilities (the vulnerabilities tab only). */
+  cves: string[];
+}
+
 /** What the Dependencies page can filter packages by. */
 export const PACKAGE_STATUSES = {
   vulnerable: "Vulnerable",
@@ -289,6 +341,8 @@ export interface SbomResponse {
     /** Unique vulnerabilities by severity. */
     vulnerabilities: { critical: number; high: number; medium: number; low: number; unknown: number };
     ecosystems: { name: string; packages: number }[];
+    /** Packages by the language they're written for (languageOf), for the language filter. */
+    languages: { name: string; packages: number }[];
     licenseRisks: Record<LicenseRiskFilter, number>;
     /** Repositories with an SBOM, for the repository filter. */
     repoList: { accountId: string; account: string; repo: string }[];

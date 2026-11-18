@@ -249,7 +249,8 @@ export function resources(scans: AccountScan[]): ResourcesView | null {
 
 export function repos(scans: AccountScan[]): RepoRow[] | null {
   if (!scans.some((s) => s.scan.snap.repos)) return null;
-  return scans.flatMap(({ account, scan }) => tag(scan.snap.repos, account));
+  // The organization's login makes each repository's GitHub name ("owner/repo"), for copying and links.
+  return scans.flatMap(({ account, scan }) => tag(scan.snap.repos, account).map((r) => ({ ...r, owner: scan.snap.links?.githubOrgs?.[0] ?? null })));
 }
 
 /** Sonar's outside view, every row tagged with its account and named by its entity: there is one such account per entity. */

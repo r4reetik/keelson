@@ -74,6 +74,11 @@ Rules worth knowing:
 4. If it needs data Keelson doesn't collect yet, add a source to `sources.ts`, the read to `inventory.ts` (GET only), the field to `types.ts`, a mock route in `dev/mock/cloudflare.ts`, and a well-configured default in `test/fixtures/inventory.ts`.
 5. Add a failing case to `test/checks/cases.ts`. It's typed by check ID, so it won't compile until you do. `test/contract.test.ts` checks that the case fails, that the baseline fixture passes, and that the metadata is complete.
 6. Run `npm run docs` to regenerate `docs/checks.md` and `docs/permissions.md`. A test fails if you forget.
+7. List its ID under the security topics it gives evidence for in `src/compliance/topics.ts` (or in `NO_TOPIC` if it gives none), so the compliance checklists pick it up. `test/compliance.test.ts` fails if you forget.
+
+### A compliance framework
+
+A framework is a file in `src/compliance/` listing its controls in the standard's order, each naming the topics in `topics.ts` (and, where a topic is too broad, single checks) that give evidence for it. A control Keelson can't check has neither, and a `note` saying what it's about; the page lists it as out of scope. Add its ID to `FRAMEWORK_IDS` in `src/shared/compliance.ts` and the framework to `FRAMEWORKS` in `src/compliance/index.ts`; the page, API and export pick it up. Use the standard's control numbers and short titles, and write every description in your own words: the standards' text is copyrighted.
 
 ### A check for another provider
 

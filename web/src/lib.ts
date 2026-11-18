@@ -10,6 +10,7 @@ export * from "../../src/shared/github.ts";
 export * from "../../src/shared/alibaba.ts";
 export * from "../../src/shared/dependencies.ts";
 export * from "../../src/shared/roles.ts";
+export * from "../../src/shared/compliance.ts";
 export * from "./lib/api.ts";
 export * from "./lib/router.ts";
 export * from "./lib/scope.ts";

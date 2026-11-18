@@ -21,6 +21,7 @@ import {
   IdentificationCardIcon,
   ListChecksIcon,
   MapPinIcon,
+  SealCheckIcon,
   ShieldWarningIcon,
   StackIcon,
   InfoIcon,
@@ -405,11 +406,16 @@ export function Terms() {
     [MapPinIcon, "Location", `Where in an account something is: a ${each((p) => `${PROVIDER_INFO[p].label} ${PROVIDER_INFO[p].resource}`)}.`],
     [ListChecksIcon, "Check", "A rule Keelson tests on every resource it applies to. A check that compares platforms shows both icons, joined by arrows."],
     [ShieldWarningIcon, "Finding", "One resource failing one check. Findings are what you triage: assign, fix, or accept."],
+    [
+      SealCheckIcon,
+      "Control",
+      "One requirement of a compliance framework, such as ISO 27001 or PCI DSS. Keelson indicates whether it's met from the checks behind it.",
+    ],
   ];
   return (
     <Card
       title="How things are grouped"
-      description="An entity holds accounts; an account is on one platform and has locations; checks run on what is there, and each failure is a finding."
+      description="An entity holds accounts; an account is on one platform and has locations; checks run on what is there, each failure is a finding, and checks indicate how controls stand."
     >
       <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
         {terms.map(([Icon, term, text]) => (

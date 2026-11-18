@@ -51,3 +51,18 @@ test("the screen for an unreachable server is built from Kumo's parts", () => {
   const screen = app.slice(app.indexOf("function Unreachable("), app.indexOf("/** Status checks that fail"));
   for (const part of ["<LayerCard", "<Empty", "<Button", "<Wordmark"]) assert.ok(screen.includes(part), `uses ${part}`);
 });
+
+test("copying goes through copyText, which still works on a team server over plain HTTP", () => {
+  // Browsers offer navigator.clipboard only on HTTPS and localhost; copyText falls back to a text field elsewhere.
+  const direct = sources(WEB).filter((file) => !file.endsWith("selection.tsx") && readFileSync(file, "utf8").includes("navigator.clipboard"));
+  assert.deepEqual(direct, [], "use copyText or CopyMenu from web/src/components/selection.tsx");
+});
+
+test("lists that offer row checkboxes act on the selection with the shared selection bar", () => {
+  // Findings predates the shared bar and keeps its own, with bulk triage; every other list uses SelectionBar.
+  const own = sources(join(WEB, "pages")).filter((file) => {
+    const text = readFileSync(file, "utf8");
+    return /<Checkbox[\s>]/.test(text) && !text.includes("SelectionBar") && !file.endsWith("Findings.tsx") && !file.endsWith("Users.tsx");
+  });
+  assert.deepEqual(own, [], "pick rows with SelectRow and SelectPage, and act on them in SelectionBar");
+});

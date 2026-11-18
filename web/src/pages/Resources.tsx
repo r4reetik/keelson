@@ -10,6 +10,10 @@ import { GlobeIcon } from "@phosphor-icons/react";
 import { useScopedApi, useShell } from "../shell.tsx";
 import { num, plural, RESOURCE_GROUPS, SCORED_SEVERITIES, setParams, totalScored, useLocation, type ResourceRow, type ResourcesResponse } from "../lib.ts";
 import { ListCard, NoRows, Page, PageState, SeverityBadge, unreadableText } from "../components/ui.tsx";
+import { CopyMenu, DownloadCsvButton, downloadCsv } from "../components/selection.tsx";
+
+/** IPv4 addresses in an exposure line ("Public address 203.0.113.7"). */
+const IPV4 = /\b\d{1,3}(?:\.\d{1,3}){3}\b/g;
 
 const TITLE = "Resources";
 const DESCRIPTION =
@@ -134,6 +138,38 @@ export function ResourcesPage() {
               <Switch aria-label="Only resources with open findings" checked={issuesOnly} onCheckedChange={(v: boolean) => pick("issues", v ? "1" : null)} />
               <span aria-hidden>With open findings</span>
             </span>
+            <CopyMenu
+              label="Copy shown"
+              items={[
+                { label: "Resource IDs", run: () => ({ lines: rows.map((r) => r.id), what: ["resource ID", "resource IDs"] }) },
+                { label: "Names", run: () => ({ lines: rows.map((r) => r.name), what: ["name", "names"] }) },
+                {
+                  label: "Public addresses",
+                  run: () => ({ lines: rows.flatMap((r) => r.exposure?.match(IPV4) ?? []), what: ["public address", "public addresses"] }),
+                },
+              ]}
+            />
+            <DownloadCsvButton
+              label="Download shown"
+              onClick={() =>
+                downloadCsv("keelson-resources", [
+                  ["kind", "id", "name", "region", "account", "reachable from the internet", "facts", "critical", "high", "medium", "low"],
+                  ...rows.map((r) => [
+                    r.kind,
+                    r.id,
+                    r.name,
+                    r.region,
+                    r.account ?? "",
+                    r.exposure ?? "",
+                    r.facts.join("; "),
+                    r.findings.critical,
+                    r.findings.high,
+                    r.findings.medium,
+                    r.findings.low,
+                  ]),
+                ])
+              }
+            />
           </>
         }
         footer={

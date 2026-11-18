@@ -23,6 +23,7 @@ import {
   type TemplateResponse,
 } from "../lib.ts";
 import { FormGrid } from "./ui.tsx";
+import { copyText } from "./selection.tsx";
 import type { PermissionProbe, VisibleAccount, VerifyResponse, AddAccountsResponse } from "../lib.ts";
 type Probe = PermissionProbe;
 type Verify = VerifyResponse;
@@ -183,10 +184,9 @@ function AlibabaTokenHelp() {
           className="mt-2"
           size="sm"
           onClick={() =>
-            navigator.clipboard
-              .writeText(policy)
+            copyText(policy)
               .then(() => toasts.add({ title: "Policy copied", variant: "success" }))
-              .catch(() => {})
+              .catch((e: Error) => toasts.add({ title: "Couldn't copy", description: e.message, variant: "error" }))
           }
         >
           Copy policy

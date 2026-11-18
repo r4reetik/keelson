@@ -9,7 +9,10 @@
 import type { Repo } from "../store/repo.ts";
 import { displayName } from "../store/repo.ts";
 import type { AccountScan } from "./scope.ts";
+import { languageOf } from "../shared/dependencies.ts";
 import type {
+  AffectedRepo,
+  AffectedResponse,
   DepPackage,
   DepVuln,
   LicenseRiskFilter,
@@ -86,7 +89,7 @@ function findingsOf(repo: Repo, scans: AccountScan[]): Map<string, PackageFindin
 
 const RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, unknown: 0 };
 const isMalicious = (v: DepVuln) => [v.id, ...v.aliases].some((id) => id.startsWith("MAL-"));
-const keyOf = (p: DepPackage) => `${p.ecosystem}|${p.name}|${p.version}`;
+const keyOf = (p: Pick<DepPackage, "ecosystem" | "name" | "version">) => `${p.ecosystem}|${p.name}|${p.version}`;
 
 /** Orders versions numerically where they are numbers ("1.10" after "1.9"). */
 function compareVersions(a: string, b: string): number {
@@ -106,6 +109,8 @@ function compareVersions(a: string, b: string): number {
 export interface SbomFilters {
   q?: string;
   ecosystem?: string;
+  /** A language as languageOf names it ("Python"), covering every ecosystem written for it. */
+  language?: string;
   status?: PackageStatus;
   severity?: string;
   risk?: LicenseRiskFilter;
@@ -119,12 +124,13 @@ export interface SbomFilters {
 
 /** Every use in view, each package's rows built from them, and the repositories with an SBOM. */
 function gather(repo: Repo, scans: AccountScan[]) {
-  const indexes = scans.map((s) => accountIndex(repo, s)).filter((i): i is AccountIndex => !!i);
+  // Each index stays with its own scan: an account without an SBOM must not shift the others' names.
+  const indexed = scans.map((s) => ({ s, index: accountIndex(repo, s) })).filter((x): x is { s: AccountScan; index: AccountIndex } => !!x.index);
   return {
-    uses: indexes.flatMap((i) => i.uses),
-    repoList: indexes.flatMap((i, n) => i.repos.map((r) => ({ accountId: scans[n].account.id, account: displayName(scans[n].account), repo: r }))),
-    tools: indexes.find((i) => i.tools)?.tools ?? null,
-    dbBuilt: indexes.map((i) => i.dbBuilt).find(Boolean) ?? null,
+    uses: indexed.flatMap(({ index }) => index.uses),
+    repoList: indexed.flatMap(({ s, index }) => index.repos.map((r) => ({ accountId: s.account.id, account: displayName(s.account), repo: r }))),
+    tools: indexed.find(({ index }) => index.tools)?.index.tools ?? null,
+    dbBuilt: indexed.map(({ index }) => index.dbBuilt).find(Boolean) ?? null,
   };
 }
 
@@ -199,8 +205,10 @@ function filterRows(rows: PackageRow[], f: SbomFilters): PackageRow[] {
   const min = f.severity ? (RANK[f.severity] ?? 0) : 0;
   const out: PackageRow[] = [];
   for (const r of rows) {
-    if (q && !`${r.name} ${r.version} ${r.purl ?? ""}`.toLowerCase().includes(q)) continue;
+    // A search for a language or package manager ("python", "maven") finds its packages too.
+    if (q && !`${r.name} ${r.version} ${r.purl ?? ""} ${r.ecosystem} ${languageOf(r.ecosystem)}`.toLowerCase().includes(q)) continue;
     if (f.ecosystem && r.ecosystem !== f.ecosystem) continue;
+    if (f.language && languageOf(r.ecosystem) !== f.language) continue;
     if (f.status && !statusMatches(r, f.status)) continue;
     if (min && (!r.worst || RANK[r.worst] < min)) continue;
     if (f.risk && riskOf(r) !== f.risk) continue;
@@ -239,7 +247,11 @@ export function sbomSummary(repo: Repo, scans: AccountScan[]): SbomResponse["sum
   const rows = rowsOf(uses, new Map());
   const vulns = vulnRows(rows);
   const eco = new Map<string, number>();
-  for (const r of rows) eco.set(r.ecosystem, (eco.get(r.ecosystem) ?? 0) + 1);
+  const lang = new Map<string, number>();
+  for (const r of rows) {
+    eco.set(r.ecosystem, (eco.get(r.ecosystem) ?? 0) + 1);
+    lang.set(languageOf(r.ecosystem), (lang.get(languageOf(r.ecosystem)) ?? 0) + 1);
+  }
   const licenseRisks: Record<LicenseRiskFilter, number> = { strong: 0, weak: 0, permissive: 0, other: 0, none: 0 };
   for (const r of rows) licenseRisks[riskOf(r)]++;
   const severities = { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 };
@@ -258,6 +270,7 @@ export function sbomSummary(repo: Repo, scans: AccountScan[]): SbomResponse["sum
     copyleft: licenseRisks.strong,
     vulnerabilities: severities,
     ecosystems: [...eco].map(([name, packages]) => ({ name, packages })).sort((a, b) => b.packages - a.packages),
+    languages: [...lang].map(([name, packages]) => ({ name, packages })).sort((a, b) => b.packages - a.packages),
     licenseRisks,
     repoList: repoList.sort((a, b) => a.repo.localeCompare(b.repo)),
     tools,
@@ -295,21 +308,27 @@ function vulnRows(rows: PackageRow[]): VulnRow[] {
   return [...by.values()].map(({ repoSet, ...v }) => ({ ...v, repos: repoSet.size }));
 }
 
+/** The vulnerability tab's own filters: search, severity and status, applied to each vulnerability's row. */
+function vulnMatches(f: SbomFilters) {
+  const q = f.q?.trim().toLowerCase();
+  const min = f.severity ? (RANK[f.severity] ?? 0) : 0;
+  return (v: VulnRow) =>
+    (!q || `${v.id} ${v.aliases.join(" ")} ${v.summary} ${v.packages.map((p) => p.name).join(" ")}`.toLowerCase().includes(q)) &&
+    (!min || RANK[v.severity] >= min) &&
+    (f.status !== "exploited" || v.kev) &&
+    (f.status !== "malicious" || [v.id, ...v.aliases].some((id) => id.startsWith("MAL-"))) &&
+    (f.status !== "fixable" || v.packages.some((p) => p.fixedIn)) &&
+    (f.status !== "nofix" || v.packages.every((p) => !p.fixedIn));
+}
+
+/** Package filters for the vulnerabilities tab: its search, status and severity belong to the vulnerability, not the package. */
+const vulnPackageFilters = (f: SbomFilters): SbomFilters => ({ ...f, q: undefined, status: undefined, severity: undefined, vuln: undefined });
+
 export function vulnPage(repo: Repo, scans: AccountScan[], f: SbomFilters, offset: number, limit: number): SbomPage<VulnRow> {
   const { uses } = gather(repo, scans);
   // Package filters narrow which packages count; the vulnerability's own filters apply after.
-  const rows = filterRows(rowsOf(uses, new Map()), { ...f, q: undefined, status: undefined, severity: undefined, vuln: undefined });
-  const q = f.q?.trim().toLowerCase();
-  const min = f.severity ? (RANK[f.severity] ?? 0) : 0;
-  const out = vulnRows(rows).filter(
-    (v) =>
-      (!q || `${v.id} ${v.aliases.join(" ")} ${v.summary} ${v.packages.map((p) => p.name).join(" ")}`.toLowerCase().includes(q)) &&
-      (!min || RANK[v.severity] >= min) &&
-      (f.status !== "exploited" || v.kev) &&
-      (f.status !== "malicious" || [v.id, ...v.aliases].some((id) => id.startsWith("MAL-"))) &&
-      (f.status !== "fixable" || v.packages.some((p) => p.fixedIn)) &&
-      (f.status !== "nofix" || v.packages.every((p) => !p.fixedIn)),
-  );
+  const rows = filterRows(rowsOf(uses, new Map()), vulnPackageFilters(f));
+  const out = vulnRows(rows).filter(vulnMatches(f));
   out.sort((a, b) => Number(b.kev) - Number(a.kev) || b.risk - a.risk || RANK[b.severity] - RANK[a.severity] || b.repos - a.repos || a.id.localeCompare(b.id));
   return page(out, offset, limit);
 }
@@ -360,6 +379,8 @@ export function packageCsv(repo: Repo, scans: AccountScan[], f: SbomFilters): st
       "exploited",
       "upgrade_to",
       "triage",
+      // Added after the first release of this export; last, so scripts that read columns by position keep working.
+      "language",
     ],
   ];
   for (const r of rows)
@@ -381,6 +402,61 @@ export function packageCsv(repo: Repo, scans: AccountScan[], f: SbomFilters): st
         String(r.kev),
         r.upgrade ?? "",
         u.finding?.status ?? "",
+        languageOf(r.ecosystem),
       ]);
   return out;
+}
+
+export type AffectedTab = "packages" | "vulnerabilities" | "licenses";
+
+/**
+ * The repositories behind a selection on the Dependencies page: the packages, vulnerabilities or licenses picked by
+ * key (`ecosystem|name|version`, an advisory ID, a license expression), or with no keys every one the filters match,
+ * across every page. Each repository lists the picked packages it uses.
+ */
+export function affectedRepos(repo: Repo, scans: AccountScan[], tab: AffectedTab, f: SbomFilters, keys: string[]): AffectedResponse {
+  const { uses } = gather(repo, scans);
+  const picked = keys.length ? new Set(keys) : null;
+  let rows: PackageRow[];
+  let names: string[];
+  let cves: string[] = [];
+  if (tab === "vulnerabilities") {
+    const candidates = filterRows(rowsOf(uses, new Map()), vulnPackageFilters(f));
+    const vulns = vulnRows(candidates).filter((v) => vulnMatches(f)(v) && (!picked || picked.has(v.id)));
+    const ids = new Set(vulns.map((v) => v.id));
+    rows = candidates.filter((r) => r.vulns.some((v) => ids.has(v.id)));
+    names = vulns.map((v) => v.id);
+    cves = [...new Set(vulns.flatMap((v) => [v.id, ...v.aliases]).filter((id) => id.startsWith("CVE-")))].sort();
+  } else if (tab === "licenses") {
+    const q = f.q?.trim().toLowerCase();
+    rows = filterRows(rowsOf(uses, new Map()), { ...f, q: undefined, license: undefined }).filter(
+      (r) => (!q || licenseOf(r).toLowerCase().includes(q)) && (!picked || picked.has(licenseOf(r))),
+    );
+    names = [...new Set(rows.map(licenseOf))];
+  } else {
+    rows = filterRows(rowsOf(uses, findingsOf(repo, scans)), f).filter((r) => !picked || picked.has(keyOf(r)));
+    names = rows.map((r) => `${r.name}@${r.version}`);
+  }
+
+  const logins = new Map(scans.map((s) => [s.account.id, s.scan.snap.links?.githubOrgs?.[0] ?? null]));
+  const by = new Map<string, AffectedRepo>();
+  for (const r of rows)
+    for (const u of r.uses) {
+      const key = `${u.accountId}/${u.repo}`;
+      let a = by.get(key);
+      if (!a) {
+        const login = logins.get(u.accountId);
+        a = {
+          accountId: u.accountId,
+          account: u.account,
+          repo: u.repo,
+          fullName: login ? `${login}/${u.repo}` : u.repo,
+          url: login ? `https://github.com/${login}/${u.repo}` : null,
+          packages: [],
+        };
+        by.set(key, a);
+      }
+      a.packages.push({ name: r.name, version: r.version, ecosystem: r.ecosystem, upgrade: r.upgrade });
+    }
+  return { repos: [...by.values()].sort((a, b) => a.fullName.localeCompare(b.fullName)), packages: rows.length, names, cves };
 }

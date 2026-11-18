@@ -2,6 +2,7 @@ import { Input, Switch, Table, Link } from "@cloudflare/kumo";
 import { useScopedApi, useShell } from "../shell.tsx";
 import { compact, num, plural, SCORED_SEVERITIES, setParams, totalScored, useLocation, type ZoneRow, type ZonesResponse } from "../lib.ts";
 import { Flag, ListCard, NoRows, Page, PageState, SeverityBadge, unreadableText } from "../components/ui.tsx";
+import { CopyMenu } from "../components/selection.tsx";
 import { OLD_TLS, WEAK_SECURITY_LEVELS } from "../../../src/core/cf-constants.ts";
 type Zone = ZoneRow;
 
@@ -98,6 +99,7 @@ export function ZonesPage() {
               <Switch aria-label="Only zones with open findings" checked={issuesOnly} onCheckedChange={(v: boolean) => setParams({ issues: v ? "1" : null })} />
               <span aria-hidden>Only zones with open findings</span>
             </span>
+            <CopyMenu label="Copy shown" items={[{ label: "Zone names", run: () => ({ lines: zones.map((z) => z.name), what: ["zone", "zones"] }) }]} />
           </>
         }
         footer={

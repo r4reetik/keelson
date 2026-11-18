@@ -22,6 +22,7 @@ import { dashboardRoutes, findingRoutes } from "./routes/dashboard.ts";
 import { exportRoutes } from "./routes/exports.ts";
 import { userRoutes } from "./routes/users.ts";
 import { dependencyRoutes, sbomRoutes } from "./routes/dependencies.ts";
+import { complianceRoutes } from "./routes/compliance.ts";
 
 export type { AppContext } from "./env.ts";
 
@@ -53,6 +54,7 @@ export function createApp(ctx: AppContext) {
   dashboardRoutes(scoped, ctx);
   exportRoutes(scoped, ctx);
   sbomRoutes(scoped, ctx);
+  complianceRoutes(scoped, ctx);
 
   app.all("/api/*", (c) => c.json({ error: "Not found" }, 404));
   app.get("*", (c) => serveWeb(c, ctx.webDir));

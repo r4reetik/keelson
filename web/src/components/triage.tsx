@@ -24,6 +24,7 @@ import { AccountName, ConfidenceBadge, FormGrid, PlatformMark, ReopenedBadge, Se
 import { useShell } from "../shell.tsx";
 import { DEPENDENCY_EVIDENCE_KEYS, DependencyEvidenceView } from "./dependencies.tsx";
 import { LocatedSection } from "./located.tsx";
+import { copyText } from "./selection.tsx";
 
 type Editable = Pick<Triage, "status" | "owner" | "note" | "dueDate" | "acceptUntil">;
 /** Statuses where a due date means nothing: the finding is out of the queue. */
@@ -46,7 +47,7 @@ export function CopyLinkButton({ fingerprint }: { fingerprint: string }) {
           icon={<LinkSimpleIcon />}
           onClick={async () => {
             try {
-              await navigator.clipboard.writeText(permalink(fingerprint));
+              await copyText(permalink(fingerprint));
               toasts.add({ title: "Link copied", variant: "success" });
             } catch {
               toasts.add({ title: "Couldn't copy", description: permalink(fingerprint), variant: "error" });

@@ -266,6 +266,8 @@ describe("users limited to some entities", () => {
       `/api/export/findings.csv?scope=e:${other}`,
       `/api/export/findings.json?scope=a:${MOCK_ACCOUNT_2}`,
       `/api/scan/status?scope=e:${other}`,
+      `/api/compliance?scope=e:${other}`,
+      `/api/export/compliance.csv?framework=pci-dss&scope=a:${MOCK_ACCOUNT_2}`,
       `/api/finding/${otherFps[0]}`,
     ])
       assert.equal((await as.call(path)).status, 404, path);
@@ -285,6 +287,8 @@ describe("users limited to some entities", () => {
       "/api/export/findings.json?scope=all",
       "/api/scan/status?scope=all",
       "/api/checks?scope=all",
+      "/api/compliance?scope=all",
+      "/api/export/compliance.csv?scope=all",
       "/api/accounts",
       "/api/session",
       `/api/owners?accounts=${MOCK_ACCOUNT_2}`,

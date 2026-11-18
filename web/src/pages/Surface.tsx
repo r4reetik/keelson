@@ -3,7 +3,8 @@
 // followed into AWS or Alibaba Cloud (load balancer, matching rules, targets); the load balancers; the
 // public addresses with what Shodan has seen open there and what security groups let
 // anyone reach; and its domains with where their DNS lives and who issues their
-// certificates. The internet's counterpart of Zones and Regions.
+// certificates. The internet's counterpart of Zones and Regions. Rows can be
+// picked to copy their names, addresses or open ports, or download them.
 
 import { useState } from "react";
 import { Badge, Button, Dialog, Input, Switch, Table, Tabs, Link } from "@cloudflare/kumo";
@@ -26,6 +27,7 @@ import {
   type SurfaceResponse,
 } from "../lib.ts";
 import { Card, DialogHeader, ListCard, NoRows, Page, PageState, SeverityBadge, unreadableText } from "../components/ui.tsx";
+import { CopyMenu, DownloadCsvButton, SelectPage, SelectRow, SelectionBar, downloadCsv, useSelection, type CopyItem } from "../components/selection.tsx";
 
 const TITLE = "Attack surface";
 const DESCRIPTION =
@@ -55,6 +57,9 @@ const TYPE: Record<string, string> = { application: "Application", network: "Net
 /** Each cloud's names for its kinds of load balancer; rows stored before Alibaba Cloud have no cloud and are AWS's. */
 const LB_TYPE: Record<"aws" | "alibaba", Record<string, string>> = { aws: TYPE, alibaba: { application: "ALB", network: "NLB", classic: "CLB" } };
 const typeOf = (lb: { provider?: "aws" | "alibaba"; type: string }) => LB_TYPE[lb.provider ?? "aws"][lb.type] ?? lb.type;
+
+/** Open findings by severity, as CSV columns. */
+const counts = (c: SeverityCounts) => [c.critical, c.high, c.medium, c.low];
 
 const WEB: Record<string, string> = { open: "Anyone on 80/443", cloudflare: "Only Cloudflare", other: "Some public ranges" };
 
@@ -212,6 +217,7 @@ export function SurfacePage() {
   const { params } = useLocation();
   const { data, error, loading, reload } = useScopedApi<SurfaceResponse>("/api/surface");
   const [open, setOpen] = useState<{ host?: string; lb?: string; accountId?: string } | null>(null);
+  const selection = useSelection(["view", "q", "issues"].map((k) => params.get(k)));
   // Before Sonar watches any entity in view, this page is where it's offered.
   const watched = shellView.accounts.some((a) => PROVIDER_INFO[a.provider].perEntity);
   if (!watched) {
@@ -288,6 +294,84 @@ export function SurfacePage() {
   const openLb = open?.lb ? lbNamed(open.lb, open.accountId) : openHost?.route ? lbNamed(openHost.route.loadBalancer, openHost.accountId) : null;
   const account = (a?: string) => multi && a && <div className="max-w-80 truncate text-sm text-kumo-subtle">{a}</div>;
 
+  // Picking rows: each view names its rows by account and name (or address), since entities can share a hostname.
+  const hostKey = (h: { accountId?: string; name: string }) => `${h.accountId}/${h.name}`;
+  const lbKey = (b: SurfaceLoadBalancerRow) => `${b.accountId}/${b.region}/${b.name}`;
+  const ipKey = (a: { accountId?: string; ip: string }) => `${a.accountId}/${a.ip}`;
+  const shownKeys = { hosts: hosts.map(hostKey), balancers: balancers.map(lbKey), addresses: addresses.map(ipKey), domains: domains.map(hostKey) }[view];
+  const pickedHosts = hosts.filter((h) => selection.has(hostKey(h)));
+  const pickedLbs = balancers.filter((b) => selection.has(lbKey(b)));
+  const pickedIps = addresses.filter((a) => selection.has(ipKey(a)));
+  const pickedDomains = domains.filter((d) => selection.has(hostKey(d)));
+  const copyItems: CopyItem[] = {
+    hosts: [
+      { label: "Hostnames", run: () => ({ lines: pickedHosts.map((h) => h.name), what: ["hostname", "hostnames"] as [string, string] }) },
+      { label: "Links (https://…)", run: () => ({ lines: pickedHosts.map((h) => `https://${h.name}`), what: ["link", "links"] as [string, string] }) },
+    ],
+    balancers: [
+      { label: "Load balancer names", run: () => ({ lines: pickedLbs.map((b) => b.name), what: ["load balancer", "load balancers"] as [string, string] }) },
+      { label: "Hostnames that reach them", run: () => ({ lines: pickedLbs.flatMap((b) => b.hosts), what: ["hostname", "hostnames"] as [string, string] }) },
+    ],
+    addresses: [
+      { label: "Addresses", run: () => ({ lines: pickedIps.map((a) => a.ip), what: ["address", "addresses"] as [string, string] }) },
+      {
+        label: "Open ports (address:port)",
+        run: () => ({
+          lines: pickedIps.flatMap((a) => (a.shodan?.ports ?? []).map((p) => `${a.ip}:${p}`)),
+          what: ["open port", "open ports"] as [string, string],
+        }),
+      },
+      { label: "Hostnames on them", run: () => ({ lines: pickedIps.flatMap((a) => a.hosts), what: ["hostname", "hostnames"] as [string, string] }) },
+    ],
+    domains: [{ label: "Domains", run: () => ({ lines: pickedDomains.map((d) => d.name), what: ["domain", "domains"] as [string, string] }) }],
+  }[view];
+  const downloadPicked = () =>
+    ({
+      hosts: () =>
+        downloadCsv("keelson-hostnames", [
+          ["hostname", "domain", "entity", "served by", "points at", "found in", "critical", "high", "medium", "low"],
+          ...pickedHosts.map((h) => [h.name, h.domain, h.account ?? "", h.servedBy, h.points, h.found.join(" "), ...counts(h.findings)]),
+        ]),
+      balancers: () =>
+        downloadCsv("keelson-load-balancers", [
+          ["load balancer", "cloud account", "region", "type", "internet-facing", "hostnames", "critical", "high", "medium", "low"],
+          ...pickedLbs.map((b) => [b.name, b.awsAccount, b.region, typeOf(b), b.internetFacing, b.hosts.join(" "), ...counts(b.findings)]),
+        ]),
+      addresses: () =>
+        downloadCsv("keelson-addresses", [
+          [
+            "address",
+            "entity",
+            "held by",
+            "resource",
+            "hostnames",
+            "open ports (Shodan)",
+            "open to anyone",
+            "known vulnerabilities",
+            "critical",
+            "high",
+            "medium",
+            "low",
+          ],
+          ...pickedIps.map((a) => [
+            a.ip,
+            a.account ?? "",
+            a.heldBy ?? "",
+            a.resource ?? "",
+            a.hosts.join(" "),
+            a.shodan?.ports.join(" ") ?? "",
+            a.open?.join("; ") ?? "",
+            a.shodan?.vulns ?? "",
+            ...counts(a.findings),
+          ]),
+        ]),
+      domains: () =>
+        downloadCsv("keelson-domains", [
+          ["domain", "entity", "dns", "critical", "high", "medium", "low"],
+          ...pickedDomains.map((d) => [d.name, d.account ?? "", d.dns ?? "", ...counts(d.findings)]),
+        ]),
+    })[view]();
+
   return (
     <Page title={TITLE} description={DESCRIPTION}>
       <div>
@@ -304,19 +388,26 @@ export function SurfacePage() {
       </div>
       <ListCard
         toolbar={
-          <>
-            <Input
-              className="w-full min-w-48 sm:w-72"
-              aria-label={`Search ${word[1]}`}
-              placeholder={`Search ${word[1]}`}
-              value={params.get("q") || ""}
-              onChange={(e) => setParams({ q: e.target.value || null })}
-            />
-            <span className="inline-flex items-center gap-2 text-sm text-kumo-subtle">
-              <Switch aria-label="Only with open findings" checked={issuesOnly} onCheckedChange={(v: boolean) => setParams({ issues: v ? "1" : null })} />
-              <span aria-hidden>Only with open findings</span>
-            </span>
-          </>
+          selection.keys.size > 0 ? (
+            <SelectionBar selection={selection} noun={word as [string, string]} total={shown[0]} pageKeys={shownKeys}>
+              <CopyMenu items={copyItems} />
+              <DownloadCsvButton onClick={downloadPicked} />
+            </SelectionBar>
+          ) : (
+            <>
+              <Input
+                className="w-full min-w-48 sm:w-72"
+                aria-label={`Search ${word[1]}`}
+                placeholder={`Search ${word[1]}`}
+                value={params.get("q") || ""}
+                onChange={(e) => setParams({ q: e.target.value || null })}
+              />
+              <span className="inline-flex items-center gap-2 text-sm text-kumo-subtle">
+                <Switch aria-label="Only with open findings" checked={issuesOnly} onCheckedChange={(v: boolean) => setParams({ issues: v ? "1" : null })} />
+                <span aria-hidden>Only with open findings</span>
+              </span>
+            </>
+          )
         }
         footer={
           <span>
@@ -333,6 +424,9 @@ export function SurfacePage() {
             <Table layout="auto">
               <Table.Header variant="compact">
                 <Table.Row>
+                  <Table.Head className="w-10">
+                    <SelectPage selection={selection} keys={shownKeys} label="Select every hostname shown" />
+                  </Table.Head>
                   <Table.Head sticky="left">Hostname</Table.Head>
                   <Table.Head className="whitespace-nowrap">Served by</Table.Head>
                   <Table.Head className="whitespace-nowrap">Path in the cloud</Table.Head>
@@ -344,6 +438,9 @@ export function SurfacePage() {
               <Table.Body>
                 {hosts.map((h) => (
                   <Table.Row key={`${h.accountId}/${h.name}`}>
+                    <Table.Cell>
+                      <SelectRow selection={selection} id={hostKey(h)} label={`Select ${h.name}`} />
+                    </Table.Cell>
                     <Table.Cell sticky="left" className="whitespace-nowrap">
                       <Link variant="plain" href={findingsHref(h.name, h.accountId)}>
                         {h.name}
@@ -388,6 +485,9 @@ export function SurfacePage() {
             <Table layout="auto">
               <Table.Header variant="compact">
                 <Table.Row>
+                  <Table.Head className="w-10">
+                    <SelectPage selection={selection} keys={shownKeys} label="Select every load balancer shown" />
+                  </Table.Head>
                   <Table.Head sticky="left">Load balancer</Table.Head>
                   <Table.Head className="whitespace-nowrap">Scheme</Table.Head>
                   <Table.Head className="whitespace-nowrap">Hostnames</Table.Head>
@@ -403,6 +503,9 @@ export function SurfacePage() {
                   const direct = [...targets.values()].filter((t) => t.direct).length;
                   return (
                     <Table.Row key={`${b.accountId}/${b.region}/${b.name}`}>
+                      <Table.Cell>
+                        <SelectRow selection={selection} id={lbKey(b)} label={`Select ${b.name}`} />
+                      </Table.Cell>
                       <Table.Cell sticky="left" className="whitespace-nowrap">
                         <Link variant="plain" render={<button type="button" onClick={() => setOpen({ lb: b.name, accountId: b.accountId })} />}>
                           {b.name}
@@ -444,6 +547,9 @@ export function SurfacePage() {
             <Table layout="auto">
               <Table.Header variant="compact">
                 <Table.Row>
+                  <Table.Head className="w-10">
+                    <SelectPage selection={selection} keys={shownKeys} label="Select every address shown" />
+                  </Table.Head>
                   <Table.Head sticky="left">Address</Table.Head>
                   <Table.Head className="whitespace-nowrap">Held by</Table.Head>
                   <Table.Head className="whitespace-nowrap">Hostnames</Table.Head>
@@ -456,6 +562,9 @@ export function SurfacePage() {
               <Table.Body>
                 {addresses.map((a) => (
                   <Table.Row key={`${a.accountId}/${a.ip}`}>
+                    <Table.Cell>
+                      <SelectRow selection={selection} id={ipKey(a)} label={`Select ${a.ip}`} />
+                    </Table.Cell>
                     <Table.Cell sticky="left" className="whitespace-nowrap">
                       <span className="inline-flex items-center gap-2">
                         <Link variant="plain" href={findingsHref(a.ip, a.accountId)} className="font-mono">
@@ -525,6 +634,9 @@ export function SurfacePage() {
             <Table layout="auto">
               <Table.Header variant="compact">
                 <Table.Row>
+                  <Table.Head className="w-10">
+                    <SelectPage selection={selection} keys={shownKeys} label="Select every domain shown" />
+                  </Table.Head>
                   <Table.Head sticky="left">Domain</Table.Head>
                   <Table.Head className="whitespace-nowrap">DNS</Table.Head>
                   <Table.Head className="whitespace-nowrap">Valid certificates</Table.Head>
@@ -535,6 +647,9 @@ export function SurfacePage() {
               <Table.Body>
                 {domains.map((d) => (
                   <Table.Row key={`${d.accountId}/${d.name}`}>
+                    <Table.Cell>
+                      <SelectRow selection={selection} id={hostKey(d)} label={`Select ${d.name}`} />
+                    </Table.Cell>
                     <Table.Cell sticky="left" className="whitespace-nowrap">
                       <Link variant="plain" href={findingsHref(d.name, d.accountId)}>
                         {d.name}

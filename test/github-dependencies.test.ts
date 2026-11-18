@@ -9,7 +9,8 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { Scanner } from "../src/scanner.ts";
 import { installMockGithub, MOCK_GITHUB_ACCOUNT, MOCK_SOURCE_CONTENT, MOCK_SOURCE_FILE } from "../dev/mock/github.ts";
-import { seedGithub, testRepo } from "../dev/mock/accounts.ts";
+import { seedAccount, seedGithub, testRepo } from "../dev/mock/accounts.ts";
+import { installMockCloudflare } from "../dev/mock/cloudflare.ts";
 import { makeApp } from "./helpers/app.ts";
 import { baseImages, findParts, goRequires, requirementLines, wanted } from "../src/providers/github/sbom/manifests.ts";
 import { actionUses, compareVersions, mergeAliases } from "../src/providers/github/sbom/index.ts";
@@ -419,12 +420,81 @@ test("the Dependencies page's APIs filter packages, vulnerabilities and licenses
     assert.match(csv, /"package","version","ecosystem"/);
     assert.match(csv, /"mock-xml-parser","0\.9\.1","npm"/);
 
+    // Languages: each ecosystem's packages under the language they're written for, as a filter and in the search.
+    assert.ok(sum.languages.some((l: any) => l.name === "JavaScript and TypeScript"));
+    assert.ok(sum.languages.some((l: any) => l.name === "Go"));
+    assert.deepEqual(await names(`language=Go&status=vulnerable`), await names("ecosystem=Go&status=vulnerable"));
+    assert.ok((await names("language=JavaScript and TypeScript")).includes("mock-xml-parser"));
+    assert.ok(!(await names("language=JavaScript and TypeScript")).includes("mock.example/httpkit"));
+    assert.ok(
+      (await names("q=python")).every((n: string) => !n.startsWith("mock.example/")),
+      "a search for a language finds its packages",
+    );
+    assert.ok((await names("q=python")).includes("mock-celery"));
+    assert.match(csv, /"language"/);
+
+    // The repositories behind picked rows, or behind every row that matches, across pages.
+    const affected = (q: string) => t.json(`/api/sbom/affected?${S}&${q}`);
+    const vulnerable = await affected("tab=packages&status=vulnerable");
+    assert.ok(vulnerable.repos.length >= 2);
+    assert.ok(
+      vulnerable.repos.every((r: any) => r.fullName.includes("/") && r.url.startsWith("https://github.com/")),
+      "named owner/repo, with a link",
+    );
+    assert.equal(vulnerable.packages, (await t.json(`/api/sbom/packages?${S}&status=vulnerable`)).total);
+    const xml = (await t.json(`/api/sbom/packages?${S}&q=mock-xml-parser`)).rows[0];
+    const one = await affected(`tab=packages&key=${encodeURIComponent(`${xml.ecosystem}|${xml.name}|${xml.version}`)}`);
+    assert.deepEqual(
+      one.repos.map((r: any) => r.repo),
+      xml.uses.map((u: any) => u.repo).sort(),
+    );
+    assert.deepEqual(one.names, [`mock-xml-parser@${xml.version}`]);
+    assert.ok(one.repos[0].packages[0].upgrade);
+    const byVuln = await affected("tab=vulnerabilities&key=GHSA-mock-0001-0001");
+    assert.deepEqual(byVuln.names, ["GHSA-mock-0001-0001"]);
+    assert.equal(byVuln.repos.length, 1);
+    const byCve = await affected("tab=vulnerabilities&q=CVE-2026-90003");
+    assert.ok(byCve.cves.includes("CVE-2026-90003"));
+    assert.ok(byCve.repos.some((r: any) => r.packages.some((p: any) => p.name === "mock-router")));
+    const gpl = await affected("tab=licenses&key=GPL-3.0-only");
+    assert.deepEqual(gpl.names, ["GPL-3.0-only"]);
+    assert.ok(gpl.repos.every((r: any) => r.packages.every((p: any) => p.name === "mock-readline")));
+    assert.equal((await t.call(`/api/sbom/affected?${S}&tab=findings`)).status, 400);
+    const tooMany = Array.from({ length: 201 }, (_, i) => `key=k${i}`).join("&");
+    assert.equal((await t.call(`/api/sbom/affected?${S}&tab=packages&${tooMany}`)).status, 400, "a selection that large is sent as every row that matches");
+
     // Someone limited to another entity sees no dependencies.
     const other = t.repo.entities.create("Other Ltd");
     const as = t.limitedAs("viewer", [other.id]);
     assert.equal((await as.call(`/api/sbom?${S}`)).status, 404);
+    assert.equal((await as.call(`/api/sbom/affected?${S}&tab=packages`)).status, 404);
   } finally {
     restore();
+    t.cleanup();
+  }
+});
+
+test("an account without an SBOM in the view doesn't shift other accounts' repositories, and repositories carry their owner", async () => {
+  const t = makeApp();
+  const restoreCf = installMockCloudflare();
+  const restore = installMockGithub();
+  try {
+    // The Cloudflare account comes first in the view and has no SBOM.
+    seedAccount(t.repo, t.vault, { entity: "Mock Group" });
+    seedGithub(t.repo, t.vault, { entity: "Mock Group" });
+    await t.scanner.start("test").done;
+    const entity = t.repo.accounts.get(MOCK_GITHUB_ACCOUNT)!.entityId;
+    const sum = (await t.json(`/api/sbom?scope=e:${entity}`)).summary;
+    assert.ok(sum.repoList.length > 0);
+    assert.ok(
+      sum.repoList.every((r: any) => r.accountId === MOCK_GITHUB_ACCOUNT),
+      "each repository is under the account that has it",
+    );
+    const repos = (await t.json(`/api/repos?scope=e:${entity}`)).repos;
+    assert.ok(repos.length && repos.every((r: any) => typeof r.owner === "string" && r.owner.length > 0));
+  } finally {
+    restore();
+    restoreCf();
     t.cleanup();
   }
 });

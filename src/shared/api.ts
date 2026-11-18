@@ -1040,6 +1040,8 @@ export interface RepoRow {
   name: string;
   account?: string;
   accountId?: string;
+  /** The organization's login on GitHub, so "owner/repo" can be copied; null when the scan didn't record it. */
+  owner?: string | null;
   /** "public", "private" or "internal". */
   visibility: string;
   archived: boolean;

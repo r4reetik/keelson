@@ -85,3 +85,15 @@ export function useApi<T>(path: string | null, key: unknown = null) {
   }, [reload, JSON.stringify(key)]);
   return { data, error, loading, reload, setData };
 }
+
+/** Downloads an export under the server's file name. Throws the server's error, so a page can show it as a toast instead of replacing itself with it. */
+export async function downloadFile(url: string, fallbackName = "export"): Promise<void> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error || `HTTP ${res.status}`);
+  const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") || "")?.[1] || fallbackName;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(await res.blob());
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}

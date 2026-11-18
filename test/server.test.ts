@@ -87,6 +87,9 @@ describe("the API", () => {
       "/api/scan/status",
       "/api/export/findings.csv",
       "/api/export/findings.json",
+      "/api/compliance",
+      "/api/compliance?framework=pci-dss",
+      "/api/export/compliance.csv",
     ];
     for (const p of paths) {
       const res = await call(p);

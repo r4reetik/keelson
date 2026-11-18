@@ -15,6 +15,7 @@ import {
   GearIcon,
   GitBranchIcon,
   PackageIcon,
+  SealCheckIcon,
   GlobeIcon,
   ListChecksIcon,
   StackIcon,
@@ -69,6 +70,13 @@ export const ROUTES: RouteDef[] = [
     page: page(() => import("./pages/Finding.tsx"), "FindingPage"),
   },
   { path: "/triaged", label: "Triaged", group: "Posture", icon: ClipboardTextIcon, page: page(() => import("./pages/Triaged.tsx"), "TriagedPage") },
+  {
+    path: "/compliance",
+    label: "Compliance",
+    group: "Posture",
+    icon: SealCheckIcon,
+    page: page(() => import("./pages/Compliance.tsx"), "CompliancePage"),
+  },
   {
     path: "/zones",
     label: "Zones",

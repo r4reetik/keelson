@@ -16,10 +16,10 @@ import { anchore } from "../../core/anchore.ts";
 import type { Context } from "hono";
 import type { AppEnv } from "../env.ts";
 import { LICENSE_RISKS, PACKAGE_STATUSES } from "../../shared/dependencies.ts";
-import type { DependenciesResponse, LicenseRiskFilter, PackageStatus, RepoDependencies, SbomResponse } from "../../shared/dependencies.ts";
+import type { AffectedResponse, DependenciesResponse, LicenseRiskFilter, PackageStatus, RepoDependencies, SbomResponse } from "../../shared/dependencies.ts";
 import { coverage, latestScans, scanMeta } from "../scope.ts";
 import { csvCell, slug } from "../present.ts";
-import { licensePage, packageCsv, packagePage, sbomSummary, vulnPage, type SbomFilters } from "../sbom.ts";
+import { affectedRepos, licensePage, packageCsv, packagePage, sbomSummary, vulnPage, type AffectedTab, type SbomFilters } from "../sbom.ts";
 
 interface StoredView {
   dependencies: RepoDependencies;
@@ -100,8 +100,12 @@ export function dependencyRoutes(r: Routes, { repo }: AppContext) {
 
 /**
  * The Dependencies page, for the view's scope: a summary (GET /api/sbom), and filtered pages of packages,
- * vulnerabilities and licenses (the Grant report), with the packages as CSV. Filters are query parameters.
+ * vulnerabilities and licenses (the Grant report), with the packages as CSV, and the repositories a selection affects
+ * (GET /api/sbom/affected). Filters are query parameters.
  */
+/** Rows a selection may name, which keeps the address under Node's header limit; a larger one is "every row that matches", sent without keys. */
+export const MAX_KEYS = 200;
+
 export function sbomRoutes(r: Routes, { repo }: AppContext) {
   const filters = (c: Context<AppEnv>): SbomFilters => {
     const q = (k: string) => c.req.query(k) || undefined;
@@ -110,6 +114,7 @@ export function sbomRoutes(r: Routes, { repo }: AppContext) {
     return {
       q: q("q")?.slice(0, 200),
       ecosystem: q("ecosystem"),
+      language: q("language"),
       status: status && status in PACKAGE_STATUSES ? (status as PackageStatus) : undefined,
       severity: q("severity"),
       risk: risk && risk in LICENSE_RISKS ? (risk as LicenseRiskFilter) : undefined,
@@ -142,6 +147,14 @@ export function sbomRoutes(r: Routes, { repo }: AppContext) {
   r.get("/api/sbom/licenses", (c) => {
     const { offset, limit } = paging(c);
     return c.json(licensePage(repo, latestScans(repo, c.get("scope")), filters(c), offset, limit));
+  });
+  // The repositories behind picked rows (`key`, repeatable), or behind every row the filters match when none is picked.
+  r.get("/api/sbom/affected", (c) => {
+    const tab = c.req.query("tab") || "packages";
+    if (!["packages", "vulnerabilities", "licenses"].includes(tab)) throw badRequest("Pick packages, vulnerabilities or licenses.");
+    const keys = c.req.queries("key") ?? [];
+    if (keys.length > MAX_KEYS) throw badRequest(`Pick at most ${MAX_KEYS} rows, or none to take every row that matches the filters.`);
+    return c.json(affectedRepos(repo, latestScans(repo, c.get("scope")), tab as AffectedTab, filters(c), keys) satisfies AffectedResponse);
   });
   r.get("/api/sbom/packages.csv", (c) => {
     const scope = c.get("scope");

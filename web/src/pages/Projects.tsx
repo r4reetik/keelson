@@ -5,6 +5,7 @@ import { Input, Switch, Table, Link } from "@cloudflare/kumo";
 import { useScopedApi, useShell } from "../shell.tsx";
 import { num, plural, SCORED_SEVERITIES, setParams, totalScored, useLocation, type ProjectRow, type ProjectsResponse } from "../lib.ts";
 import { Flag, ListCard, NoRows, Page, PageState, SeverityBadge, unreadableText } from "../components/ui.tsx";
+import { CopyMenu } from "../components/selection.tsx";
 
 const TITLE = "Projects";
 const DESCRIPTION = "Every Vercel project: who can open its deployments, whether the firewall runs, and how its secrets are stored.";
@@ -79,6 +80,16 @@ export function ProjectsPage() {
               />
               <span aria-hidden>Only projects with open findings</span>
             </span>
+            <CopyMenu
+              label="Copy shown"
+              items={[
+                { label: "Project names", run: () => ({ lines: projects.map((p) => p.name), what: ["project", "projects"] }) },
+                {
+                  label: "Custom domains",
+                  run: () => ({ lines: projects.flatMap((p) => p.domains.filter((d) => !d.endsWith(".vercel.app"))), what: ["domain", "domains"] }),
+                },
+              ]}
+            />
           </>
         }
         footer={
