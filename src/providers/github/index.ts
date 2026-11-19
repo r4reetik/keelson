@@ -41,6 +41,7 @@ export const github: Provider = {
           c.ok ? c : { ...c, skippedChecks: GITHUB_CHECKS.filter((ch) => ch.requires?.includes(c.key)).map((ch) => ch.id) },
         ),
         calls: client.calls,
+        backlog: inv.images?.later ?? null,
       };
     } catch (e) {
       throw Object.assign(e as Error, { calls: client.calls });

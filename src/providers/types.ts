@@ -5,6 +5,7 @@
 
 import type { Evaluation } from "../core/engine.ts";
 import type { EngineOptions, ProgressEvent } from "../core/types.ts";
+import type { ImageBacklog } from "../core/images.ts";
 import type { CheckMeta } from "../core/checks/define.ts";
 import type { Coverage, LinkKey, PermissionProbe, ScanSnapshot, TokenInfo } from "../shared/api.ts";
 import type { ProviderId, ProviderInfo } from "../shared/providers.ts";
@@ -39,6 +40,8 @@ export interface ScanOutput {
   snapshot: Omit<ScanSnapshot, "accountName" | "coverage" | "checks">;
   coverage: Coverage[];
   calls: number;
+  /** Images the scan's time didn't reach. The scanner reads them in the background, then scans the account again for their findings. */
+  backlog?: ImageBacklog | null;
 }
 
 export interface Provider {

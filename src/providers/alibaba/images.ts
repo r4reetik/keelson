@@ -285,7 +285,7 @@ export async function scanAlibabaImages(
     foreign: foreignFor(all, o.related),
     now: inv.now,
   });
-  const { snapshot, scans } = await scanImages(targets, {
+  const { snapshot, scans, later } = await scanImages(targets, {
     repositories: all.reduce((n, r) => n + r.repositories, 0),
     cache: o.cache,
     toolDir: o.toolDir,
@@ -294,6 +294,6 @@ export async function scanAlibabaImages(
     now: inv.now,
     previous: o.previous,
   });
-  inv.images = { snapshot, scans, workloads };
+  inv.images = { snapshot, scans, workloads, later };
   inv.unreadable = [...client.coverage.values()].filter((c) => !c.ok).map((c) => c.key);
 }

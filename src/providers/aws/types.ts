@@ -5,7 +5,7 @@
 
 import type { AwsSourceKey } from "./sources.ts";
 import type { Prefixes } from "../../core/aws-ranges.ts";
-import type { ImageHighlights } from "../../core/images.ts";
+import type { ImageBacklog, ImageHighlights } from "../../core/images.ts";
 import type { ImagesSnapshot, WorkloadLink } from "../../shared/images.ts";
 
 /** The name findings use for resources that aren't in a region (IAM, S3 settings, CloudFront, Route 53). */
@@ -542,7 +542,7 @@ export interface AwsInventory {
   /** AWS's published EC2 address ranges, to recognise a record that points at an AWS address. Held for the scan, never stored. */
   ec2Prefixes: Prefixes | null;
   /** The images this scan looked at and what Trivy found in each, with the workloads known in the entity (set by the provider). */
-  images?: { snapshot: ImagesSnapshot; scans: Map<string, ImageHighlights>; workloads: WorkloadLink[] };
+  images?: { snapshot: ImagesSnapshot; scans: Map<string, ImageHighlights>; workloads: WorkloadLink[]; later?: ImageBacklog | null };
 }
 
 export type { Related } from "../../core/types.ts";

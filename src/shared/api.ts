@@ -636,6 +636,20 @@ export interface ScanStatus {
   queued: string[];
   /** The running or queued scans include an account in the current view. */
   inScope: boolean;
+  /**
+   * Images being read in the background, after scans that had no time for them. It gives way to any scan, so while one
+   * runs this says what waits behind it. Null when nothing is left to read.
+   */
+  background: {
+    /** The account whose images are being read; null when the user can't see it. */
+    accountId: string | null;
+    done: number;
+    total: number;
+    /** Accounts with images to read after this one. */
+    queued: number;
+    /** One of those accounts is in the current view. */
+    inScope: boolean;
+  } | null;
   lastScanAt: string | null;
   lastFailed: { id: number; finishedAt: string; error: string; account: string } | null;
 }

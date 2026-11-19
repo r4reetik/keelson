@@ -14,7 +14,9 @@
 // asks only for its vulnerability database (and its Java index, about 1 GB, the
 // first time an image holds JAR files), from the public registries Aqua
 // publishes them to. Two processes can't share its cache, so images are scanned
-// one at a time.
+// one at a time: every command that opens the cache waits its turn (`inTurn`),
+// which is what lets the background reader finish its image while a new scan
+// starts.
 //
 // An image named by its digest never changes, so it is pulled once. Trivy then
 // writes its own bill of materials for what it read (`sbom`), and on later scans
@@ -111,6 +113,14 @@ export function trivyFailure(message: string): TrivyError {
   return e;
 }
 
+/** One command on Trivy's cache at a time, in the order they were asked for. */
+let turn: Promise<unknown> = Promise.resolve();
+function inTurn<T>(work: () => Promise<T>): Promise<T> {
+  const mine = turn.then(work, work);
+  turn = mine.catch(() => {});
+  return mine;
+}
+
 async function run(bin: string, args: string[], seconds: number, extra: Record<string, string> = {}): Promise<string> {
   try {
     return await runChild("Trivy", bin, args, { seconds, env: { ...QUIET, ...extra }, fail: (m) => new TrivyError(m) });
@@ -149,31 +159,34 @@ export const trivy = {
       const host = ref.split("/")[0];
       const auths = login ? { [host]: { auth: Buffer.from(`${login.username}:${login.password}`).toString("base64") } } : {};
       await writeFile(join(docker, "config.json"), JSON.stringify({ auths }), { mode: 0o600 });
-      return await run(
-        bin,
-        [
-          "image",
-          "--format",
-          "json",
-          "--quiet",
-          "--scanners",
-          "vuln,secret",
-          "--list-all-pkgs",
-          "--image-src",
-          "remote",
-          "--cache-dir",
-          await trivyCacheDir(toolDir),
-          "--timeout",
-          `${trivyLimits.imageSeconds}s`,
-          // As many layers at a time as it has cores to work on them.
-          "--parallel",
-          String(scannerCpus()),
-          // Trivy asks for linux/amd64 unless told otherwise.
-          ...(platform ? ["--platform", platform] : []),
-          ref,
-        ],
-        trivyLimits.imageSeconds + 30,
-        { DOCKER_CONFIG: docker },
+      const cache = await trivyCacheDir(toolDir);
+      return await inTurn(() =>
+        run(
+          bin,
+          [
+            "image",
+            "--format",
+            "json",
+            "--quiet",
+            "--scanners",
+            "vuln,secret",
+            "--list-all-pkgs",
+            "--image-src",
+            "remote",
+            "--cache-dir",
+            cache,
+            "--timeout",
+            `${trivyLimits.imageSeconds}s`,
+            // As many layers at a time as it has cores to work on them.
+            "--parallel",
+            String(scannerCpus()),
+            // Trivy asks for linux/amd64 unless told otherwise.
+            ...(platform ? ["--platform", platform] : []),
+            ref,
+          ],
+          trivyLimits.imageSeconds + 30,
+          { DOCKER_CONFIG: docker },
+        ),
       );
     } finally {
       await rm(docker, { recursive: true, force: true }).catch(() => {});
@@ -202,23 +215,26 @@ export const trivy = {
     try {
       const file = join(dir, "image.cdx.json");
       await writeFile(file, sbom, { mode: 0o600 });
-      return await run(
-        bin,
-        [
-          "sbom",
-          "--format",
-          "json",
-          "--quiet",
-          "--skip-db-update",
-          "--skip-java-db-update",
-          "--offline-scan",
-          "--cache-dir",
-          await trivyCacheDir(toolDir),
-          "--timeout",
-          `${MATCH_SECONDS}s`,
-          file,
-        ],
-        MATCH_SECONDS + 30,
+      const cache = await trivyCacheDir(toolDir);
+      return await inTurn(() =>
+        run(
+          bin,
+          [
+            "sbom",
+            "--format",
+            "json",
+            "--quiet",
+            "--skip-db-update",
+            "--skip-java-db-update",
+            "--offline-scan",
+            "--cache-dir",
+            cache,
+            "--timeout",
+            `${MATCH_SECONDS}s`,
+            file,
+          ],
+          MATCH_SECONDS + 30,
+        ),
       );
     } finally {
       await rm(dir, { recursive: true, force: true }).catch(() => {});
@@ -226,10 +242,9 @@ export const trivy = {
   },
   /** Downloads Trivy's vulnerability database, or refreshes it when a newer one is published. No login is involved. */
   async updateDb(bin: string, toolDir: string | null): Promise<void> {
-    await run(
-      bin,
-      ["image", "--download-db-only", "--quiet", "--cache-dir", await trivyCacheDir(toolDir), "--timeout", `${trivyLimits.dbSeconds}s`],
-      trivyLimits.dbSeconds + 30,
+    const dir = await trivyCacheDir(toolDir);
+    await inTurn(() =>
+      run(bin, ["image", "--download-db-only", "--quiet", "--cache-dir", dir, "--timeout", `${trivyLimits.dbSeconds}s`], trivyLimits.dbSeconds + 30),
     );
   },
 };

@@ -17,6 +17,12 @@
 // current database: a vulnerability published since shows up without pulling
 // anything, in a fraction of a second per image.
 //
+// Reading an image for the first time takes about half a minute, so a scan reads
+// what matters most itself, however long that takes: the images workloads run and
+// each repository's latest. The others get what is left of the scan's time, and
+// the ones it doesn't reach are handed back as a backlog (`later`), which the
+// scanner reads in the background once no scan is running.
+//
 // Of Trivy's report only packages, vulnerabilities and a few facts of the image's
 // configuration are kept. A credential found in a file keeps its kind and the
 // file's path; the image's environment variables are scanned in memory with the
@@ -60,6 +66,8 @@ const READABLE_FORMATS = [1, IMAGE_FORMAT];
  * only the layers it hasn't read). One named by its digest never changes and is never pulled twice.
  */
 const RESCAN_MS = 20 * 3600_000;
+/** A registry login is asked for again after this long: the shortest-lived (Container Registry's) lasts an hour. */
+const LOGIN_MS = 30 * 60_000;
 /** Where an account's index of its images is cached (./image-index.ts). */
 export const INDEX_KEY = "imgindex";
 /** An image pulled within this many days is in use by something, even when Keelson can't see what. */
@@ -98,6 +106,8 @@ export interface RegistryImage {
 export interface ImageTarget extends Omit<ImageEntry, "summary" | "error" | "key"> {
   /** Higher is scanned first, so the images that matter most are done when time runs out. */
   priority: number;
+  /** The newest image of its repository. */
+  latest: boolean;
   /** The registry login, asked for once per registry; null to pull without one (a public image). */
   login: (() => Promise<RegistryLogin | null>) | null;
   /** Set instead of scanning: why Keelson can't pull it (a private registry no connected account holds). */
@@ -175,7 +185,7 @@ export function pickImages(o: {
     ].filter((x): x is string => !!x);
     if (!why.length) continue;
     const priority = use === "internet" ? 120 : use === "running" ? 100 : use === "pulled" ? 60 : 40;
-    const t: ImageTarget = { ...img, own: true, why, priority, login: o.login(img) };
+    const t: ImageTarget = { ...img, own: true, why, priority, latest: newest.get(imageName(img)) === img, login: o.login(img) };
     out.set(imageCacheKey(t), t);
   }
   for (const w of o.ownWorkloads)
@@ -197,6 +207,7 @@ export function pickImages(o: {
         own: false,
         why: [w.internet === true ? "runs in a workload the internet reaches" : "runs in a workload"],
         priority: w.internet === true ? 120 : 100,
+        latest: false,
         login: null,
         ...(where === "private" ? { unreadable: "It is kept in a private registry that no connected account holds." } : {}),
       };
@@ -204,8 +215,17 @@ export function pickImages(o: {
       const prev = out.get(key);
       if (!prev || prev.priority < t.priority) out.set(key, t);
     }
-  return [...out.values()].sort((a, b) => b.priority - a.priority || (b.pushedAt ?? "").localeCompare(a.pushedAt ?? "")).slice(0, MAX_IMAGES);
+  // When a registry has more than one scan looks at, what a scan reads itself is kept before a repository's older images.
+  return [...out.values()]
+    .sort((a, b) => Number(readInScan(b)) - Number(readInScan(a)) || b.priority - a.priority || (b.pushedAt ?? "").localeCompare(a.pushedAt ?? ""))
+    .slice(0, MAX_IMAGES);
 }
+
+/**
+ * The images a scan reads itself, whatever time it takes: the ones workloads run and each repository's latest. The
+ * others (a repository's older images that were pulled lately) can wait for the background.
+ */
+export const readInScan = (t: Pick<ImageTarget, "priority" | "latest">): boolean => t.priority >= 100 || t.latest;
 
 export type ImageSource = "trivy" | "kev" | "pull";
 
@@ -222,14 +242,31 @@ export const highlightsOf = (scan: ImageScan): ImageHighlights => ({
   vulns: scan.vulns.filter((v) => v.kev || (v.fixedIn && (v.severity === "critical" || v.severity === "high"))).slice(0, HIGHLIGHTS),
 });
 
+/**
+ * The images a scan didn't reach in its time, to read once it is over. Their results go to the account's cache, where
+ * the account's next scan finds them without pulling anything.
+ */
+export interface ImageBacklog {
+  /** How many images it holds. */
+  total: number;
+  /**
+   * Reads them one at a time until none is left or `stop` says to give way; a later call goes on from where this one
+   * stopped. `read` is how many images have a result so far, over every call.
+   */
+  run(o: { stop: () => boolean; onProgress?: (done: number, total: number) => void; now?: () => number }): Promise<{ finished: boolean; read: number }>;
+}
+
 export interface ImageScanOutput {
   snapshot: ImagesSnapshot;
   /** What the checks read of each scanned image, by cache key. */
   scans: Map<string, ImageHighlights>;
+  /** The images the scan's time didn't reach; null when it read them all. */
+  later: ImageBacklog | null;
 }
 
 /**
- * Scans the picked images with Trivy, most important first, until the time for one scan runs out. `note` records
+ * Scans the picked images with Trivy, most important first. The images workloads run and each repository's latest are
+ * always read; the others until the time for one scan runs out, and the rest are handed back as `later`. `note` records
  * whether Trivy ran, whether CISA's list was read and whether the registry let Keelson pull, as the provider's coverage.
  */
 export async function scanImages(
@@ -265,7 +302,7 @@ export async function scanImages(
       ready = false;
     }
   }
-  const { version, dbUpdated } = bin ? await trivy.version(bin, o.toolDir) : { version: null, dbUpdated: null };
+  const tool = bin ? await trivy.version(bin, o.toolDir) : { version: null, dbUpdated: null };
   let exploited: Set<string> | null = null;
   if (ready && wanted)
     try {
@@ -278,15 +315,89 @@ export async function scanImages(
 
   // Support dates of every runtime Keelson recognises, read once: which images hold which isn't known before they are scanned.
   const lines = ready && wanted ? await eol.load(Object.values(RUNTIME_PRODUCT), o.toolDir, now).catch(() => ({}) as Awaited<ReturnType<typeof eol.load>>) : {};
-  const logins = new Map<ImageTarget["login"], Promise<RegistryLogin | null>>();
+  // Coverage is the scan's: what the backlog meets after it is over is that image's own, shown with the next scan.
+  let note = o.note;
+  const logins = new Map<ImageTarget["login"], { at: number; login: Promise<RegistryLogin | null> }>();
+  const loginFor = (login: ImageTarget["login"]): Promise<RegistryLogin | null> | null => {
+    if (!login) return null;
+    const had = logins.get(login);
+    if (had && Date.now() - had.at < LOGIN_MS) return had.login;
+    const asked = login();
+    logins.set(login, { at: Date.now(), login: asked });
+    return asked;
+  };
+
+  /** Pulls one image and reads it, and keeps Trivy's bill of materials for it. `skip`: what the reference names isn't an image. */
+  const read = async (t: ImageTarget, key: string, at: number): Promise<{ scan?: ImageScan; skip?: boolean; error?: string }> => {
+    const sbomKey = sbomCacheKey(key);
+    try {
+      const auth = await loginFor(t.login);
+      const ref = `${imageName(t)}${t.digest ? `@${t.digest}` : `:${t.tags[0] ?? "latest"}`}`;
+      // Trivy asks for linux/amd64. An image built for other platforms only is asked for by one of its own.
+      let platform = t.platforms?.length && !t.platforms.includes(DEFAULT_PLATFORM) ? (t.platforms.find((p) => p.startsWith("linux/")) ?? null) : null;
+      let text: string;
+      try {
+        text = await trivy.image(bin!, ref, auth, o.toolDir, platform);
+      } catch (e) {
+        // The registry didn't say which platforms it has: arm64 is the other one images are built for.
+        if (!(e as TrivyError).noPlatform || platform) throw e;
+        platform = "linux/arm64";
+        text = await trivy.image(bin!, ref, auth, o.toolDir, platform);
+      }
+      const doc = parseReport(text);
+      const scan = reduceReport(doc, t, tool.version, at, platform, tool.dbUpdated);
+      note("pull", true);
+      // Trivy's own list of what it read, kept so later scans match it against a newer database without pulling.
+      // Without one the image is read again next time, as before.
+      try {
+        o.cache.put(sbomKey, keptSbom(JSON.parse(await trivy.sbom(bin!, JSON.stringify(inventoryOf(doc)))), ref));
+      } catch {
+        o.cache.delete(sbomKey);
+      }
+      return { scan };
+    } catch (e) {
+      const te = e as TrivyError;
+      if (te.notImage) {
+        o.cache.put(key, { format: IMAGE_FORMAT, skip: "not an image" });
+        return { skip: true };
+      }
+      // A registry that refuses a login the account handed out is a missing permission. An image that's gone, or
+      // one Trivy can't read, is that image's own: only a failure of the tool itself is a gap.
+      if (t.login && (te.denied || !(e instanceof TrivyError))) note("pull", false, e);
+      else if (e instanceof TrivyError && !te.image) note("trivy", false, e);
+      return { error: String(te?.message || e).slice(0, 240) };
+    }
+  };
+
+  /** Applies what changes while an image stays the same; true when the result differs from what is stored. */
+  const refresh = (scan: ImageScan, at: number): boolean => {
+    let changed = false;
+    // CISA's list changes between scans of the same image: it is applied on every scan, not kept from the last one.
+    if (exploited)
+      for (const v of scan.vulns)
+        if (v.kev !== exploited.has(v.id)) {
+          v.kev = !v.kev;
+          changed = true;
+        }
+    // So do support dates: a release line that was supported at the last scan may have reached its end since.
+    for (const r of scan.runtimes) {
+      const support = supportOf(lines[RUNTIME_PRODUCT[r.name] ?? ""], r.version, at);
+      if (support.eol !== r.eol || support.latest !== r.latest || support.until !== r.until) {
+        Object.assign(r, support);
+        changed = true;
+      }
+    }
+    return changed;
+  };
+
   const started = Date.now();
-  let waiting = 0;
+  const rest: ImageTarget[] = [];
   let pulled = 0;
   let checked = 0;
   let done = 0;
   let ran = false;
   for (const t of targets) {
-    const { priority: _p, login, unreadable, ...entry } = t;
+    const { priority: _p, latest: _l, login: _login, unreadable, ...entry } = t;
     const key = imageCacheKey(t);
     const cached = o.cache.get<ImageScan & { skip?: string }>(key);
     // What a reference named last time wasn't an image (a build attestation): it isn't asked for again, or listed.
@@ -296,22 +407,21 @@ export async function scanImages(
     let error: string | null = unreadable ?? null;
     /** The stored result differs from this one: a new scan, or a vulnerability that joined or left CISA's list. */
     let stale = false;
-    const sbomKey = sbomCacheKey(key);
     // What was read of an image named by its digest stays true: only what the database says of its packages changes.
-    const read = usable && cached?.format === IMAGE_FORMAT && (t.digest != null || now - Date.parse(usable.scannedAt) < RESCAN_MS) ? usable : null;
+    const known = usable && cached?.format === IMAGE_FORMAT && (t.digest != null || now - Date.parse(usable.scannedAt) < RESCAN_MS) ? usable : null;
     /** Its vulnerabilities are the current database's, without pulling it. */
     let current = false;
-    if (bin && ready && !unreadable && read) {
+    if (bin && ready && !unreadable && known) {
       // The same database as last time has nothing new to say.
-      if (read.dbUpdated && read.dbUpdated === dbUpdated) current = true;
+      if (known.dbUpdated && known.dbUpdated === tool.dbUpdated) current = true;
       else {
-        const sbom = o.cache.get<Json>(sbomKey);
+        const sbom = o.cache.get<Json>(sbomCacheKey(key));
         if (sbom && Array.isArray(sbom.components))
           try {
             o.onProgress({ phase: "Scanning images with Trivy", done, total: targets.length });
             // An image without a package has nothing to match.
             const doc = sbom.components.length ? parseMatch(await trivy.match(bin, JSON.stringify(sbom), o.toolDir)) : {};
-            scan = rematched(read, doc, dbUpdated);
+            scan = rematched(known, doc, tool.dbUpdated);
             current = stale = ran = true;
           } catch {
             // The image is read again below, which also writes its bill of materials again.
@@ -320,72 +430,25 @@ export async function scanImages(
     }
     if (current) checked++;
     if (bin && ready && !unreadable && !current) {
-      if ((Date.now() - started) / 1000 > trivyLimits.totalSeconds) waiting++;
+      // Only the images that can wait give way to the clock.
+      if (!readInScan(t) && (Date.now() - started) / 1000 > trivyLimits.totalSeconds) rest.push(t);
       else {
         o.onProgress({ phase: "Scanning images with Trivy", done, total: targets.length });
-        try {
-          let auth: RegistryLogin | null = null;
-          if (login) {
-            if (!logins.has(login)) logins.set(login, login());
-            auth = await logins.get(login)!;
-          }
-          const ref = `${imageName(t)}${t.digest ? `@${t.digest}` : `:${t.tags[0] ?? "latest"}`}`;
-          // Trivy asks for linux/amd64. An image built for other platforms only is asked for by one of its own.
-          let platform = t.platforms?.length && !t.platforms.includes(DEFAULT_PLATFORM) ? (t.platforms.find((p) => p.startsWith("linux/")) ?? null) : null;
-          let text: string;
-          try {
-            text = await trivy.image(bin, ref, auth, o.toolDir, platform);
-          } catch (e) {
-            // The registry didn't say which platforms it has: arm64 is the other one images are built for.
-            if (!(e as TrivyError).noPlatform || platform) throw e;
-            platform = "linux/arm64";
-            text = await trivy.image(bin, ref, auth, o.toolDir, platform);
-          }
-          const doc = parseReport(text);
-          scan = reduceReport(doc, t, version, now, platform, dbUpdated);
-          stale = true;
-          ran = true;
-          pulled++;
-          o.note("pull", true);
-          // Trivy's own list of what it read, kept so later scans match it against a newer database without pulling.
-          // Without one the image is read again next time, as before.
-          try {
-            o.cache.put(sbomKey, keptSbom(JSON.parse(await trivy.sbom(bin, JSON.stringify(inventoryOf(doc)))), ref));
-          } catch {
-            o.cache.delete(sbomKey);
-          }
-        } catch (e) {
-          const te = e as TrivyError;
-          if (te.notImage) {
-            o.cache.put(key, { format: IMAGE_FORMAT, skip: "not an image" });
-            done++;
-            continue;
-          }
-          error = String(te?.message || e).slice(0, 240);
-          // A registry that refuses a login the account handed out is a missing permission. An image that's gone, or
-          // one Trivy can't read, is that image's own: only a failure of the tool itself is a gap.
-          if (login && (te.denied || !(e instanceof TrivyError))) o.note("pull", false, e);
-          else if (e instanceof TrivyError && !te.image) o.note("trivy", false, e);
+        const r = await read(t, key, now);
+        if (r.skip) {
+          done++;
+          continue;
         }
+        if (r.scan) {
+          scan = r.scan;
+          stale = ran = true;
+          pulled++;
+        } else error = r.error ?? null;
       }
     }
     done++;
     if (scan) {
-      // CISA's list changes between scans of the same image: it is applied on every scan, not kept from the last one.
-      if (exploited)
-        for (const v of scan.vulns)
-          if (v.kev !== exploited.has(v.id)) {
-            v.kev = !v.kev;
-            stale = true;
-          }
-      // So do support dates: a release line that was supported at the last scan may have reached its end since.
-      for (const r of scan.runtimes) {
-        const support = supportOf(lines[RUNTIME_PRODUCT[r.name] ?? ""], r.version, now);
-        if (support.eol !== r.eol || support.latest !== r.latest || support.until !== r.until) {
-          Object.assign(r, support);
-          stale = true;
-        }
-      }
+      if (refresh(scan, now)) stale = true;
       if (stale) o.cache.put(key, scan);
       scans.set(key, highlightsOf(scan));
       index.add(key, scan);
@@ -393,25 +456,58 @@ export async function scanImages(
     entries.push({ ...entry, key, digest: entry.digest ?? scan?.digest ?? null, summary: scan ? summarize(scan) : null, error: scan ? null : error });
   }
   if (ready && (ran || !wanted)) o.note("trivy", true);
+  note = () => {};
   // Results of images that are gone, or no longer picked, go with them.
   const kept = new Set(targets.map(imageCacheKey));
   for (const key of o.cache.keys("img:")) if (!kept.has(key)) o.cache.delete(key);
   for (const key of o.cache.keys("imgsbom:")) if (!kept.has(`img:${key.slice(8)}`)) o.cache.delete(key);
   // What is in which image, for the lists that work across every image.
   o.cache.put(INDEX_KEY, index.done());
-  return { snapshot: { images: entries, repositories: o.repositories, waiting, pulled, checked, trivy: version, dbUpdated }, scans };
+
+  let next = 0;
+  let got = 0;
+  const later: ImageBacklog | null = rest.length
+    ? {
+        total: rest.length,
+        async run({ stop, onProgress, now: clock = Date.now }) {
+          // Trivy refreshes its database as it goes: a result says which one its vulnerabilities are from.
+          const fresh = await trivy.version(bin!, o.toolDir);
+          if (fresh.dbUpdated) Object.assign(tool, fresh);
+          while (next < rest.length && !stop()) {
+            onProgress?.(next, rest.length);
+            const t = rest[next];
+            const key = imageCacheKey(t);
+            const at = clock();
+            const r = await read(t, key, at);
+            if (r.scan) {
+              refresh(r.scan, at);
+              o.cache.put(key, r.scan);
+              got++;
+            }
+            next++;
+          }
+          onProgress?.(next, rest.length);
+          return { finished: next >= rest.length, read: got };
+        },
+      }
+    : null;
+  return {
+    snapshot: { images: entries, repositories: o.repositories, waiting: rest.length, pulled, checked, trivy: tool.version, dbUpdated: tool.dbUpdated },
+    scans,
+    later,
+  };
 }
 
 /**
- * The order images are scanned in, since a scan's time runs out before a large registry is read for the first time (a
- * new image takes half a minute to pull and read; one already read is only matched against the database, in a fraction
- * of a second). First the images workloads run, new ones before ones already read; then the rest, never read before
- * read, and the ones read longest ago first. In the order they are listed, a scan would reach the same first images
- * every day and never the others.
+ * The order images are scanned in (a new image takes half a minute to pull and read; one already read is only matched
+ * against the database, in a fraction of a second). First what a scan reads itself, most exposed first: the images
+ * workloads run, then each repository's latest, new ones before ones already read. Then the rest, which have what is
+ * left of the scan's time: never read before read, and the ones read longest ago first. In the order they are listed, a
+ * scan would reach the same first images every day and never the others.
  */
 export function inScanOrder(targets: ImageTarget[], previous: ImagesSnapshot | null): ImageTarget[] {
   const scannedAt = new Map((previous?.images ?? []).filter((i) => i.summary).map((i) => [i.key, i.summary!.scannedAt]));
-  const rank = (t: ImageTarget) => (t.priority >= 100 ? 0 : 2) + (scannedAt.has(imageCacheKey(t)) ? 1 : 0);
+  const rank = (t: ImageTarget) => (readInScan(t) ? 0 : 2) + (scannedAt.has(imageCacheKey(t)) ? 1 : 0);
   return [...targets].sort(
     (a, b) =>
       rank(a) - rank(b) ||

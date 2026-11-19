@@ -138,12 +138,25 @@ export function dashboardRoutes(r: Routes, { repo, scanner, version }: AppContex
     const seen = new Set(viewOf(repo, c).accounts.map((a) => a.id));
     const s = scanner.state;
     const hidden = !!s.accountId && !seen.has(s.accountId);
+    // The same for images read in the background: nothing of it is shown to someone who sees none of its accounts.
+    const b = scanner.background;
+    const reading = b ? [b.accountId, ...b.queued].filter((id) => seen.has(id)) : [];
     return c.json({
       ...s,
       accountId: hidden ? null : s.accountId,
       scanId: hidden ? null : s.scanId,
       queued: s.queued.filter((id) => seen.has(id)),
       inScope: !!(s.accountId && inScope.has(s.accountId)) || s.queued.some((id) => inScope.has(id)),
+      background:
+        b && reading.length
+          ? {
+              accountId: seen.has(b.accountId) ? b.accountId : null,
+              done: b.done,
+              total: b.total,
+              queued: b.queued.filter((id) => seen.has(id)).length,
+              inScope: reading.some((id) => inScope.has(id)),
+            }
+          : null,
       lastScanAt,
       lastFailed,
     } satisfies ScanStatus);

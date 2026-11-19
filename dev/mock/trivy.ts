@@ -401,6 +401,12 @@ function matched(sbomText: string): string {
   });
 }
 
+/**
+ * Set while the mock runs: `beforeImage` is awaited before an image is handed over, so a test can hold a pull and the
+ * mock dev server can make one slow enough to watch.
+ */
+export const mockTrivy: { beforeImage: ((ref: string) => Promise<void> | void) | null } = { beforeImage: null };
+
 let installed = 0;
 let restore: (() => void) | null = null;
 let current: MockTrivyOptions = {};
@@ -425,6 +431,7 @@ export function installMockTrivy(o: MockTrivyOptions = {}): () => void {
     trivy.match = async (_bin, sbomText) => matched(sbomText);
     trivy.image = async (_bin, ref, login, _toolDir, platform = null) => {
       current.onImage?.(ref, login, platform);
+      await mockTrivy.beforeImage?.(ref);
       const denied = () =>
         Object.assign(new TrivyError("The registry answered DENIED: requested access to the resource is denied"), { denied: true, image: true });
       if (current.deny?.some((re) => re.test(ref))) throw denied();

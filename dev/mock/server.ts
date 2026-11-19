@@ -14,6 +14,8 @@ import { installMockAws, mockAws } from "./aws.ts";
 import { installMockAlibaba, mockAlibaba } from "./alibaba.ts";
 import { installMockGithub } from "./github.ts";
 import { installMockInternet } from "./internet.ts";
+import { MOCK_DIGEST, mockTrivy } from "./trivy.ts";
+import { trivyLimits } from "../../src/core/trivy.ts";
 import { seedAccount, seedAlibaba, seedAws, seedGithub, seedInternet, seedTriageHistory, seedVercel } from "./accounts.ts";
 import { providerList } from "../../src/shared/providers.ts";
 import { ROLES, ROLE_INFO } from "../../src/shared/roles.ts";
@@ -76,6 +78,11 @@ await scanner.start("manual").done;
 // Once more for Cloudflare, which was scanned before AWS noticed the address was gone.
 await scanner.start("manual", [MOCK_ACCOUNT]).done;
 seedTriageHistory(repo, MOCK_ACCOUNT);
+// From here on, the first scan of the AWS account shows the background reader: an older build turns out to have been
+// pulled lately, the scan has no time for it, and reading it takes long enough to watch in the top bar.
+mockAws.oldBuildPulled = true;
+trivyLimits.totalSeconds = -1;
+mockTrivy.beforeImage = (ref) => (ref.includes(MOCK_DIGEST.webOld) ? new Promise((done) => setTimeout(done, 25_000)) : undefined);
 console.log(`\n  Keelson (mock ${providerList()} data)\n\n  Open:  ${running.url}`);
 console.log(
   signup

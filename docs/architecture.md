@@ -155,13 +155,17 @@ PATH):
    (`sbom/builds.ts`, published as `githubImageBuilds`).
 2. **What is scanned.** `pickImages` takes every image a workload in the entity runs, images pulled in the last 30
    days (the newest three of each repository), and the newest image of each repository, most exposed first, at
-   most 400 a scan. An image is scanned by the
+   most 400 a scan (what runs and each repository's newest before older builds). An image is scanned by the
    account whose registry holds it; one a workload runs from a public registry (Docker Hub, ECR Public, a public
    GitHub package of another organization) by the account that runs it, without a login.
 3. **The scan.** Trivy's database is updated first, on its own. Then each image is pulled by digest with
    `trivy image --image-src remote --scanners vuln,secret`, one at a time (two processes can't share Trivy's
-   cache), until 30 minutes have passed; the rest wait for the next scan, which starts with the images workloads run,
-   then the ones never scanned, then the rest from the stalest. Trivy runs at the lowest priority, on
+   cache). The images workloads run and each repository's latest image are always read, however long that takes;
+   a repository's older builds get what is left of 30 minutes. What isn't reached is read in the background once no
+   scan is running or queued (the top bar shows its progress), and the account is then scanned again, which pulls
+   nothing and reports what those images hold. A scan that is asked for goes first: the background gives way after
+   the image it is on, and goes on when the queue is empty. After a restart, unread images wait for the account's
+   next scan. Trivy runs at the lowest priority, on
    at most half the cores (`GOMAXPROCS`, `--parallel`) and with a soft memory ceiling (`GOMEMLIMIT`). An image
    with no linux/amd64 build is asked for by a platform it has, and what turns out not to be an image (an
    attestation) is dropped and not asked for again. The registry login (ECR's 12-hour token,

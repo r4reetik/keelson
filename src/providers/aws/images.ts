@@ -128,7 +128,7 @@ export async function scanAwsImages(
     foreign: foreignFor(inv.accountId, o.related),
     now: inv.now,
   });
-  const { snapshot, scans } = await scanImages(targets, {
+  const { snapshot, scans, later } = await scanImages(targets, {
     repositories: inv.regions.reduce((n, r) => n + (r.repositories?.length ?? 0), 0),
     cache: o.cache,
     toolDir: o.toolDir,
@@ -137,6 +137,6 @@ export async function scanAwsImages(
     now: inv.now,
     previous: o.previous,
   });
-  inv.images = { snapshot, scans, workloads };
+  inv.images = { snapshot, scans, workloads, later };
   inv.unreadable = [...client.coverage.values()].filter((c) => !c.ok).map((c) => c.key);
 }

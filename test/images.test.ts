@@ -7,11 +7,11 @@
 
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installMockAlibaba, MOCK_ALIBABA_ACCOUNT, MOCK_ALIBABA_POD_SECRET, MOCK_ALIBABA_REGISTRY_PASSWORD, MOCK_ALIBABA_TOKEN } from "../dev/mock/alibaba.ts";
-import { installMockAws, MOCK_AWS_ACCOUNT, MOCK_AWS_REGISTRY_PASSWORD, MOCK_AWS_TOKEN } from "../dev/mock/aws.ts";
+import { installMockAws, MOCK_AWS_ACCOUNT, MOCK_AWS_REGISTRY_PASSWORD, MOCK_AWS_TOKEN, mockAws } from "../dev/mock/aws.ts";
 import { installMockCloudflare } from "../dev/mock/cloudflare.ts";
 import { installMockGithub, MOCK_GITHUB_ACCOUNT } from "../dev/mock/github.ts";
 import { seedAccount, seedAlibaba, seedAws, seedGithub } from "../dev/mock/accounts.ts";
@@ -22,6 +22,7 @@ import {
   MOCK_IMAGE_FILE_SECRET,
   MOCK_IMAGE_LABEL,
   MOCK_KEV,
+  mockTrivy,
   type MockTrivyOptions,
 } from "../dev/mock/trivy.ts";
 import { scannerCpus } from "../src/core/anchore.ts";
@@ -34,6 +35,7 @@ import {
   inScanOrder,
   parseReport,
   pickImages,
+  readInScan,
   reduceReport,
   runtimesIn,
   sbomCacheKey,
@@ -41,7 +43,7 @@ import {
   type ImageTarget,
   type RegistryImage,
 } from "../src/core/images.ts";
-import { trivy, trivyFailure, TrivyError } from "../src/core/trivy.ts";
+import { trivy, trivyFailure, trivyLimits, TrivyError } from "../src/core/trivy.ts";
 import { imageBuilds } from "../src/providers/github/sbom/builds.ts";
 import { fixPlaces } from "../src/server/images.ts";
 import type { RepoDependencies } from "../src/shared/dependencies.ts";
@@ -276,8 +278,12 @@ test("a repository deployed every day keeps its newest few pulled images, and a 
   });
   assert.deepEqual(
     targets.map((t) => `${t.repository}:${t.tags[0]}`),
-    ["api:b9", "api:b1", "api:b2", "api:b3", "tools:1"],
-    "what runs, the newest three pulled lately, and each repository's newest",
+    ["api:b9", "api:b1", "tools:1", "api:b2", "api:b3"],
+    "what runs and each repository's newest, which a scan reads itself, then the other two of the newest three pulled lately",
+  );
+  assert.deepEqual(
+    targets.filter(readInScan).map((t) => t.tags[0]),
+    ["b9", "b1", "1"],
   );
 
   const at = (tag: string) => targets.find((t) => t.tags[0] === tag)!;
@@ -285,13 +291,13 @@ test("a repository deployed every day keeps its newest few pulled images, and a 
   const previous = { images: [seen("b9", day(1)), seen("b2", day(1)), seen("1", day(3))] } as unknown as ImagesSnapshot;
   assert.deepEqual(
     inScanOrder(targets, previous).map((t) => t.tags[0]),
-    ["b9", "b1", "b3", "1", "b2"],
-    "what runs first, then what was never scanned, then the rest from the stalest",
+    ["b1", "b9", "1", "b3", "b2"],
+    "what a scan reads itself first, the never scanned before the scanned; then the rest, never scanned and then from the stalest",
   );
   assert.deepEqual(
     inScanOrder(targets, null).map((t) => t.tags[0]),
-    ["b9", "b1", "b2", "b3", "1"],
-    "a first scan goes by exposure",
+    ["b9", "b1", "1", "b2", "b3"],
+    "a first scan reads what runs, then each repository's newest, then the older builds",
   );
   // Among images that run, a new one comes before one to refresh.
   const both = [
@@ -375,6 +381,15 @@ test("the real runner gives a scanner the registry login for that one host only,
     assert.ok(!again.includes("must-not-reach-the-scanner"));
     assert.match(again, new RegExp(`GOMAXPROCS=${scannerCpus()}\\b`));
     assert.match(await trivy.sbom(bin, "{}"), /ARGS convert --format cyclonedx .*report\.json/);
+
+    // Two processes can't share Trivy's cache: whatever opens it waits its turn, so the background reader can finish
+    // its image while a scan that just started asks for the database.
+    const log = join(dir, "turns.log");
+    const slow = join(dir, "slow-trivy");
+    writeFileSync(slow, `#!/bin/sh\necho start >> "${log}"\nsleep 0.2\necho end >> "${log}"\n`);
+    chmodSync(slow, 0o755);
+    await Promise.all([trivy.image(slow, "docker.io/library/alpine:3", null, dir), trivy.match(slow, "{}", dir), trivy.updateDb(slow, dir)]);
+    assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), ["start", "end", "start", "end", "start", "end"]);
   } finally {
     delete process.env.KEELSON_TEST_SECRET;
     rmSync(dir, { recursive: true, force: true });
@@ -553,6 +568,7 @@ test("a scan asks for an arm64-only image by its own platform, and forgets what 
       own: false,
       why: ["runs in a workload"],
       priority: 100,
+      latest: false,
       login: null,
     });
     const notes: string[] = [];
@@ -613,6 +629,7 @@ test("an image is pulled once: later scans match its stored packages against the
       own: false,
       why: ["runs in a workload"],
       priority: 100,
+      latest: false,
       login: digest ? async () => ({ username: "AWS", password: "x" }) : null,
     });
     const web = target(ECR, "web", MOCK_DIGEST.web, "1.4.2");
@@ -687,6 +704,97 @@ test("an image is pulled once: later scans match its stored packages against the
     await scanImages([shipper], { repositories: 1, cache, toolDir: null, onProgress: () => {}, note: () => {}, now: start + 4 * day });
     assert.deepEqual(cache.keys("imgsbom:"), [sbomCacheKey(imageCacheKey(shipper))]);
   } finally {
+    restore();
+  }
+});
+
+test("a scan always reads what runs and each repository's latest image, and hands the rest to the background", async () => {
+  const { installMockTrivy } = await import("../dev/mock/trivy.ts");
+  const pulled: string[] = [];
+  const restore = installMockTrivy({
+    onImage: (ref) =>
+      pulled.push(
+        ref
+          .split("/")
+          .pop()!
+          .replace(/@sha256:(..).*/, "@$1"),
+      ),
+  });
+  const limit = trivyLimits.totalSeconds;
+  // No time at all for the images that can wait.
+  trivyLimits.totalSeconds = -1;
+  try {
+    const store = new Map<string, unknown>();
+    const cache = {
+      get: <T>(k: string) => (store.has(k) ? (structuredClone(store.get(k)) as T) : null),
+      put: (k: string, v: unknown) => void store.set(k, structuredClone(v)),
+      keys: (prefix: string) => [...store.keys()].filter((k) => k.startsWith(prefix)),
+      delete: (k: string) => void store.delete(k),
+    };
+    let logins = 0;
+    const login = async () => ({ username: "AWS", password: `x${++logins}` });
+    const target = (repository: string, digest: string, tag: string, priority: number, latest: boolean): ImageTarget => ({
+      registry: ECR,
+      repository,
+      region: "eu-west-1",
+      digest,
+      tags: [tag],
+      pushedAt: null,
+      pulledAt: null,
+      public: false,
+      own: true,
+      why: [],
+      priority,
+      latest,
+      login,
+    });
+    // An older build that was pulled lately, listed first; the image a service runs; another older build; a repository's latest nothing runs.
+    const old = target("web", MOCK_DIGEST.webOld, "1.4.1", 60, false);
+    const older = target("api", MOCK_DIGEST.api, "2026.10.1", 60, false);
+    const targets = [old, target("web", MOCK_DIGEST.web, "1.4.2", 120, true), older, target("tools", MOCK_DIGEST.tools, "latest", 40, true)];
+    const start = Date.parse("2026-11-01T06:00:00Z");
+    const scan = (now: number) => scanImages(targets, { repositories: 3, cache, toolDir: null, onProgress: () => {}, note: () => {}, now });
+
+    const first = await scan(start);
+    assert.deepEqual(pulled, ["web@a1", "tools@c3"], "the running image and each repository's latest are read whatever the time");
+    assert.equal(first.snapshot.waiting, 2);
+    assert.equal(first.later?.total, 2, "the older builds are handed back for the background");
+    assert.deepEqual(
+      first.snapshot.images.map((i) => `${i.repository}:${i.tags[0]} ${i.summary ? "read" : "waiting"}`),
+      ["web:1.4.2 read", "tools:latest read", "web:1.4.1 waiting", "api:2026.10.1 waiting"],
+    );
+    assert.equal(cache.get(imageCacheKey(old)), null);
+
+    // The background reads one image, then gives way to a scan that was asked for.
+    const progress: string[] = [];
+    let asked = 0;
+    const later = first.later!;
+    const paused = await later.run({ stop: () => asked++ > 0, onProgress: (done, total) => progress.push(`${done}/${total}`), now: () => start + 3600_000 });
+    assert.deepEqual(paused, { finished: false, read: 1 });
+    assert.deepEqual(pulled.slice(2), ["web@a0"]);
+    const kept = cache.get<ImageScan>(imageCacheKey(old))!;
+    assert.equal(kept.scannedAt, new Date(start + 3600_000).toISOString(), "read when the background got to it");
+    assert.ok(
+      kept.vulns.some((v) => v.id === MOCK_KEV && v.kev),
+      "with CISA's list applied, as in a scan",
+    );
+    assert.ok(cache.get(sbomCacheKey(imageCacheKey(old))), "and its bill of materials kept, so it is never pulled again");
+    // It goes on from where it stopped.
+    assert.deepEqual(await later.run({ stop: () => false, onProgress: (done, total) => progress.push(`${done}/${total}`) }), { finished: true, read: 2 });
+    assert.deepEqual(pulled.slice(3), ["api@b2"]);
+    assert.deepEqual(progress, ["0/2", "1/2", "1/2", "2/2"]);
+    assert.equal(logins, 1, "one registry login serves the scan and the background that follows it");
+
+    // The scan that follows pulls nothing and has every image.
+    pulled.length = 0;
+    const second = await scan(start + 2 * 3600_000);
+    assert.deepEqual(pulled, []);
+    assert.equal(second.later, null);
+    assert.deepEqual([second.snapshot.waiting, second.snapshot.pulled, second.snapshot.checked], [0, 0, 4]);
+    assert.ok(second.snapshot.images.every((i) => i.summary));
+    assert.ok(second.scans.get(imageCacheKey(old))!.vulns.length, "and the checks read what the background found");
+  } finally {
+    trivyLimits.totalSeconds = limit;
     restore();
   }
 });
@@ -783,6 +891,72 @@ describe("image scans against the mocked platforms", () => {
       assert.deepEqual(pulls, []);
       assert.equal((await findings(t)).length, web.length + api.length, "and reports the same findings from what it kept");
     } finally {
+      t.cleanup();
+    }
+  });
+
+  test("images a scan had no time for are read in the background once no scan runs, and the account is then scanned again", async () => {
+    const limit = trivyLimits.totalSeconds;
+    // The build before the current one was pulled lately, and the scan has no time for images that can wait.
+    mockAws.oldBuildPulled = true;
+    trivyLimits.totalSeconds = -1;
+    let release = () => {};
+    const held = new Promise<void>((done) => {
+      release = done;
+    });
+    let reached = () => {};
+    const reading = new Promise<void>((done) => {
+      reached = done;
+    });
+    mockTrivy.beforeImage = (ref) => {
+      if (!ref.includes(MOCK_DIGEST.webOld)) return;
+      reached();
+      return held;
+    };
+    pulls.length = 0;
+    const t = makeApp();
+    try {
+      seedAws(t.repo, t.vault, { entity: "Mock Group" });
+      const other = seedAccount(t.repo, t.vault, { entity: "Other Ltd" });
+      await t.scanner.start("test", [MOCK_AWS_ACCOUNT]).done;
+      const first = t.repo.scans.latest(MOCK_AWS_ACCOUNT)!;
+      assert.equal(first.snap.images!.waiting, 1);
+      const old = (await imagesOf(t)).find((i) => i.digest === MOCK_DIGEST.webOld)!;
+      assert.deepEqual([old.use, old.summary], ["pulled", null], "listed, and not read yet");
+
+      // The scan is over; the image is being read.
+      await reading;
+      const status = await t.json("/api/scan/status?scope=all");
+      assert.equal(status.running, false);
+      assert.deepEqual(status.background, { accountId: MOCK_AWS_ACCOUNT, done: 0, total: 1, queued: 0, inScope: true });
+      assert.equal((await t.json(`/api/scan/status?scope=a:${other.id}`)).background.inScope, false, "another view isn't told its images are being read");
+      const outsider = t.limitedAs("viewer", [other.entityId]);
+      assert.equal((await outsider.json("/api/scan/status?scope=all")).background, null, "someone who can't see the account isn't told of it at all");
+
+      // A scan that is asked for doesn't wait for the background, which goes on when the queue is empty again.
+      await t.scanner.start("manual", [other.id]).done;
+      assert.equal((await t.json("/api/scan/status?scope=all")).background.total, 1);
+
+      release();
+      await t.scanner.idle();
+      const scans = (await t.json("/api/scans?scope=all")).scans as { trigger: string; status: string; accountId: string }[];
+      assert.deepEqual(
+        scans.map((s) => `${s.accountId === other.id ? "other" : "aws"} ${s.trigger} ${s.status}`),
+        ["aws images done", "other manual done", "aws test done"],
+        "one more scan of the account, for what the images hold",
+      );
+      const second = t.repo.scans.latest(MOCK_AWS_ACCOUNT)!;
+      assert.deepEqual([second.snap.images!.waiting, second.snap.images!.pulled], [0, 0], "which pulled nothing");
+      assert.equal(pulls.filter((p) => p.ref.includes(MOCK_DIGEST.webOld)).length, 1, "the image was pulled once, by the background");
+      assert.ok((await imagesOf(t)).find((i) => i.digest === MOCK_DIGEST.webOld)!.summary);
+      assert.equal((await t.json("/api/scan/status?scope=all")).background, null);
+      assert.equal(t.scanner.background, null);
+    } finally {
+      release();
+      await t.scanner.idle();
+      mockTrivy.beforeImage = null;
+      mockAws.oldBuildPulled = false;
+      trivyLimits.totalSeconds = limit;
       t.cleanup();
     }
   });

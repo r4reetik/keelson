@@ -2,8 +2,16 @@
 // One account at a time keeps the request rate predictable when several accounts
 // share a token (providers' rate limits are per token). What a scan
 // reads and checks is up to the account's provider (src/providers).
+//
+// A scan may leave images it had no time to read (a backlog). Once no scan is
+// running or queued they are read in the background, one account at a time, and
+// the account is then scanned again, which pulls nothing and reports what they
+// hold. A new scan always goes first: the background gives way after the image
+// it is on. A backlog lives in memory, with its scan's registry access: after a
+// restart the account's next scan picks up where it was.
 
 import { computeScore, severityCounts } from "./core/engine.ts";
+import type { ImageBacklog } from "./core/images.ts";
 import { PROVIDER } from "./providers/index.ts";
 import { notifyScan } from "./notify.ts";
 import { displayName, type Account, type Repo } from "./store/repo.ts";
@@ -22,6 +30,16 @@ export interface ScanState {
   done: number | null;
   total: number | null;
   /** Accounts waiting their turn, in order. */
+  queued: string[];
+}
+
+/** Images being read after their scans finished. */
+export interface BackgroundState {
+  /** The account whose images are read now, or next when a scan is in the way. */
+  accountId: string;
+  done: number;
+  total: number;
+  /** Accounts with images to read after this one. */
   queued: string[];
 }
 
@@ -45,12 +63,17 @@ const IDLE: ScanState = { running: false, accountId: null, scanId: null, trigger
 
 export class Scanner {
   state: ScanState = { ...IDLE };
+  /** What the background is reading; null when no scan left anything. */
+  background: BackgroundState | null = null;
   readonly #repo: Repo;
   readonly #vault: TokenVault;
   readonly #log: (msg: string) => void;
   readonly #toolDir: string | null;
   #jobs: Job[] = [];
   #current: Job | null = null;
+  /** What scans left to read, by account, in the order they finished. */
+  #backlogs = new Map<string, { backlog: ImageBacklog; done: number }>();
+  #working: Promise<void> | null = null;
 
   /** `toolDir`: where scanners keep data between scans (Grype's database), or null to keep none. */
   constructor(repo: Repo, vault: TokenVault, log: (msg: string) => void, opts: { toolDir?: string | null } = {}) {
@@ -118,6 +141,78 @@ export class Scanner {
     }
     this.#current = null;
     this.state = { ...IDLE };
+    this.#resume();
+  }
+
+  /** Settles when no scan is running or queued and the background has nothing left to read. For tests and shutdown. */
+  async idle(): Promise<void> {
+    while (this.#current || this.#jobs.length || this.#working) {
+      await Promise.allSettled([this.#current?.promise, ...this.#jobs.map((j) => j.promise), this.#working]);
+      // A scan's promise settles a moment before the queue moves on.
+      await new Promise((r) => setImmediate(r));
+    }
+  }
+
+  #busy(): boolean {
+    return !!this.#current || this.#jobs.length > 0;
+  }
+
+  #show(): void {
+    const [first, ...rest] = this.#backlogs.keys();
+    const b = first ? this.#backlogs.get(first)! : null;
+    this.background = b ? { accountId: first, done: b.done, total: b.backlog.total, queued: rest } : null;
+  }
+
+  /** Starts reading backlogs when nothing else is going on. */
+  #resume(): void {
+    this.#show();
+    if (this.#working || this.#busy() || !this.#backlogs.size) return;
+    this.#working = this.#work().finally(() => {
+      this.#working = null;
+      // A scan may have come and gone while the last image was being read.
+      this.#resume();
+    });
+  }
+
+  async #work(): Promise<void> {
+    while (!this.#busy()) {
+      const accountId = this.#backlogs.keys().next().value;
+      if (accountId === undefined) return;
+      const entry = this.#backlogs.get(accountId)!;
+      const account = this.#repo.accounts.get(accountId);
+      if (!account) {
+        this.#backlogs.delete(accountId);
+        continue;
+      }
+      let out = { finished: true, read: 0 };
+      try {
+        out = await entry.backlog.run({
+          // A scan that was asked for goes first; a removed account has nowhere to keep results.
+          stop: () => this.#busy() || !this.#repo.accounts.get(accountId),
+          onProgress: (done) => {
+            entry.done = done;
+            this.#show();
+          },
+        });
+      } catch (e) {
+        this.#log(`Reading ${displayName(account)}'s remaining images stopped: ${(e as Error)?.message || e}`);
+      }
+      // Its account was scanned again meanwhile: that scan's own backlog, if any, has taken this one's place.
+      if (this.#backlogs.get(accountId) !== entry) continue;
+      if (!out.finished) {
+        if (this.#repo.accounts.get(accountId)) return;
+        this.#backlogs.delete(accountId);
+        continue;
+      }
+      this.#backlogs.delete(accountId);
+      this.#show();
+      if (!out.read) continue;
+      // The results are in the account's cache: a scan now pulls nothing, and reports what the images hold.
+      this.#log(
+        `Read ${out.read} more ${out.read === 1 ? "image" : "images"} of ${displayName(account)} in the background; scanning it again for their findings`,
+      );
+      this.start("images", [accountId]);
+    }
   }
 
   async #scan(job: Job): Promise<ScanResult> {
@@ -177,6 +272,10 @@ export class Scanner {
       const snapshot: ScanSnapshot = { accountName: out.accountName, coverage: out.coverage, checks: result.checkStats, ...out.snapshot };
 
       this.#repo.scans.complete(id, { findings: result.findings, score: score.overall, counts, categories: result.categories, snapshot, calls });
+      // What the scan had no time to read waits for the queue to empty; a scan that read everything clears what an earlier one left.
+      if (out.backlog?.total) this.#backlogs.set(account.id, { backlog: out.backlog, done: 0 });
+      else this.#backlogs.delete(account.id);
+      this.#show();
       this.#repo.scans.prune(account.id, settings.retentionDays);
       // Keep the provider's name current, for accounts renamed in its dashboard.
       if (out.accountName && out.accountName !== account.name) this.#repo.accounts.update(account.id, { name: out.accountName });

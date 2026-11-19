@@ -5,7 +5,7 @@
 
 import type { AlibabaSourceKey } from "./sources.ts";
 import type { AddressHistory } from "../../shared/api.ts";
-import type { ImageHighlights } from "../../core/images.ts";
+import type { ImageBacklog, ImageHighlights } from "../../core/images.ts";
 import type { ImagesSnapshot, WorkloadLink } from "../../shared/images.ts";
 import type { AlibabaContainerGroup, AlibabaRegistry } from "./images.ts";
 
@@ -409,5 +409,5 @@ export interface AlibabaInventory {
   /** Elastic Container Instance groups; null when unreadable, undefined before they're read. */
   containerGroups?: AlibabaContainerGroup[] | null;
   /** The images this scan looked at and what Trivy found in each, with the workloads known in the entity (set by the provider). */
-  images?: { snapshot: ImagesSnapshot; scans: Map<string, ImageHighlights>; workloads: WorkloadLink[] };
+  images?: { snapshot: ImagesSnapshot; scans: Map<string, ImageHighlights>; workloads: WorkloadLink[]; later?: ImageBacklog | null };
 }

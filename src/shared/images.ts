@@ -274,7 +274,10 @@ export interface ImagesSnapshot {
   images: ImageEntry[];
   /** Repositories in the account's own registries, and images in them. */
   repositories: number;
-  /** Images picked but not scanned this time, because the time for one scan ran out: they come first next time. */
+  /**
+   * Images picked but not read by this scan, because its time ran out. They are read in the background once no scan is
+   * running, and show with the scan that follows.
+   */
   waiting: number;
   /** Images this scan pulled and read: new ones, and ones named by a tag that may have moved. Absent on scans from before Keelson counted them. */
   pulled?: number;

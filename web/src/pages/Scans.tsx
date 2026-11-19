@@ -12,6 +12,7 @@ const TRIGGER: Record<string, string> = {
   "catch-up": "Catch-up",
   setup: "Account added",
   token: "Token replaced",
+  images: "Images read in the background",
 };
 
 export function ScansPage() {

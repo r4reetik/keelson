@@ -165,6 +165,7 @@ function AppShell({ session, refreshSession, standalone }: { session: Session; r
   const toasts = useKumoToastManager();
   const wasRunning = useRef(false);
   const lastScan = useRef<number | null>(null);
+  const lastFinished = useRef<{ scope: string; at: string | null } | null>(null);
   const failedPolls = useRef(0);
   const [key, setScope] = useScopeKey();
   // A removed account or entity falls back to the default view, and so does an empty one: "All accounts" holds nothing
@@ -196,7 +197,12 @@ function AppShell({ session, refreshSession, standalone }: { session: Session; r
         // with images to scan can take half an hour, and the pages showed the scan before until every account was done).
         setDataVersion((v) => v + 1);
         void refreshSession();
+      } else if (!s.running && lastFinished.current?.scope === scope && lastFinished.current.at && s.lastScanAt && s.lastScanAt !== lastFinished.current.at) {
+        // A scan began and ended between two checks (a scheduled one, or the one that follows images read in the background).
+        setDataVersion((v) => v + 1);
+        void refreshSession();
       }
+      lastFinished.current = { scope, at: s.lastScanAt };
       lastScan.current = s.running ? s.scanId : null;
       wasRunning.current = s.running;
       if (failedPolls.current >= POLL_FAILURES_SHOWN) toasts.add({ title: "Connected to Keelson again", variant: "success" });
@@ -210,11 +216,13 @@ function AppShell({ session, refreshSession, standalone }: { session: Session; r
     }
   }, [toasts, scope, refreshSession, empty]);
 
+  // Images read in the background take about half a minute each: their count needn't be asked for as often as a scan's phase.
+  const every = status?.running ? 2000 : status?.background ? 10_000 : 30_000;
   useEffect(() => {
     void poll();
-    const t = setInterval(poll, status?.running ? 2000 : 30_000);
+    const t = setInterval(poll, every);
     return () => clearInterval(t);
-  }, [poll, status?.running]);
+  }, [poll, every]);
 
   const startScan = useCallback(
     async (scopeKey?: string, opts?: { every?: boolean }) => {
@@ -384,11 +392,16 @@ function TopBar() {
   const parent = route?.parent ? ROUTES.find((r) => r.path === route.parent) : null;
   const running = !!status?.running;
   const name = (id: string | null) => session.accounts?.find((a) => a.id === id)?.display || "account";
+  const several = (session.accounts?.length || 0) > 1;
+  // Images a scan had no time for are read once no scan is running; a scan's own progress comes first.
+  const reading = !running ? status?.background : null;
   const progress = running
-    ? `${(session.accounts?.length || 0) > 1 ? `${name(status!.accountId)}: ` : ""}${status?.phase || "Scanning"}${status?.total ? ` (${status.done}/${status.total})` : ""}${status?.queued.length ? `, ${status.queued.length} more queued` : ""}…`
-    : status?.lastScanAt
-      ? `Last scan ${ago(status.lastScanAt)}`
-      : "Not scanned yet";
+    ? `${several ? `${name(status!.accountId)}: ` : ""}${status?.phase || "Scanning"}${status?.total ? ` (${status.done}/${status.total})` : ""}${status?.queued.length ? `, ${status.queued.length} more queued` : ""}…`
+    : reading
+      ? `${several ? `${name(reading.accountId)}: ` : ""}Reading the remaining images in the background (${reading.done}/${reading.total})${reading.queued ? `, ${plural(reading.queued, "more account")} after it` : ""}…`
+      : status?.lastScanAt
+        ? `Last scan ${ago(status.lastScanAt)}`
+        : "Not scanned yet";
   return (
     // h-14 includes the bottom border, like the sidebar header beside it, so the two lines meet.
     <div className="no-print sticky top-0 z-10 h-14 shrink-0 border-b border-kumo-hairline bg-kumo-base">
@@ -446,8 +459,8 @@ function TopBar() {
           <UserMenu />
         </div>
       </div>
-      {/* Below lg the progress line has no room in the bar; a thin strip shows it while scanning. */}
-      {running && (
+      {/* Below lg the progress line has no room in the bar; a thin strip shows it while scanning or reading images. */}
+      {(running || reading) && (
         <div className="truncate border-t border-kumo-hairline px-4 py-1 text-xs text-kumo-subtle lg:hidden" aria-hidden>
           {progress}
         </div>

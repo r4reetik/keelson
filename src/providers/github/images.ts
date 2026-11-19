@@ -112,7 +112,7 @@ export async function scanGithubImages(
       });
     }
   const targets = pickImages({ registry, workloads, ownWorkloads: [], login: () => null, foreign: () => "entity", now: inv.now });
-  const { snapshot, scans } = await scanImages(targets, {
+  const { snapshot, scans, later } = await scanImages(targets, {
     repositories: listed?.packages ?? 0,
     cache: o.cache,
     toolDir: o.toolDir,
@@ -122,6 +122,6 @@ export async function scanGithubImages(
     now: inv.now,
     previous: o.previous,
   });
-  inv.images = { snapshot, scans, workloads };
+  inv.images = { snapshot, scans, workloads, later };
   inv.unreadable = [...client.coverage.values()].filter((c) => !c.ok).map((c) => c.key);
 }

@@ -242,7 +242,12 @@ export const MOCK_AWS_OLD_IP = "198.51.100.99";
  * `cloudflareOnly`: the web security group admits HTTPS only from a managed prefix list of Cloudflare's ranges instead
  * of from anywhere, as after following XP-006's fix, so Cloudflare's ATS-001 can tell a locked origin from an open one.
  */
-export const mockAws = { released: false, cloudflareOnly: false };
+export const mockAws = {
+  released: false,
+  cloudflareOnly: false,
+  /** The web repository's build before the current one was pulled two days ago: something still runs it that Keelson can't see. */
+  oldBuildPulled: false,
+};
 const LB_IP = "198.51.100.60";
 const DB_IP = "198.51.100.70";
 const WEB = "i-0web00000000000001";
@@ -698,7 +703,7 @@ function rpc(service: string, action: string, body: Record<string, unknown>, reg
           image(MOCK_DIGEST.web, ["1.4.2", "latest"], 20, 0, true),
           image(MOCK_DIGEST.webArm, [], 20, 0),
           image(MOCK_DIGEST.webAttestation, [], 20, 0),
-          image(MOCK_DIGEST.webOld, ["1.4.1"], 60, 45),
+          image(MOCK_DIGEST.webOld, ["1.4.1"], 60, mockAws.oldBuildPulled ? 2 : 45),
           // Left behind by a build: untagged and never pulled.
           image(`sha256:${"09".repeat(32)}`, [], 90, null),
         ],

@@ -105,7 +105,9 @@ function Search({ placeholder, value, onChange }: { placeholder: string; value: 
 }
 
 export function ImagesPage() {
-  const { view, multi } = useShell();
+  const { view, multi, status } = useShell();
+  // Images a scan had no time for are read in the background while Keelson keeps running; after a restart they wait for the next scan.
+  const inBackground = !!status?.background?.inScope;
   const { params } = useLocation();
   const tab = (TABS.includes(params.get("tab") as Tab) ? params.get("tab") : "images") as Tab;
   const page = Math.max(1, Number(params.get("page")) || 1);
@@ -530,7 +532,7 @@ export function ImagesPage() {
         <Stat
           label="Images"
           value={num(s.images)}
-          note={`${num(s.scanned)} scanned${s.waiting ? `, ${num(s.waiting)} wait for the next scan` : ""} · ${plural(s.repositories, "repository", "repositories")} in your registries`}
+          note={`${num(s.scanned)} scanned${s.waiting ? `, ${num(s.waiting)} ${inBackground ? "being read in the background" : "wait for the next scan"}` : ""} · ${plural(s.repositories, "repository", "repositories")} in your registries`}
           onClick={() => goTo("images")}
         />
         <Stat
