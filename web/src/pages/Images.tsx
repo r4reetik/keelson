@@ -9,21 +9,26 @@
 // Every tab is served a page of 50 rows at a time. A registry has hundreds of
 // images and thousands of components: drawing them all at once, and again each
 // time the scan status refreshed, is what made this page slow.
+//
+// A search keeps the rows on screen until the next ones arrive, and those are
+// drawn at low priority: emptying the table and drawing fifty rows again for
+// every pause in typing is what made the search box feel stuck.
 
-import { memo, useEffect, useState, type ReactNode } from "react";
-import { Badge, Banner, Button, DropdownMenu, Input, Link, Pagination, Select, Table, Tabs, Tooltip, useKumoToastManager } from "@cloudflare/kumo";
+import { memo, useDeferredValue, useMemo, type ReactNode } from "react";
+import { Badge, Banner, Button, DropdownMenu, Link, Pagination, Select, Table, Tabs, Tooltip, cn, useKumoToastManager } from "@cloudflare/kumo";
 import { CaretDownIcon, DownloadSimpleIcon, GlobeIcon, KeyIcon, WarningIcon, XIcon } from "@phosphor-icons/react";
 import {
   api,
   COMPONENT_KIND_LABEL,
+  csvOf,
   dateOnly,
   IMAGE_STATUSES,
   IMAGE_USE_LABEL,
-  imageName,
   num,
   plural,
   REGISTRY_LABEL,
   setParams,
+  STATUS_LABEL,
   useLocation,
   withScope,
   type ComponentRow,
@@ -34,12 +39,28 @@ import {
   type ImageVulnRow,
   type RegistryKind,
   type Severity,
+  type TriageStatus,
   type WorkloadRow,
 } from "../lib.ts";
 import { useScopedApi, useShell } from "../shell.tsx";
 import { ListCard, NoRows, Page, PageState, ProviderIcon, Row, SeverityBadge, Stat } from "../components/ui.tsx";
+import { SearchBox } from "../components/search.tsx";
 import { ExploitedBadges, VulnSeverity } from "../components/dependencies.tsx";
-import { BuiltBy, ImageName, imageHref, imageTag, Reach, registryText, UseBadge, VulnCountsView, workloadPlace } from "../components/images.tsx";
+import {
+  BuiltBy,
+  fullRef,
+  IMAGE_COLUMNS,
+  ImageName,
+  imageHref,
+  imageTag,
+  Reach,
+  registryText,
+  UseBadge,
+  VulnCountsView,
+  workloadPlace,
+  workloadsList,
+} from "../components/images.tsx";
+import { copyItemsOf, MoreLink, MoreNames, type FullList, type FullListColumn } from "../components/full-list.tsx";
 import { CopyMenu, DownloadCsvButton, SelectPage, SelectRow, SelectionBar, downloadCsv, useSelection, type Selection } from "../components/selection.tsx";
 
 const TITLE = "Images";
@@ -83,26 +104,126 @@ const EMPTY: Record<Tab, string> = {
   components: "No components: no image has been scanned yet.",
 };
 
-const fullRef = (i: ImageRow) => `${imageName(i)}:${imageTag(i)}`;
 const briefRef = (i: ImageBrief) => `${i.name}${i.tag ? `:${i.tag}` : ""}`;
 type AnyRow = ImageRow | (WorkloadRow & { key: string }) | ImageVulnRow | ComponentRow;
 /** How each tab names a row, for picking it. */
 const keyOf = (tab: Tab, r: AnyRow): string =>
   tab === "images" ? (r as ImageRow).id : tab === "vulnerabilities" ? (r as ImageVulnRow).id : (r as ComponentRow | (WorkloadRow & { key: string })).key;
 
-/** A search box that waits for a pause in typing before it changes the address, so a list isn't asked for on every key. */
-function Search({ placeholder, value, onChange }: { placeholder: string; value: string; onChange: (v: string) => void }) {
-  const [text, setText] = useState(value);
-  useEffect(() => setText(value), [value]);
-  useEffect(() => {
-    if (text === value) return;
-    const t = setTimeout(() => onChange(text), 250);
-    return () => clearTimeout(t);
-  }, [text, value, onChange]);
-  return (
-    <Input className="w-full min-w-48 sm:w-64" aria-label={placeholder} placeholder={placeholder} value={text} onChange={(e) => setText(e.target.value)} />
-  );
+/** No rows yet: one array, so a list that is still loading doesn't look like a new one on every draw. */
+const NO_ROWS: AnyRow[] = [];
+
+type VulnPackage = ImageVulnRow["packages"][number];
+const fixText = (p: VulnPackage) => `${p.name} ${p.version} → ${p.fixedIn ?? "no fix yet"}`;
+const VULN_PACKAGE_COLUMNS = (v: ImageVulnRow): FullListColumn<VulnPackage>[] => [
+  { label: "Component", value: (p) => p.name, copy: { label: "Component names", what: ["component", "components"] }, className: "align-top font-mono text-xs" },
+  { label: "Version", value: (p) => p.version, className: "align-top font-mono text-xs" },
+  {
+    label: "Fixed in",
+    value: (p) => p.fixedIn ?? "",
+    cell: (p) => (p.fixedIn ? <span className="font-mono text-xs">{p.fixedIn}</span> : <span className="text-kumo-subtle">No fix yet</span>),
+  },
+  { label: "Kind", value: (p) => (p.layer === "os" ? "operating system" : "application") },
+  { label: "Type", value: (p) => p.type },
+  {
+    label: "Component at version",
+    value: (p) => `${p.name}@${p.version}`,
+    copy: { label: "Components (name@version)", what: ["component", "components"] },
+    csvOnly: true,
+  },
+  { label: "Upgrade to make", value: fixText, copy: { label: "Upgrades to make", what: ["upgrade", "upgrades"] }, csvOnly: true },
+  { label: "Vulnerability", value: () => v.id, csvOnly: true },
+  { label: "Severity", value: () => v.severity, csvOnly: true },
+  { label: "Known exploited", value: () => (v.kev ? "yes" : "no"), csvOnly: true },
+];
+
+const FINDING_COLUMNS: FullListColumn<ImageRow["findings"][number]>[] = [
+  { label: "Check", value: (f) => f.checkId, copy: { label: "Check IDs", what: ["check", "checks"] }, className: "align-top font-mono text-xs" },
+  { label: "Severity", value: (f) => f.severity, cell: (f) => <SeverityBadge severity={f.severity as Severity} /> },
+  {
+    label: "Finding",
+    value: (f) => f.title,
+    cell: (f) => (
+      <Link variant="plain" href={`/findings/${f.fingerprint}`}>
+        {f.title}
+      </Link>
+    ),
+  },
+  { label: "Status", value: (f) => STATUS_LABEL[f.status as TriageStatus] ?? f.status },
+  {
+    label: "Link",
+    value: (f) => `${location.origin}/findings/${f.fingerprint}`,
+    copy: { label: "Links to the findings", what: ["link", "links"] },
+    csvOnly: true,
+  },
+];
+
+/**
+ * What each row's "and 43 more" opens: every image a vulnerability or a component is in, every version a vulnerability
+ * affects, every workload that runs an image. Asked of the server under the tab's own filters, so the list is the one
+ * the row counted.
+ */
+function fullLists(scope: string, filterQuery: string) {
+  const get = <T,>(path: string) => api<T>(withScope(path, scope));
+  const imagesIn = async (list: "vulnerabilities" | "components", key: string) => {
+    const out: ImageRow[] = [];
+    for (;;) {
+      const p = await get<ImageList<ImageRow>>(`/api/images/within?list=${list}&of=${encodeURIComponent(key)}&${filterQuery}&offset=${out.length}&limit=200`);
+      out.push(...p.rows);
+      if (!p.rows.length || out.length >= p.total) return out;
+    }
+  };
+  const images = (title: string, description: string, file: string, rows: () => Promise<ImageRow[]>): FullList<ImageRow> => ({
+    title,
+    description,
+    noun: ["image", "images"],
+    columns: IMAGE_COLUMNS,
+    rows,
+    keyOf: (i) => i.id,
+    file,
+  });
+  return {
+    imagesWith: (v: ImageVulnRow) =>
+      images(
+        `Images with ${v.id}`,
+        "Most exposed first, each with where it runs and the repository that builds it. The CSV adds what each is built on and what else was found in it.",
+        `keelson-images-with-${v.id}`,
+        () => imagesIn("vulnerabilities", v.id),
+      ),
+    imagesHolding: (c: ComponentRow) =>
+      images(
+        `Images that hold ${c.name} ${c.version}`,
+        "Most exposed first, each with where it runs and the repository that builds it.",
+        `keelson-images-with-${c.name}-${c.version}`.replace(/[^\w.-]+/g, "_"),
+        () => imagesIn("components", c.key),
+      ),
+    packagesOf: (v: ImageVulnRow): FullList<VulnPackage> => ({
+      title: `Components ${v.id} affects`,
+      description: "Each version found in the images, with the version that fixes it.",
+      noun: ["version", "versions"],
+      columns: VULN_PACKAGE_COLUMNS(v),
+      rows: async () =>
+        (await get<ImageList<ImageVulnRow>>(`/api/images/vulnerabilities?${filterQuery}&full=1&limit=1&key=${encodeURIComponent(v.id)}`)).rows[0]?.packages ??
+        [],
+      keyOf: (p) => `${p.type}|${p.name}|${p.version}`,
+      file: `keelson-components-with-${v.id}`,
+    }),
+    workloadsOf: (i: ImageRow) =>
+      workloadsList(
+        fullRef(i),
+        async () => (await get<ImageList<ImageRow>>(`/api/images/list?full=1&limit=1&key=${encodeURIComponent(i.id)}`)).rows[0]?.workloads ?? [],
+      ),
+    findingsOf: (i: ImageRow): FullList<ImageRow["findings"][number]> => ({
+      title: `Findings on ${fullRef(i)}`,
+      noun: ["finding", "findings"],
+      columns: FINDING_COLUMNS,
+      rows: i.findings,
+      keyOf: (f) => f.fingerprint,
+      file: "keelson-image-findings",
+    }),
+  };
 }
+type Lists = ReturnType<typeof fullLists>;
 
 export function ImagesPage() {
   const { view, multi, status } = useShell();
@@ -119,8 +240,18 @@ export function ImagesPage() {
   const filterQuery = query.toString();
   const list = useScopedApi<ImageList<AnyRow>>(
     data?.summary ? `/api/images/${ENDPOINT[tab]}?${filterQuery}&offset=${(page - 1) * PER_PAGE}&limit=${PER_PAGE}` : null,
+    null,
+    { keep: tab },
   );
   const selection = useSelection([tab, filterQuery]);
+  const lists = useMemo(() => fullLists(view.key, filterQuery), [view.key, filterQuery]);
+  // The rows are drawn at low priority, so a key typed while fifty of them are drawn isn't held up. They carry their
+  // tab: for a moment after switching tabs the rows still being shown are the other tab's.
+  const latest = list.data?.rows ?? NO_ROWS;
+  const shown = useDeferredValue(useMemo(() => ({ tab, rows: latest }), [tab, latest]));
+  const rows = shown.tab === tab ? shown.rows : NO_ROWS;
+  /** The rows on screen aren't yet the ones the filters ask for. */
+  const behind = list.stale || rows !== latest;
 
   const s = data?.summary;
   if (error || !data || !s) {
@@ -156,9 +287,10 @@ export function ImagesPage() {
       items={{ [ALL]: label, ...items }}
     />
   );
-  const search = (placeholder: string) => <Search placeholder={placeholder} value={params.get("q") || ""} onChange={(v) => filter({ q: v || null })} />;
+  const search = (placeholder: string) => (
+    <SearchBox placeholder={placeholder} value={params.get("q") || ""} onChange={(v) => filter({ q: v || null })} busy={list.loading || behind} />
+  );
 
-  const rows = list.data?.rows ?? [];
   const total = list.data?.total ?? 0;
   const active = TAB_FILTERS[tab].filter((k) => params.has(k));
   const csvHref = (name: "vulnerabilities" | "components") => withScope(`/api/images/${name}.csv?${tab === name ? filterQuery : ""}`, view.key);
@@ -244,87 +376,18 @@ export function ImagesPage() {
   };
 
   const selectionActions: Record<Tab, ReactNode> = {
+    // The same columns as an image in any list in full: what is copied and exported doesn't depend on where it was picked.
     images: (
       <>
-        <CopyMenu
-          items={[
-            { label: "Images (registry/name:tag)", run: lines<ImageRow>(["image", "images"], (r) => r.map(fullRef)) },
-            {
-              label: "Images by digest",
-              run: lines<ImageRow>(["image", "images"], (r) => r.filter((i) => i.digest).map((i) => `${imageName(i)}@${i.digest}`)),
-            },
-            {
-              label: "Repositories that build them",
-              run: lines<ImageRow>(["repository", "repositories"], (r) => r.flatMap((i) => i.builtBy.map((b) => b.repo))),
-            },
-            {
-              label: "Workloads that run them",
-              run: lines<ImageRow>(["workload", "workloads"], (r) => r.flatMap((i) => i.workloads.map((w) => `${w.kind} ${w.name} (${workloadPlace(w)})`))),
-            },
-          ]}
-        />
+        <CopyMenu items={copyItemsOf(() => picked<ImageRow>(), IMAGE_COLUMNS)} />
         <DownloadCsvButton
-          onClick={() =>
-            download<ImageRow>(
-              "keelson-images",
-              [
-                "image",
-                "tag",
-                "digest",
-                "registry",
-                "account",
-                "in use",
-                "runs in",
-                "internet-facing",
-                "hostnames",
-                "built by",
-                "operating system",
-                "runtimes",
-                "base image",
-                "past end of life",
-                "components",
-                "critical",
-                "high",
-                "medium",
-                "low",
-                "critical or high with a fix",
-                "known exploited",
-                "stored credentials",
-                "pushed",
-                "last pulled",
-                "scanned",
-              ],
-              (i) => [
-                [
-                  imageName(i),
-                  i.tags.join(" "),
-                  i.digest ?? "",
-                  REGISTRY_LABEL[i.kind],
-                  i.account,
-                  IMAGE_USE_LABEL[i.use],
-                  i.workloads.map((w) => `${w.kind} ${w.name}`).join("; "),
-                  i.workloads.some((w) => w.internet === true),
-                  [...new Set(i.workloads.flatMap((w) => w.hosts))].join(" "),
-                  i.builtBy.map((b) => b.repo).join(" "),
-                  i.summary?.os ?? "",
-                  (i.summary?.runtimes ?? []).map((r) => `${r.name} ${r.version}`).join("; "),
-                  i.summary?.baseName ?? "",
-                  i.summary ? i.summary.eol || !!i.summary.runtimes?.some((r) => r.eol) : "",
-                  i.summary?.packages ?? "",
-                  i.summary?.vulns.critical ?? "",
-                  i.summary?.vulns.high ?? "",
-                  i.summary?.vulns.medium ?? "",
-                  i.summary?.vulns.low ?? "",
-                  i.summary ? i.summary.fixable.critical + i.summary.fixable.high : "",
-                  i.summary?.exploited.join(" ") ?? "",
-                  i.summary?.secrets ?? "",
-                  i.pushedAt ?? "",
-                  i.pulledAt ?? "",
-                  i.summary?.scannedAt ?? i.error ?? "not scanned",
-                ],
-              ],
-            )
-          }
+          onClick={async () => {
+            try {
+              downloadCsv("keelson-images", csvOf(await picked<ImageRow>(), IMAGE_COLUMNS));
+            } catch (e) {
+              toasts.add({ title: "Couldn't read the selection", description: (e as Error).message, variant: "error" });
+            }
+          }}
         />
       </>
     ),
@@ -613,15 +676,20 @@ export function ImagesPage() {
         {list.error ? (
           <NoRows>{list.error.message}</NoRows>
         ) : !rows.length ? (
-          <NoRows>{list.loading ? "Loading…" : active.length ? "Nothing matches these filters." : EMPTY[tab]}</NoRows>
-        ) : tab === "images" ? (
-          <ImagesTable rows={rows as ImageRow[]} selection={selection} multi={multi} />
-        ) : tab === "running" ? (
-          <WorkloadsTable rows={rows as (WorkloadRow & { key: string })[]} selection={selection} />
-        ) : tab === "vulnerabilities" ? (
-          <VulnerabilitiesTable rows={rows as ImageVulnRow[]} selection={selection} />
+          <NoRows>{list.loading || behind ? "Loading…" : active.length ? "Nothing matches these filters." : EMPTY[tab]}</NoRows>
         ) : (
-          <ComponentsTable rows={rows as ComponentRow[]} selection={selection} />
+          // Rows of the previous search stay, dimmed, until the next ones are here; a quick answer never dims them.
+          <div aria-busy={behind} className={cn("transition-opacity", behind && "pointer-events-none opacity-50 delay-200")}>
+            {tab === "images" ? (
+              <ImagesTable rows={rows as ImageRow[]} selection={selection} multi={multi} lists={lists} />
+            ) : tab === "running" ? (
+              <WorkloadsTable rows={rows as (WorkloadRow & { key: string })[]} selection={selection} />
+            ) : tab === "vulnerabilities" ? (
+              <VulnerabilitiesTable rows={rows as ImageVulnRow[]} selection={selection} lists={lists} />
+            ) : (
+              <ComponentsTable rows={rows as ComponentRow[]} selection={selection} lists={lists} />
+            )}
+          </div>
         )}
       </ListCard>
     </Page>
@@ -650,7 +718,7 @@ function BuiltOn({ image }: { image: ImageRow }) {
   );
 }
 
-const ImagesTable = memo(function ImagesTable({ rows, selection, multi }: { rows: ImageRow[]; selection: Selection; multi: boolean }) {
+const ImagesTable = memo(function ImagesTable({ rows, selection, multi, lists }: { rows: ImageRow[]; selection: Selection; multi: boolean; lists: Lists }) {
   return (
     <Table layout="auto">
       <Table.Header variant="compact">
@@ -694,18 +762,21 @@ const ImagesTable = memo(function ImagesTable({ rows, selection, multi }: { rows
                     </span>
                   )}
                 </span>
-                <div className="truncate text-sm text-kumo-subtle">
+                <div className="text-sm text-kumo-subtle">
                   {registryText(i)}
                   {multi && !i.own ? ` · ${i.account}` : ""}
                   {i.tags.length > 1 ? ` · also ${i.tags.slice(1, 4).join(", ")}` : ""}
+                  <MoreNames names={i.tags} shown={4} title={`Tags of ${i.repository}`} noun={["tag", "tags"]} />
                 </div>
               </Table.Cell>
               <Table.Cell className="align-top">
                 <UseBadge use={i.use} />
                 {first && (
-                  <div className="mt-1 max-w-64 truncate text-sm text-kumo-subtle">
-                    {first.kind} {first.name}
-                    {i.workloadCount > 1 ? ` and ${num(i.workloadCount - 1)} more` : ""}
+                  <div className="mt-1 max-w-64 text-sm text-kumo-subtle">
+                    <span className="block truncate">
+                      {first.kind} {first.name}
+                    </span>
+                    {i.workloadCount > 1 && <MoreLink list={() => lists.workloadsOf(i)}>and {num(i.workloadCount - 1)} more</MoreLink>}
                   </div>
                 )}
               </Table.Cell>
@@ -746,7 +817,11 @@ const ImagesTable = memo(function ImagesTable({ rows, selection, multi }: { rows
                         <span className="font-mono text-xs text-kumo-subtle">{f.checkId}</span>
                       </Link>
                     ))}
-                    {open.length > 3 && <span className="text-xs text-kumo-subtle">and {num(open.length - 3)} more</span>}
+                    {open.length > 3 && (
+                      <MoreLink className="text-xs" list={() => lists.findingsOf(i)}>
+                        and {num(open.length - 3)} more
+                      </MoreLink>
+                    )}
                   </span>
                 ) : (
                   <span className="text-kumo-subtle">{i.findings.length ? "Triaged" : "None"}</span>
@@ -795,7 +870,7 @@ const WorkloadsTable = memo(function WorkloadsTable({ rows, selection }: { rows:
               <div className="text-sm text-kumo-subtle">{workloadPlace(w)}</div>
             </Table.Cell>
             <Table.Cell className="align-top">
-              <Reach internet={w.internet} via={w.via} hosts={w.hosts} />
+              <Reach internet={w.internet} via={w.via} hosts={w.hosts} name={`${w.kind} ${w.name}`} />
             </Table.Cell>
             <Table.Cell className="align-top">
               <ul className="flex flex-col gap-1.5">
@@ -831,7 +906,7 @@ const WorkloadsTable = memo(function WorkloadsTable({ rows, selection }: { rows:
 const shortRef = (ref: string) => ref.replace(/@sha256:([a-f0-9]{12})[a-f0-9]+$/, "@sha256:$1…");
 
 /** The first few images a row names, most exposed first, and how many more there are. */
-function InImages({ images, count, use }: { images: ImageBrief[]; count: number; use: ImageBrief["use"] }) {
+function InImages({ images, count, use, all }: { images: ImageBrief[]; count: number; use: ImageBrief["use"]; all: () => FullList<ImageRow> }) {
   return (
     <>
       <span className="inline-flex items-center gap-2 whitespace-nowrap">
@@ -847,13 +922,17 @@ function InImages({ images, count, use }: { images: ImageBrief[]; count: number;
             </Link>
           </li>
         ))}
-        {count > images.length && <li className="text-xs text-kumo-subtle">and {num(count - images.length)} more</li>}
+        {count > images.length && (
+          <li className="text-xs">
+            <MoreLink list={all}>and {num(count - images.length)} more</MoreLink>
+          </li>
+        )}
       </ul>
     </>
   );
 }
 
-const VulnerabilitiesTable = memo(function VulnerabilitiesTable({ rows, selection }: { rows: ImageVulnRow[]; selection: Selection }) {
+const VulnerabilitiesTable = memo(function VulnerabilitiesTable({ rows, selection, lists }: { rows: ImageVulnRow[]; selection: Selection; lists: Lists }) {
   return (
     <Table layout="auto">
       <Table.Header variant="compact">
@@ -911,12 +990,14 @@ const VulnerabilitiesTable = memo(function VulnerabilitiesTable({ rows, selectio
                   </li>
                 ))}
                 {v.packageCount > v.packages.length && (
-                  <li className="text-xs text-kumo-subtle">and {num(v.packageCount - v.packages.length)} more versions</li>
+                  <li className="text-xs">
+                    <MoreLink list={() => lists.packagesOf(v)}>and {num(v.packageCount - v.packages.length)} more versions</MoreLink>
+                  </li>
                 )}
               </ul>
             </Table.Cell>
             <Table.Cell className="align-top">
-              <InImages images={v.images} count={v.imageCount} use={v.use} />
+              <InImages images={v.images} count={v.imageCount} use={v.use} all={() => lists.imagesWith(v)} />
             </Table.Cell>
           </Table.Row>
         ))}
@@ -925,7 +1006,7 @@ const VulnerabilitiesTable = memo(function VulnerabilitiesTable({ rows, selectio
   );
 });
 
-const ComponentsTable = memo(function ComponentsTable({ rows, selection }: { rows: ComponentRow[]; selection: Selection }) {
+const ComponentsTable = memo(function ComponentsTable({ rows, selection, lists }: { rows: ComponentRow[]; selection: Selection; lists: Lists }) {
   return (
     <Table layout="auto">
       <Table.Header variant="compact">
@@ -997,10 +1078,12 @@ const ComponentsTable = memo(function ComponentsTable({ rows, selection }: { row
                     <GlobeIcon weight="fill" className="text-kumo-warning" />
                   </Tooltip>
                 )}
-                <span className="max-w-72 truncate text-kumo-subtle">
-                  {c.images.map((i) => i.name.split("/").pop()).join(", ")}
-                  {c.imageCount > c.images.length ? ` and ${num(c.imageCount - c.images.length)} more` : ""}
-                </span>
+                <span className="max-w-56 truncate text-kumo-subtle">{c.images.map((i) => i.name.split("/").pop()).join(", ")}</span>
+                {c.imageCount > c.images.length && (
+                  <MoreLink className="whitespace-nowrap" list={() => lists.imagesHolding(c)}>
+                    and {num(c.imageCount - c.images.length)} more
+                  </MoreLink>
+                )}
               </span>
             </Table.Cell>
             <Table.Cell className="max-w-48 truncate align-top text-sm text-kumo-subtle">{c.licenses.join(", ") || "—"}</Table.Cell>

@@ -69,6 +69,7 @@ import { ShellContext, useShell, type Shell } from "./shell.tsx";
 import { NAV_GROUPS, ROUTES, ReportPage, matchRoute } from "./routes.tsx";
 import { AppLink, Loading, NoRows, Page, ProviderIcon } from "./components/ui.tsx";
 import { Wordmark } from "./components/brand.tsx";
+import { FullListProvider } from "./components/full-list.tsx";
 import { GetStarted, NoAccountsYet } from "./pages/Setup.tsx";
 import { ChangePasswordDialog, ChangePasswordPage, LoginPage, SignupPage } from "./pages/Login.tsx";
 
@@ -77,7 +78,9 @@ export function App() {
     <Toasty>
       <TooltipProvider delay={300}>
         <LinkProvider component={AppLink}>
-          <Root />
+          <FullListProvider>
+            <Root />
+          </FullListProvider>
         </LinkProvider>
       </TooltipProvider>
     </Toasty>

@@ -8,6 +8,7 @@ import { FireIcon, WarningIcon } from "@phosphor-icons/react";
 import { useScopedApi, useShell } from "../shell.tsx";
 import { num, plural, SCORED_SEVERITIES, setParams, totalScored, useLocation, type RepoRow, type ReposResponse } from "../lib.ts";
 import { Flag, ListCard, NoRows, Page, PageState, SeverityBadge, unreadableText } from "../components/ui.tsx";
+import { MoreNames } from "../components/full-list.tsx";
 import { CopyMenu, DownloadCsvButton, SelectPage, SelectRow, SelectionBar, downloadCsv, useSelection } from "../components/selection.tsx";
 
 const TITLE = "Repositories";
@@ -308,7 +309,10 @@ function Dependencies({ r, href }: { r: RepoRow; href: string | null }) {
         {d.parts > 1 && <span className="text-kumo-subtle"> · {num(d.parts)} projects</span>}
       </span>
       <span className="inline-flex items-center gap-2 text-sm text-kumo-subtle">
-        {d.ecosystems.slice(0, 3).join(", ") || "No manifests"}
+        <span>
+          {d.ecosystems.slice(0, 3).join(", ") || "No manifests"}
+          <MoreNames names={d.ecosystems} shown={3} title={`Package managers in ${r.name}`} noun={["package manager", "package managers"]} />
+        </span>
         {(d.exploited ?? 0) > 0 && (
           <Tooltip content="Vulnerabilities attackers are known to exploit (CISA KEV)">
             <Badge variant="red" icon={<FireIcon weight="fill" />}>

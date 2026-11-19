@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApiError } from "../../../src/shared/api.ts";
+import { shownFor, type Fetched } from "../../../src/shared/fetched.ts";
 
 export class HttpError extends Error {
   readonly status: number;
@@ -43,13 +44,16 @@ export async function api<T = unknown>(path: string, init: { method?: string; bo
  * Fetches `path` and refetches when it or `key` changes. A newer request
  * cancels an older one, so a slow response never overwrites a newer view.
  * `reload` refetches while keeping the previous data on screen.
+ *
+ * `keep` is for a list whose filters are part of its path (a search box): while the path changes within the same
+ * `keep`, the rows already on screen stay there, with `stale` set, until the new ones arrive. Without it the list
+ * was emptied and drawn again for every search, which is what made typing in a large list feel stuck.
  */
-export function useApi<T>(path: string | null, key: unknown = null) {
+export function useApi<T>(path: string | null, key: unknown = null, { keep = null }: { keep?: string | null } = {}) {
   // Data and errors remember the path they came from: after switching views, the previous view's numbers
   // must not sit under the new view's name while it loads.
-  const [result, setResult] = useState<{ path: string | null; data: T | null; error: Error | null }>({ path: null, data: null, error: null });
-  const data = result.path === path ? result.data : null;
-  const error = result.path === path ? result.error : null;
+  const [result, setResult] = useState<Fetched<T>>({ path: null, keep: null, data: null, error: null });
+  const { data, error, stale } = shownFor(result, path, keep);
   const setData = useCallback(
     (next: T | null | ((prev: T | null) => T | null)) =>
       setResult((r) => ({ ...r, path, data: typeof next === "function" ? (next as (prev: T | null) => T | null)(r.path === path ? r.data : null) : next })),
@@ -69,21 +73,21 @@ export function useApi<T>(path: string | null, key: unknown = null) {
     setLoading(true);
     try {
       const d = await api<T>(path, { signal: ctl.signal });
-      if (!ctl.signal.aborted) setResult({ path, data: d, error: null });
+      if (!ctl.signal.aborted) setResult({ path, keep, data: d, error: null });
     } catch (e) {
       // A failed refresh keeps what's on screen and reports the error alongside it.
-      if (!ctl.signal.aborted) setResult((r) => ({ path, data: r.path === path ? r.data : null, error: e as Error }));
+      if (!ctl.signal.aborted) setResult((r) => ({ path, keep, data: r.path === path ? r.data : null, error: e as Error }));
     } finally {
       if (!ctl.signal.aborted) setLoading(false);
     }
-  }, [path]);
+  }, [path, keep]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `key` is an explicit refetch trigger, compared by value
   useEffect(() => {
     void reload();
     return () => inflight.current?.abort();
   }, [reload, JSON.stringify(key)]);
-  return { data, error, loading, reload, setData };
+  return { data, error, loading, stale, reload, setData };
 }
 
 /** Downloads an export under the server's file name. Throws the server's error, so a page can show it as a toast instead of replacing itself with it. */

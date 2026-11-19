@@ -6,8 +6,8 @@
 // (the Grant report: each license with its risk class). Rows can be picked, or
 // every row that matches, to copy or download the repositories they affect.
 
-import { useState, type ReactNode } from "react";
-import { Badge, Banner, Button, Dialog, Input, Link, Pagination, Select, Table, Tabs, useKumoToastManager } from "@cloudflare/kumo";
+import { memo, useDeferredValue, useMemo, useState, type ReactNode } from "react";
+import { Badge, Banner, Button, Dialog, Link, Pagination, Select, Table, Tabs, cn, useKumoToastManager } from "@cloudflare/kumo";
 import { CopyIcon, DownloadSimpleIcon, WarningIcon, XIcon } from "@phosphor-icons/react";
 import {
   api,
@@ -22,6 +22,7 @@ import {
   type AffectedResponse,
   type LicenseRow,
   type PackageRow,
+  type PackageUse,
   type SbomPage,
   type SbomResponse,
   type Severity,
@@ -30,6 +31,8 @@ import {
 } from "../lib.ts";
 import { useScopedApi, useShell } from "../shell.tsx";
 import { DialogHeader, ListCard, NoRows, Page, PageState, Row, SeverityBadge, Stat, unreadableText } from "../components/ui.tsx";
+import { SearchBox } from "../components/search.tsx";
+import { MoreLink, MoreNames, type FullList, type FullListColumn } from "../components/full-list.tsx";
 import { ExploitedBadges, UsedBy, VulnSeverity, VulnTable, epssText } from "../components/dependencies.tsx";
 import {
   CopyMenu,
@@ -81,6 +84,131 @@ const LICENSE_VARIANT: Record<string, "red" | "warning" | "outline" | "neutral" 
 
 const riskOfRow = (r: { licenseRisk: string | null; licenses: string[] }) => r.licenseRisk ?? (r.licenses.length ? "other" : "none");
 
+type AnyRow = PackageRow | VulnRow | LicenseRow;
+/** No rows yet: one array, so a list that is still loading doesn't look like a new one on every draw. */
+const NO_ROWS: AnyRow[] = [];
+
+/** Opens a tab with these filters and no others. */
+const goTo = (to: Tab, next: Record<string, string | null> = {}) => {
+  const clear = Object.fromEntries(
+    ["q", "status", "severity", "language", "ecosystem", "risk", "license", "usage", "env", "repo", "triage", "vuln", "sort", "page"].map((k) => [k, null]),
+  );
+  setParams({ ...clear, tab: to === "packages" ? null : to, ...next });
+};
+// Named once, so the tables that take them aren't drawn again for a new function on every draw of the page.
+const packagesWithVuln = (id: string) => goTo("packages", { vuln: id });
+const packagesWithLicense = (license: string) => goTo("packages", { license });
+
+const yesNo = (v: boolean) => (v ? "yes" : "no");
+
+/** A repository that uses a package, with its name as GitHub spells it ("owner/repo") when the organization is known. */
+type Use = PackageUse & { fullName: string; url: string | null };
+const USE_COLUMNS = (r: PackageRow): FullListColumn<Use>[] => [
+  {
+    label: "Repository",
+    value: (u) => u.fullName,
+    copy: { label: "Repositories (owner/repo)", what: ["repository", "repositories"] },
+    cell: (u) => (
+      <Link variant="plain" href={`/repositories/${encodeURIComponent(u.accountId)}/${encodeURIComponent(u.repo)}`}>
+        {u.fullName}
+      </Link>
+    ),
+  },
+  { label: "Used by", value: (u) => u.parts.map((p) => p.label), cell: (u) => <UsedBy usages={u.parts} /> },
+  { label: "Recorded in", value: (u) => u.locations, className: "align-top font-mono text-xs" },
+  { label: "Direct", value: (u) => yesNo(u.direct) },
+  { label: "Development only", value: (u) => yesNo(u.devOnly) },
+  {
+    label: "Finding",
+    value: (u) => (u.finding ? (STATUS_LABEL[u.finding.status as TriageStatus] ?? u.finding.status) : ""),
+    cell: (u) =>
+      u.finding ? (
+        <span className="inline-flex items-center gap-2">
+          <SeverityBadge severity={u.finding.severity as Severity} />
+          <Link variant="plain" href={`/findings/${u.finding.fingerprint}`}>
+            {STATUS_LABEL[u.finding.status as TriageStatus] ?? u.finding.status}
+          </Link>
+        </span>
+      ) : (
+        <span className="text-kumo-subtle">—</span>
+      ),
+  },
+  { label: "Account", value: (u) => u.account, csvOnly: true },
+  { label: "On GitHub", value: (u) => u.url ?? "", copy: { label: "Links on GitHub", what: ["link", "links"] }, csvOnly: true },
+  { label: "Package", value: () => r.name, csvOnly: true },
+  { label: "Version", value: () => r.version, csvOnly: true },
+  { label: "Package manager", value: () => r.ecosystem, csvOnly: true },
+  { label: "Upgrade to", value: () => r.upgrade ?? "", csvOnly: true },
+  { label: "Vulnerabilities", value: () => r.vulns.map((v) => v.id), csvOnly: true },
+  { label: "Finding severity", value: (u) => u.finding?.severity ?? "", csvOnly: true },
+];
+
+type VulnPackage = VulnRow["packages"][number];
+const VULN_PACKAGE_COLUMNS = (v: VulnRow): FullListColumn<VulnPackage>[] => [
+  { label: "Package", value: (p) => p.name, copy: { label: "Package names", what: ["package", "packages"] }, className: "align-top font-mono text-xs" },
+  { label: "Version", value: (p) => p.version, className: "align-top font-mono text-xs" },
+  { label: "Package manager", value: (p) => p.ecosystem },
+  {
+    label: "Fixed in",
+    value: (p) => p.fixedIn ?? "",
+    cell: (p) => (p.fixedIn ? <span className="font-mono text-xs">{p.fixedIn}</span> : <span className="text-kumo-subtle">No fix yet</span>),
+  },
+  { label: "Repositories", value: (p) => String(p.repos), className: "align-top text-sm tabular-nums" },
+  {
+    label: "Package at version",
+    value: (p) => `${p.name}@${p.version}`,
+    copy: { label: "Packages (name@version)", what: ["package", "packages"] },
+    csvOnly: true,
+  },
+  {
+    label: "Upgrade to make",
+    value: (p) => `${p.name} ${p.version} → ${p.fixedIn ?? "no fix yet"}`,
+    copy: { label: "Upgrades to make", what: ["upgrade", "upgrades"] },
+    csvOnly: true,
+  },
+  { label: "Vulnerability", value: () => v.id, csvOnly: true },
+  { label: "Severity", value: () => v.severity, csvOnly: true },
+];
+
+/**
+ * What a row's "and 4 more" opens. The rows already hold every repository and version; the repositories' names as
+ * GitHub spells them come from the server, under the page's filters.
+ */
+function fullLists(scope: string, filterQuery: string) {
+  return {
+    usesOf: (r: PackageRow): FullList<Use> => ({
+      title: `Repositories that use ${r.name} ${r.version}`,
+      description: r.upgrade
+        ? `Upgrade to ${r.upgrade} to fix every vulnerability that has a fix. The CSV adds each repository's link and the vulnerabilities.`
+        : "With where each records it and the finding it raised.",
+      noun: ["repository", "repositories"],
+      columns: USE_COLUMNS(r),
+      rows: async () => {
+        const q = new URLSearchParams(filterQuery);
+        q.set("tab", "packages");
+        q.append("key", rowKey.packages(r));
+        const named = new Map((await api<AffectedResponse>(withScope(`/api/sbom/affected?${q}`, scope))).repos.map((x) => [`${x.accountId}/${x.repo}`, x]));
+        return r.uses.map((u) => {
+          const n = named.get(`${u.accountId}/${u.repo}`);
+          return { ...u, fullName: n?.fullName ?? u.repo, url: n?.url ?? null };
+        });
+      },
+      keyOf: (u) => `${u.accountId}/${u.repo}`,
+      file: `keelson-repositories-using-${r.name}-${r.version}`.replace(/[^\w.-]+/g, "_"),
+    }),
+    packagesOf: (v: VulnRow): FullList<VulnPackage> => ({
+      title: `Packages ${v.id} affects`,
+      description: "Each version found in the repositories, with the version that fixes it.",
+      noun: ["version", "versions"],
+      columns: VULN_PACKAGE_COLUMNS(v),
+      rows: v.packages,
+      keyOf: (p) => `${p.ecosystem}|${p.name}|${p.version}`,
+      file: `keelson-packages-with-${v.id}`,
+    }),
+  };
+}
+type Lists = ReturnType<typeof fullLists>;
+
 export function DependenciesPage() {
   const { view } = useShell();
   const { params } = useLocation();
@@ -92,11 +220,19 @@ export function DependenciesPage() {
   for (const k of TAB_FILTERS[tab]) if (params.has(k)) query.set(k, params.get(k)!);
   query.set("offset", String((page - 1) * PER_PAGE));
   query.set("limit", String(PER_PAGE));
-  const list = useScopedApi<SbomPage<PackageRow | VulnRow | LicenseRow>>(data?.summary ? `/api/sbom/${tab}?${query}` : null);
+  const list = useScopedApi<SbomPage<AnyRow>>(data?.summary ? `/api/sbom/${tab}?${query}` : null, null, { keep: tab });
+  // A search keeps the rows on screen until the next ones arrive, and those are drawn at low priority, so a key typed
+  // while fifty rows are drawn isn't held up. They carry their tab: just after switching, the rows shown are the other tab's.
+  const latest = list.data?.rows ?? NO_ROWS;
+  const shown = useDeferredValue(useMemo(() => ({ tab, rows: latest }), [tab, latest]));
+  const rows = shown.tab === tab ? shown.rows : NO_ROWS;
+  /** The rows on screen aren't yet the ones the filters ask for. */
+  const behind = list.stale || rows !== latest;
   const [open, setOpen] = useState<PackageRow | null>(null);
   // The filters without paging: what "every row that matches" means, and what a picked row was picked under.
   const filterQuery = new URLSearchParams([...query].filter(([k]) => k !== "offset" && k !== "limit")).toString();
   const selection = useSelection([tab, filterQuery]);
+  const lists = useMemo(() => fullLists(view.key, filterQuery), [view.key, filterQuery]);
   const copy = useCopy();
   const toasts = useKumoToastManager();
   const copyError = (e: Error) => toasts.add({ title: "Couldn't download", description: e.message, variant: "error" });
@@ -130,6 +266,16 @@ export function DependenciesPage() {
       items={{ [ALL]: label, ...items }}
     />
   );
+  const search = (label: string, placeholder: string) => (
+    <SearchBox
+      label={label}
+      placeholder={placeholder}
+      value={params.get("q") || ""}
+      onChange={(v) => filter({ q: v || null })}
+      busy={list.loading || behind}
+      className="sm:w-60"
+    />
+  );
   const ecosystems = Object.fromEntries(s.ecosystems.map((e) => [e.name, `${e.name} (${num(e.packages)})`]));
   // Summaries cached before languages existed have none; the filter then lists nothing until the next scan.
   const languages = Object.fromEntries((s.languages ?? []).map((l) => [l.name, `${l.name} (${num(l.packages)})`]));
@@ -140,13 +286,7 @@ export function DependenciesPage() {
   const toolbar: Record<Tab, ReactNode> = {
     packages: (
       <>
-        <Input
-          className="w-full min-w-48 sm:w-60"
-          aria-label="Search packages"
-          placeholder="Package, language or package manager"
-          value={params.get("q") || ""}
-          onChange={(e) => filter({ q: e.target.value || null })}
-        />
+        {search("Search packages", "Package, language or package manager")}
         {select("status", "Any status", PACKAGE_STATUSES)}
         {select("severity", "Any severity", Object.fromEntries(Object.entries(SEVERITY_FILTERS).slice(1)))}
         {select("language", "Every language", languages, "sm:w-52")}
@@ -161,13 +301,7 @@ export function DependenciesPage() {
     ),
     vulnerabilities: (
       <>
-        <Input
-          className="w-full min-w-48 sm:w-60"
-          aria-label="Search vulnerabilities"
-          placeholder="CVE, advisory or package"
-          value={params.get("q") || ""}
-          onChange={(e) => filter({ q: e.target.value || null })}
-        />
+        {search("Search vulnerabilities", "CVE, advisory or package")}
         {select("status", "Any status", { exploited: "Exploited", fixable: "Has a fix", nofix: "No fix yet", malicious: "Malicious" })}
         {select("severity", "Any severity", Object.fromEntries(Object.entries(SEVERITY_FILTERS).slice(1)))}
         {select("language", "Every language", languages, "sm:w-52")}
@@ -177,13 +311,7 @@ export function DependenciesPage() {
     ),
     licenses: (
       <>
-        <Input
-          className="w-full min-w-48 sm:w-60"
-          aria-label="Search licenses"
-          placeholder="Search licenses"
-          value={params.get("q") || ""}
-          onChange={(e) => filter({ q: e.target.value || null })}
-        />
+        {search("Search licenses", "Search licenses")}
         {select("risk", "Any risk", LICENSE_RISKS)}
         {select("language", "Every language", languages, "sm:w-52")}
         {select("ecosystem", "Every package manager", ecosystems, "sm:w-52")}
@@ -192,14 +320,7 @@ export function DependenciesPage() {
     ),
   };
 
-  const rows = list.data?.rows ?? [];
   const total = list.data?.total ?? 0;
-  const goTo = (to: Tab, next: Record<string, string | null> = {}) => {
-    const clear = Object.fromEntries(
-      ["q", "status", "severity", "language", "ecosystem", "risk", "license", "usage", "env", "repo", "triage", "vuln", "sort", "page"].map((k) => [k, null]),
-    );
-    setParams({ ...clear, tab: to === "packages" ? null : to, ...next });
-  };
 
   const keyOf = rowKey[tab] as (r: PackageRow | VulnRow | LicenseRow) => string;
   const pageKeys = rows.map(keyOf);
@@ -364,13 +485,18 @@ export function DependenciesPage() {
         {list.error ? (
           <NoRows>{list.error.message}</NoRows>
         ) : !rows.length ? (
-          <NoRows>{list.loading ? "Loading…" : "Nothing matches these filters."}</NoRows>
-        ) : tab === "packages" ? (
-          <Packages rows={rows as PackageRow[]} onOpen={setOpen} selection={selection} />
-        ) : tab === "vulnerabilities" ? (
-          <Vulnerabilities rows={rows as VulnRow[]} onPackages={(id) => goTo("packages", { vuln: id })} selection={selection} />
+          <NoRows>{list.loading || behind ? "Loading…" : "Nothing matches these filters."}</NoRows>
         ) : (
-          <Licenses rows={rows as LicenseRow[]} onPackages={(license) => goTo("packages", { license })} selection={selection} />
+          // Rows of the previous search stay, dimmed, until the next ones are here; a quick answer never dims them.
+          <div aria-busy={behind} className={cn("transition-opacity", behind && "pointer-events-none opacity-50 delay-200")}>
+            {tab === "packages" ? (
+              <Packages rows={rows as PackageRow[]} onOpen={setOpen} selection={selection} lists={lists} />
+            ) : tab === "vulnerabilities" ? (
+              <Vulnerabilities rows={rows as VulnRow[]} onPackages={packagesWithVuln} selection={selection} lists={lists} />
+            ) : (
+              <Licenses rows={rows as LicenseRow[]} onPackages={packagesWithLicense} selection={selection} />
+            )}
+          </div>
         )}
       </ListCard>
 
@@ -385,6 +511,12 @@ export function DependenciesPage() {
   );
 }
 
+// The tables are only drawn again for new rows or a new selection: the page itself is drawn on every key that reaches
+// the address and every refresh of the scan status.
+const Packages = memo(PackagesRows);
+const Vulnerabilities = memo(VulnerabilitiesRows);
+const Licenses = memo(LicensesRows);
+
 /** Triage of the package's findings across repositories: "2 open, 1 accepted". */
 function triageText(r: PackageRow): string {
   const counts = new Map<string, number>();
@@ -392,7 +524,7 @@ function triageText(r: PackageRow): string {
   return [...counts].map(([s, n]) => `${num(n)} ${STATUS_LABEL[s as TriageStatus]?.toLowerCase() ?? s}`).join(", ");
 }
 
-function Packages({ rows, onOpen, selection }: { rows: PackageRow[]; onOpen: (r: PackageRow) => void; selection: Selection }) {
+function PackagesRows({ rows, onOpen, selection, lists }: { rows: PackageRow[]; onOpen: (r: PackageRow) => void; selection: Selection; lists: Lists }) {
   return (
     <Table layout="auto">
       <Table.Header variant="compact">
@@ -452,8 +584,13 @@ function Packages({ rows, onOpen, selection }: { rows: PackageRow[]; onOpen: (r:
                     .slice(0, 2)
                     .map((u) => u.repo)
                     .join(", ")}
-                  {r.uses.length > 2 ? ` and ${num(r.uses.length - 2)} more` : ""}
                 </span>
+                {r.uses.length > 2 && (
+                  <>
+                    {" "}
+                    <MoreLink list={() => lists.usesOf(r)}>and {num(r.uses.length - 2)} more</MoreLink>
+                  </>
+                )}
               </Table.Cell>
               <Table.Cell className="whitespace-nowrap text-sm text-kumo-subtle">{triageText(r) || "—"}</Table.Cell>
               <Table.Cell className="whitespace-nowrap">
@@ -472,7 +609,17 @@ function Packages({ rows, onOpen, selection }: { rows: PackageRow[]; onOpen: (r:
   );
 }
 
-function Vulnerabilities({ rows, onPackages, selection }: { rows: VulnRow[]; onPackages: (id: string) => void; selection: Selection }) {
+function VulnerabilitiesRows({
+  rows,
+  onPackages,
+  selection,
+  lists,
+}: {
+  rows: VulnRow[];
+  onPackages: (id: string) => void;
+  selection: Selection;
+  lists: Lists;
+}) {
   return (
     <Table layout="auto">
       <Table.Header variant="compact">
@@ -507,6 +654,9 @@ function Vulnerabilities({ rows, onPackages, selection }: { rows: VulnRow[]; onP
                     {a}
                   </span>
                 ))}
+                <span className="text-xs">
+                  <MoreNames names={v.aliases} shown={2} title={`Other names of ${v.id}`} noun={["ID", "IDs"]} />
+                </span>
                 <ExploitedBadges kev={v.kev} ransomware={v.ransomware} />
               </div>
               {v.summary && <p className="mt-1 line-clamp-2 max-w-xl text-xs text-kumo-subtle">{v.summary}</p>}
@@ -528,7 +678,11 @@ function Vulnerabilities({ rows, onPackages, selection }: { rows: VulnRow[]; onP
                     <span className="text-xs text-kumo-subtle"> {p.fixedIn ? `→ ${p.fixedIn}` : "· no fix yet"}</span>
                   </li>
                 ))}
-                {v.packages.length > 3 && <li className="text-xs text-kumo-subtle">and {num(v.packages.length - 3)} more versions</li>}
+                {v.packages.length > 3 && (
+                  <li className="text-xs">
+                    <MoreLink list={() => lists.packagesOf(v)}>and {num(v.packages.length - 3)} more versions</MoreLink>
+                  </li>
+                )}
               </ul>
             </Table.Cell>
             <Table.Cell className="whitespace-nowrap align-top">
@@ -544,7 +698,7 @@ function Vulnerabilities({ rows, onPackages, selection }: { rows: VulnRow[]; onP
 }
 
 /** The Grant report: each license with Grant's risk class. */
-function Licenses({ rows, onPackages, selection }: { rows: LicenseRow[]; onPackages: (license: string) => void; selection: Selection }) {
+function LicensesRows({ rows, onPackages, selection }: { rows: LicenseRow[]; onPackages: (license: string) => void; selection: Selection }) {
   return (
     <Table layout="auto">
       <Table.Header variant="compact">

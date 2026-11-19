@@ -24,7 +24,8 @@ import {
 import { useShell } from "../shell.tsx";
 import { Card, DialogHeader, KeyValue, ListCard, NoRows, Page, PageState, Row, SeverityBadge, Stat } from "../components/ui.tsx";
 import { ExploitedBadges, UsedBy, VulnTable, epssText } from "../components/dependencies.tsx";
-import { ImageName, registryText, UseBadge, VulnCountsView } from "../components/images.tsx";
+import { fullRef, ImageName, registryText, UseBadge, VulnCountsView, workloadsList } from "../components/images.tsx";
+import { MoreLink } from "../components/full-list.tsx";
 
 const RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, unknown: 0 };
 const worst = (p: DepPackage) => p.vulns.reduce((w, v) => Math.max(w, RANK[v.severity] ?? 0), 0);
@@ -594,7 +595,11 @@ function BuiltImages({ accountId, repo }: { accountId: string; repo: string }) {
                         </span>
                       </li>
                     ))}
-                    {i.workloads.length > 3 && <li className="text-kumo-subtle">and {num(i.workloads.length - 3)} more</li>}
+                    {i.workloads.length > 3 && (
+                      <li>
+                        <MoreLink list={() => workloadsList(fullRef(i), i.workloads)}>and {num(i.workloads.length - 3)} more</MoreLink>
+                      </li>
+                    )}
                   </ul>
                 ) : (
                   <span className="text-kumo-subtle">Nothing Keelson reads</span>

@@ -87,6 +87,9 @@ interface Part {
   rows: (ImageRow | null)[];
   /** Each package's vulnerabilities and the version that fixes them all, worked out the first time components are listed. */
   vulnsOf?: Map<number, { ids: Set<number>; fixedIn: string | null }>;
+  /** Each package's name in lowercase and its key, made once: a search reads them for every package on every key typed. */
+  names?: string[];
+  pkgKeys?: string[];
 }
 
 /** The fields of a finding that don't change with triage. */
@@ -104,8 +107,10 @@ interface View {
   findings: Map<string, FindingRef[]>;
   /** The indexes, read the first time a list across images is asked for. */
   parts: Part[] | null;
-  /** Filtered lists by their filters, newest last. */
+  /** Filtered lists by their filters, the one used last at the end. */
   results: Map<string, unknown[]>;
+  /** Lists being made now, shared by every request that asks for one meanwhile. */
+  pending: Map<string, Promise<unknown[]>>;
 }
 
 /** The sources image scanning depends on, on any platform: their gaps are shown on the page. */
@@ -289,6 +294,7 @@ export function imagesView(repo: Repo, scope: Scope, now = Date.now()): View {
     findings,
     parts: null,
     results: new Map(),
+    pending: new Map(),
   };
   views.set(signature, view);
   while (views.size > VIEWS_KEPT) views.delete(views.keys().next().value!);
@@ -319,14 +325,69 @@ function partsOf(repo: Repo, view: View): Part[] {
   return parts;
 }
 
-/** A filtered list, computed once per filter and kept while its view is. */
+/**
+ * A filtered list, computed once per filter and kept while its view is. The one used longest ago goes first: a search
+ * is narrowed from the list without it, which every search uses and so stays.
+ */
 function kept<T>(view: View, key: string, make: () => T[]): T[] {
+  return had<T>(view, key) ?? keep(view, key, make());
+}
+
+function had<T>(view: View, key: string): T[] | null {
   const hit = view.results.get(key);
-  if (hit) return hit as T[];
-  const rows = make();
+  if (!hit) return null;
+  view.results.delete(key);
+  view.results.set(key, hit);
+  return hit as T[];
+}
+
+function keep<T>(view: View, key: string, rows: T[]): T[] {
   view.results.set(key, rows);
   while (view.results.size > RESULTS_KEPT) view.results.delete(view.results.keys().next().value!);
   return rows;
+}
+
+/**
+ * The same for a list that takes long enough to be made in slices. With `shared`, requests that arrive while it is
+ * being made wait for that one piece of work instead of each starting their own.
+ */
+async function keptLater<T>(view: View, key: string, make: () => Promise<T[]>, shared = false): Promise<T[]> {
+  const hit = had<T>(view, key);
+  if (hit) return hit;
+  if (!shared) return keep(view, key, await make());
+  let work = view.pending.get(key) as Promise<T[]> | undefined;
+  if (!work) {
+    work = make()
+      .then((rows) => keep(view, key, rows))
+      .finally(() => view.pending.delete(key));
+    view.pending.set(key, work);
+  }
+  return work;
+}
+
+/** Thrown when whoever asked stopped waiting: the browser drops a search as soon as the next one starts. */
+export class Abandoned extends Error {}
+
+/** How long a list is worked on before other requests get their turn. */
+export const SLICE_MS = 10;
+
+/**
+ * For work that goes through every vulnerability of every image: returns a function to call now and then, which
+ * steps aside for other requests every few milliseconds and stops the work once nobody waits for its answer. Without
+ * it the server answered nothing else for up to a second, and worked through searches the browser had already dropped.
+ */
+export function inSlices(signal?: AbortSignal): () => Promise<void> | undefined {
+  let until = performance.now() + SLICE_MS;
+  return () => {
+    if (performance.now() < until) return;
+    return new Promise<void>((resolve, reject) =>
+      setImmediate(() => {
+        until = performance.now() + SLICE_MS;
+        if (signal?.aborted) reject(new Abandoned());
+        else resolve();
+      }),
+    );
+  };
 }
 
 const brief = (row: ImageRow): ImageBrief => ({ id: row.id, name: imageName(row), tag: row.tags[0] ?? null, use: row.use });
@@ -402,14 +463,44 @@ export function imagePage(repo: Repo, view: View, f: ImageFilters, offset: numbe
       : kept(view, `images|${JSON.stringify(shape)}`, () => view.images.filter((i) => imageMatches(i, f, open)));
   const rows = keys ? all.filter((i) => keys.has(i.id)) : all;
   const out = page(rows, offset, limit);
+  return { total: out.total, rows: out.rows.map((i) => served(repo, view, i, full)) };
+}
+
+/** An image as a list sends it: its findings as they are triaged now, and every workload or the first few. */
+function served(repo: Repo, view: View, i: ImageRow, full: boolean): ImageRow {
   return {
-    total: out.total,
-    rows: out.rows.map((i) => ({
-      ...i,
-      workloads: full ? i.workloads : i.workloads.slice(0, SHOWN),
-      findings: refsOf(i).map((r) => ({ ...r, status: repo.findings.triageOf(r.fingerprint)?.status ?? "open" })),
+    ...i,
+    workloads: full ? i.workloads : i.workloads.slice(0, SHOWN),
+    findings: (view.findings.get(`${i.accountId}|${imageName(i)}`) ?? []).map((r) => ({
+      ...r,
+      status: repo.findings.triageOf(r.fingerprint)?.status ?? "open",
     })),
   };
+}
+
+/**
+ * The images one vulnerability or one component is in, in full and most exposed first: what a row's "and 43 more"
+ * opens. Under the list's own filters, so it is the same images the row counted.
+ */
+export async function imagesWithin(
+  repo: Repo,
+  view: View,
+  list: "vulnerabilities" | "components",
+  f: ImageFilters,
+  key: string,
+  offset: number,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<ImageList<ImageRow> | null> {
+  const row =
+    list === "vulnerabilities" ? (await vulnRows(repo, view, f, signal)).find((v) => v.id === key) : componentRows(repo, view, f).find((c) => c.key === key);
+  if (!row) return null;
+  const out = page(
+    [...row.rows].sort((a, b) => usageRank(b.use) - usageRank(a.use) || imageName(a).localeCompare(imageName(b))),
+    offset,
+    limit,
+  );
+  return { total: out.total, rows: out.rows.map((i) => served(repo, view, i, true)) };
 }
 
 const workloadKey = (w: WorkloadRow) => `${w.accountId}|${w.region}|${w.kind}|${w.group ?? ""}|${w.name}`;
@@ -435,64 +526,150 @@ export function workloadPage(view: View, f: ImageFilters, offset: number, limit:
 interface VulnAll extends Omit<ImageVulnRow, "packages" | "images"> {
   packages: Map<string, ImageVulnRow["packages"][number]>;
   rows: Set<ImageRow>;
+  /** What a search reads of the vulnerability itself, in lowercase. */
+  text: string;
 }
 
-function vulnRows(repo: Repo, view: View, f: ImageFilters): VulnAll[] {
-  const { keys: _k, ...shape } = f;
-  return kept(view, `vulns|${JSON.stringify(shape)}`, () => {
-    const out = new Map<string, VulnAll>();
-    const q = f.q?.toLowerCase();
-    const min = f.severity ? (RANK[f.severity as VulnSeverity] ?? 0) : 0;
-    for (const { index, rows } of partsOf(repo, view)) {
-      // What the search and the severity say about each vulnerability and package, worked out once for the index.
-      const vulnOk = index.vulns.map((v) => RANK[v.severity] >= min && (f.status !== "exploited" || v.kev));
-      const vulnHit = q ? index.vulns.map((v) => `${v.id} ${v.title}`.toLowerCase().includes(q)) : null;
-      const pkgHit = q ? index.packages.map((p) => p.name.toLowerCase().includes(q)) : null;
-      const h = index.hits;
-      for (let n = 0; n < h.length; n += 5) {
-        const row = rows[h[n]];
-        const vi = h[n + 2];
-        if (!row || !vulnOk[vi] || !usedEnough(row, f.use) || (f.image && row.id !== f.image)) continue;
-        const pkg = index.packages[h[n + 1]];
-        const fix = h[n + 3];
-        const base = h[n + 4] === 1;
-        if ((f.layer && pkg.layer !== f.layer) || (f.from && (f.from === "base") !== base)) continue;
-        if (f.status === "fixable" ? !fix : f.status === "nofix" ? !!fix : false) continue;
-        if (vulnHit && pkgHit && !vulnHit[vi] && !pkgHit[h[n + 1]]) continue;
-        const v = index.vulns[vi];
-        let r = out.get(v.id);
-        if (!r) out.set(v.id, (r = { ...v, packages: new Map(), packageCount: 0, rows: new Set(), imageCount: 0, base: true, use: "stored" }));
-        if (RANK[v.severity] > RANK[r.severity]) r.severity = v.severity;
-        r.cvss = Math.max(r.cvss ?? 0, v.cvss ?? 0) || null;
-        r.kev ||= v.kev;
-        r.base &&= base;
-        const pk = `${pkg.type}|${pkg.name}|${pkg.version}`;
-        const fixedIn = index.fixes[fix] || null;
-        const p = r.packages.get(pk);
-        if (p) p.fixedIn = older(p.fixedIn, fixedIn);
-        else r.packages.set(pk, { name: pkg.name, version: pkg.version, type: pkg.type, layer: pkg.layer, fixedIn });
-        r.rows.add(row);
-        r.use = moreInUse(r.use, row.use);
+const byUrgency = (a: VulnAll, b: VulnAll) =>
+  Number(b.kev) - Number(a.kev) ||
+  usageRank(b.use) - usageRank(a.use) ||
+  RANK[b.severity] - RANK[a.severity] ||
+  b.rows.size - a.rows.size ||
+  a.id.localeCompare(b.id);
+
+/** How many index entries are read between looks at the clock (a multiple of an entry's five numbers). */
+const CHECK_EVERY = 5 * 4096;
+
+/** Two sorted lists as one, without sorting again. */
+function merged<T>(a: T[], b: T[], order: (x: T, y: T) => number): T[] {
+  if (!a.length || !b.length) return a.length ? a : b;
+  const out: T[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) out.push(order(a[i], b[j]) <= 0 ? a[i++] : b[j++]);
+  while (i < a.length) out.push(a[i++]);
+  while (j < b.length) out.push(b[j++]);
+  return out;
+}
+
+/**
+ * The vulnerabilities the filters leave, each with the packages and images it is in. `only` narrows them further, by
+ * vulnerability and package as an index numbers them.
+ */
+async function gatherVulns(
+  repo: Repo,
+  view: View,
+  f: ImageFilters,
+  only?: (part: Part) => ((vuln: number, pkg: number) => boolean) | null,
+  signal?: AbortSignal,
+): Promise<VulnAll[]> {
+  const out = new Map<string, VulnAll>();
+  const pause = inSlices(signal);
+  const min = f.severity ? (RANK[f.severity as VulnSeverity] ?? 0) : 0;
+  for (const part of partsOf(repo, view)) {
+    const { index, rows } = part;
+    const wanted = only?.(part);
+    if (wanted === null) continue;
+    // What the severity says about each vulnerability, and each package's key, worked out once for the index.
+    const vulnOk = index.vulns.map((v) => RANK[v.severity] >= min && (f.status !== "exploited" || v.kev));
+    const pkgKeys = (part.pkgKeys ??= index.packages.map((p) => `${p.type}|${p.name}|${p.version}`));
+    const slot: (VulnAll | undefined)[] = new Array(index.vulns.length);
+    const h = index.hits;
+    for (let n = 0; n < h.length; n += 5) {
+      if (n % CHECK_EVERY === 0) await pause();
+      const vi = h[n + 2];
+      const pi = h[n + 1];
+      if (!vulnOk[vi] || (wanted && !wanted(vi, pi))) continue;
+      const row = rows[h[n]];
+      if (!row || !usedEnough(row, f.use) || (f.image && row.id !== f.image)) continue;
+      const pkg = index.packages[pi];
+      const fix = h[n + 3];
+      const base = h[n + 4] === 1;
+      if ((f.layer && pkg.layer !== f.layer) || (f.from && (f.from === "base") !== base)) continue;
+      if (f.status === "fixable" ? !fix : f.status === "nofix" ? !!fix : false) continue;
+      const v = index.vulns[vi];
+      let r = slot[vi];
+      if (!r) {
+        r = out.get(v.id);
+        if (!r)
+          out.set(
+            v.id,
+            (r = {
+              ...v,
+              packages: new Map(),
+              packageCount: 0,
+              rows: new Set(),
+              imageCount: 0,
+              base: true,
+              use: "stored",
+              text: `${v.id} ${v.title}`.toLowerCase(),
+            }),
+          );
+        slot[vi] = r;
       }
+      if (RANK[v.severity] > RANK[r.severity]) r.severity = v.severity;
+      r.cvss = Math.max(r.cvss ?? 0, v.cvss ?? 0) || null;
+      r.kev ||= v.kev;
+      r.base &&= base;
+      const fixedIn = index.fixes[fix] || null;
+      const p = r.packages.get(pkgKeys[pi]);
+      if (p) p.fixedIn = older(p.fixedIn, fixedIn);
+      else r.packages.set(pkgKeys[pi], { name: pkg.name, version: pkg.version, type: pkg.type, layer: pkg.layer, fixedIn });
+      r.rows.add(row);
+      r.use = moreInUse(r.use, row.use);
     }
-    return [...out.values()].sort(
-      (a, b) =>
-        Number(b.kev) - Number(a.kev) ||
-        usageRank(b.use) - usageRank(a.use) ||
-        RANK[b.severity] - RANK[a.severity] ||
-        b.rows.size - a.rows.size ||
-        a.id.localeCompare(b.id),
+  }
+  return [...out.values()].sort(byUrgency);
+}
+
+/**
+ * The vulnerabilities that match, most urgent first. A search doesn't go through every image again: a vulnerability
+ * whose own ID or title matches is taken as the list without the search has it, and only the others are looked up
+ * again, in the packages whose name matches. On a real registry that took a search from a second to a few milliseconds.
+ */
+async function vulnRows(repo: Repo, view: View, f: ImageFilters, signal?: AbortSignal): Promise<VulnAll[]> {
+  const { keys: _k, q, ...shape } = f;
+  // The list without the search is what every search starts from, so it is made once whoever asks, and never dropped
+  // half made: a search typed while it is made waits for the same work.
+  const all = await keptLater(view, `vulns|${JSON.stringify(shape)}`, () => gatherVulns(repo, view, shape), true);
+  if (signal?.aborted) throw new Abandoned();
+  const needle = q?.toLowerCase();
+  if (!needle) return all;
+  return keptLater(view, `vulns|${JSON.stringify(shape)}|${needle}`, async () => {
+    const named = all.filter((r) => r.text.includes(needle));
+    const ids = new Set(named.map((r) => r.id));
+    const inPackages = await gatherVulns(
+      repo,
+      view,
+      shape,
+      (part) => {
+        const names = (part.names ??= part.index.packages.map((p) => p.name.toLowerCase()));
+        const hit = names.map((name) => name.includes(needle));
+        if (!hit.includes(true)) return null;
+        const taken = part.index.vulns.map((v) => ids.has(v.id));
+        return (vuln, pkg) => hit[pkg] && !taken[vuln];
+      },
+      signal,
     );
+    return merged(named, inPackages, byUrgency);
   });
 }
 
-export function vulnPage(repo: Repo, view: View, f: ImageFilters, offset: number, limit: number, full = false): ImageList<ImageVulnRow> {
+export async function vulnPage(
+  repo: Repo,
+  view: View,
+  f: ImageFilters,
+  offset: number,
+  limit: number,
+  full = false,
+  signal?: AbortSignal,
+): Promise<ImageList<ImageVulnRow>> {
   const keys = f.keys?.length ? new Set(f.keys) : null;
-  const all = vulnRows(repo, view, f);
+  const all = await vulnRows(repo, view, f, signal);
   const out = page(keys ? all.filter((r) => keys.has(r.id)) : all, offset, limit);
   return {
     total: out.total,
-    rows: out.rows.map(({ rows, packages, ...r }) => {
+    rows: out.rows.map(({ rows, packages, text: _text, ...r }) => {
       const images = mostExposed(rows);
       return {
         ...r,
@@ -507,14 +684,25 @@ export function vulnPage(repo: Repo, view: View, f: ImageFilters, offset: number
 
 interface ComponentAll extends Omit<ComponentRow, "images" | "imageCount"> {
   rows: Set<ImageRow>;
+  /** What a search reads of the component, in lowercase. */
+  text: string;
 }
 
-/** Every component in view at every version: packages from the indexes, operating systems and runtimes from each image's summary. */
+/**
+ * Every component in view at every version: packages from the indexes, operating systems and runtimes from each
+ * image's summary. A search only picks rows from the list without it, which is made once: whether a component matches
+ * depends on the component alone, not on the images it is in.
+ */
 function componentRows(repo: Repo, view: View, f: ImageFilters): ComponentAll[] {
-  const { keys: _k, ...shape } = f;
-  return kept(view, `components|${JSON.stringify(shape)}`, () => {
+  const { keys: _k, q, ...shape } = f;
+  const all = componentsFor(repo, view, shape);
+  const needle = q?.toLowerCase();
+  return needle ? kept(view, `components|${JSON.stringify(shape)}|${needle}`, () => all.filter((c) => c.text.includes(needle))) : all;
+}
+
+function componentsFor(repo: Repo, view: View, f: ImageFilters): ComponentAll[] {
+  return kept(view, `components|${JSON.stringify(f)}`, () => {
     const out = new Map<string, ComponentAll>();
-    const q = f.q?.toLowerCase();
     const wants = (kind: ComponentKind) => !f.kind || f.kind === kind;
     const inScope = (row: ImageRow) => usedEnough(row, f.use) && (!f.image || row.id === f.image);
     const add = (key: string, row: ImageRow, base: boolean, make: () => Omit<ComponentAll, "rows" | "use" | "base">) => {
@@ -541,7 +729,7 @@ function componentRows(repo: Repo, view: View, f: ImageFilters): ComponentAll[] 
       const vulnsOf = part.vulnsOf;
       const hit = index.packages.map((p) => {
         const kind: ComponentKind = p.layer === "os" ? "os-package" : "app-package";
-        return wants(kind) && (!f.type || p.type === f.type) && (!q || `${p.name} ${p.type}`.toLowerCase().includes(q));
+        return wants(kind) && (!f.type || p.type === f.type);
       });
       const has = index.has;
       for (let n = 0; n < has.length; n += 3) {
@@ -563,6 +751,7 @@ function componentRows(repo: Repo, view: View, f: ImageFilters): ComponentAll[] 
             kev: mine.some((v) => v.kev),
             fixedIn: vulnsOf.get(pi)?.fixedIn ?? null,
             eol: null,
+            text: `${p.name} ${p.type}`.toLowerCase(),
           };
         });
       }
@@ -573,7 +762,7 @@ function componentRows(repo: Repo, view: View, f: ImageFilters): ComponentAll[] 
       const s = row.summary;
       if (!s || !inScope(row)) continue;
       const [family, ...release] = (s.os ?? "").split(" ");
-      if (family && wants("os") && (!f.type || f.type === family) && (!q || s.os!.toLowerCase().includes(q)))
+      if (family && wants("os") && (!f.type || f.type === family))
         add(`os|${s.os}`, row, true, () => ({
           ...plain,
           key: `os|${s.os}`,
@@ -583,20 +772,21 @@ function componentRows(repo: Repo, view: View, f: ImageFilters): ComponentAll[] 
           type: family,
           fixedIn: null,
           eol: s.eol,
+          text: s.os!.toLowerCase(),
         }));
       if (wants("runtime") && (!f.type || f.type === "runtime"))
         for (const r of s.runtimes ?? [])
-          if (!q || `${r.name} ${r.version}`.toLowerCase().includes(q))
-            add(`runtime|${r.name}|${r.version}`, row, true, () => ({
-              ...plain,
-              key: `runtime|${r.name}|${r.version}`,
-              kind: "runtime",
-              name: r.name,
-              version: r.version,
-              type: "runtime",
-              fixedIn: r.latest,
-              eol: r.eol,
-            }));
+          add(`runtime|${r.name}|${r.version}`, row, true, () => ({
+            ...plain,
+            key: `runtime|${r.name}|${r.version}`,
+            kind: "runtime",
+            name: r.name,
+            version: r.version,
+            type: "runtime",
+            fixedIn: r.latest,
+            eol: r.eol,
+            text: `${r.name} ${r.version}`.toLowerCase(),
+          }));
     }
     const risk = (c: ComponentAll) => (c.kev ? 100 : 0) + (c.eol ? 10 : 0) + (c.worst ? RANK[c.worst] : -1);
     return [...out.values()]
@@ -614,7 +804,7 @@ export function componentPage(repo: Repo, view: View, f: ImageFilters, offset: n
   const out = page(keys ? all.filter((r) => keys.has(r.key)) : all, offset, limit);
   return {
     total: out.total,
-    rows: out.rows.map(({ rows, ...c }) => {
+    rows: out.rows.map(({ rows, text: _text, ...c }) => {
       const images = mostExposed(rows);
       return { ...c, images: full ? images : images.slice(0, SHOWN), imageCount: images.length };
     }),

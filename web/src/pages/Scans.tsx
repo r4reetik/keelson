@@ -2,6 +2,7 @@ import { Badge, Table, Link } from "@cloudflare/kumo";
 import { useScopedApi, useShell } from "../shell.tsx";
 import { dateTime, num, plural, PROVIDER_INFO, score, type ScansResponse } from "../lib.ts";
 import { Aside, Flag, ListCard, NoRows, Page, PageState } from "../components/ui.tsx";
+import { MoreNames } from "../components/full-list.tsx";
 
 const TITLE = "Scans";
 const DESCRIPTION =
@@ -126,7 +127,7 @@ export function ScansPage() {
                         {c.skippedChecks?.length ? (
                           <span>
                             {plural(c.skippedChecks.length, "check")} skipped: {c.skippedChecks.slice(0, 6).join(", ")}
-                            {c.skippedChecks.length > 6 ? "…" : ""}
+                            <MoreNames names={c.skippedChecks} shown={6} title={`Checks skipped without ${c.label}`} noun={["check", "checks"]} />
                           </span>
                         ) : null}
                         {c.message && (

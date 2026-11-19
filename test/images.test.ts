@@ -45,7 +45,7 @@ import {
 } from "../src/core/images.ts";
 import { trivy, trivyFailure, trivyLimits, TrivyError } from "../src/core/trivy.ts";
 import { imageBuilds } from "../src/providers/github/sbom/builds.ts";
-import { fixPlaces } from "../src/server/images.ts";
+import { Abandoned, fixPlaces, imagesView, inSlices, SLICE_MS, vulnPage } from "../src/server/images.ts";
 import type { RepoDependencies } from "../src/shared/dependencies.ts";
 import {
   buildMatches,
@@ -405,6 +405,25 @@ test("the real runner gives a scanner the registry login for that one host only,
     delete process.env.KEELSON_TEST_SECRET;
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("work on a long list steps aside every few milliseconds, and stops once nobody waits for it", async () => {
+  // Going through every vulnerability of every image took the server a second in which it answered nothing else, and
+  // it worked through searches the browser had already replaced.
+  const pause = inSlices();
+  assert.equal(pause(), undefined, "within its slice the work goes on");
+  await new Promise((r) => setTimeout(r, SLICE_MS + 5));
+  let others = false;
+  setImmediate(() => (others = true));
+  await pause();
+  assert.ok(others, "after it, whatever else is waiting runs first");
+  assert.equal(pause(), undefined, "and a new slice starts");
+
+  const gone = new AbortController();
+  const stop = inSlices(gone.signal);
+  await new Promise((r) => setTimeout(r, SLICE_MS + 5));
+  gone.abort();
+  await assert.rejects(Promise.resolve(stop()), Abandoned);
 });
 
 test("where a vulnerability is fixed: the base image, the repository's code, a rebuild, or the image's own build", () => {
@@ -1192,6 +1211,73 @@ describe("image scans against the mocked platforms", () => {
         "what a newer base image would fix",
       );
 
+      // A search is narrowed from the list without it. A vulnerability found by its own ID or title is the row that
+      // list has; one found only by a package's name keeps just the packages that match and the images they are in.
+      const vulns = (q: string) => t.json(`/api/images/vulnerabilities?scope=all&full=1&limit=200&${q}`) as Promise<ImageList<ImageVulnRow>>;
+      const every = (await vulns("")).rows;
+      const own = (v: ImageVulnRow, needle: string) => `${v.id} ${v.title}`.toLowerCase().includes(needle);
+      const packaged = (v: ImageVulnRow, needle: string) => v.packages.some((p) => p.name.toLowerCase().includes(needle));
+      for (const typed of ["CVE-2026", MOCK_KEV.toLowerCase(), "mock-openssl", "MOCK-ROUTER", "mock-", "nothing-is-called-this"]) {
+        const needle = typed.toLowerCase();
+        const found = (await vulns(`q=${encodeURIComponent(typed)}`)).rows;
+        assert.deepEqual(
+          found.map((v) => v.id).sort(),
+          every
+            .filter((v) => own(v, needle) || packaged(v, needle))
+            .map((v) => v.id)
+            .sort(),
+          `"${typed}" finds the vulnerabilities whose ID, title or package matches`,
+        );
+        for (const v of found) {
+          const whole = every.find((x) => x.id === v.id)!;
+          if (own(v, needle)) assert.deepEqual(v, whole, `"${typed}" names ${v.id} itself: every package and image it is in`);
+          else {
+            assert.ok(
+              v.packages.every((p) => p.name.toLowerCase().includes(needle)),
+              `"${typed}" names a package of ${v.id}: only that package`,
+            );
+            assert.ok(v.imageCount <= whole.imageCount);
+          }
+        }
+      }
+      assert.ok(
+        (await vulns("q=mock-router")).rows.some((v) => !own(v, "mock-router")),
+        "the mock has a vulnerability that only its package's name finds",
+      );
+      // More searches than lists are kept: the list without a search, which each of them starts from, still answers the same.
+      for (let n = 0; n < 15; n++) await vulns(`q=none-${n}`);
+      assert.deepEqual((await vulns("")).rows, every);
+
+      // A search the browser dropped stops at once, and the next one is answered as if it had never been asked.
+      const scope = t.repo.resolveScope("all", null)!;
+      const dropped = new AbortController();
+      dropped.abort();
+      await assert.rejects(vulnPage(t.repo, imagesView(t.repo, scope), { q: "mock-zlib" }, 0, 50, false, dropped.signal), Abandoned);
+      assert.equal((await vulnPage(t.repo, imagesView(t.repo, scope), { q: "mock-zlib" }, 0, 50)).total, (await vulns("q=mock-zlib")).total);
+
+      // A row names the first few images a vulnerability is in; "and 43 more" asks for every one of them, in full and
+      // under the list's own filters, so it is the same images the row counted.
+      const within = (q: string) => t.json(`/api/images/within?scope=all&${q}`) as Promise<ImageList<ImageRow>>;
+      const withKev = await within(`list=vulnerabilities&of=${MOCK_KEV}`);
+      assert.equal(withKev.total, every.find((v) => v.id === MOCK_KEV)!.imageCount);
+      assert.deepEqual(
+        withKev.rows.map((i) => i.id).sort(),
+        every
+          .find((v) => v.id === MOCK_KEV)!
+          .images.map((i) => i.id)
+          .sort(),
+      );
+      assert.equal(withKev.rows[0].use, "internet", "most exposed first");
+      assert.ok(
+        withKev.rows.some((i) => i.workloads.length > 0 && i.builtBy.length > 0 && i.summary),
+        "whole rows: where each runs, who builds it and what was found in it",
+      );
+      assert.equal((await within(`list=vulnerabilities&of=${MOCK_KEV}&use=running`)).total, 2, "the list's filters apply");
+      assert.equal((await within(`list=vulnerabilities&of=${MOCK_KEV}&limit=1&offset=1`)).rows.length, 1);
+      assert.equal((await t.call("/api/images/within?scope=all&list=vulnerabilities&of=CVE-0000-0000")).status, 404);
+      assert.equal((await t.call(`/api/images/within?scope=all&list=images&of=${MOCK_KEV}`)).status, 400);
+      assert.equal((await t.call("/api/images/within?scope=all&list=components")).status, 400);
+
       // The inventory: every package, runtime and operating system the images are made of, at each version.
       const components = (q: string) => t.json(`/api/images/components?scope=all&${q}`) as Promise<ImageList<ComponentRow>>;
       assert.deepEqual(
@@ -1211,6 +1297,12 @@ describe("image scans against the mocked platforms", () => {
       const openssl = (await components("q=mock-openssl&kind=os-package")).rows;
       assert.deepEqual(openssl.map((c) => `${c.type} ${c.imageCount} ${c.kev}`).sort(), ["alpine 1 true", "debian 1 true", "ubuntu 1 true"]);
       assert.equal(openssl.find((c) => c.type === "debian")!.base, true, "it came with the base image");
+      const router = (await components("q=mock-router")).rows[0];
+      assert.deepEqual(
+        (await within(`list=components&of=${encodeURIComponent(router.key)}`)).rows.map((i) => i.id).sort(),
+        router.images.map((i) => i.id).sort(),
+        "the images a component is in, the same way",
+      );
       const everything = await components("limit=200");
       assert.equal(page.summary!.components, everything.total);
       assert.equal(page.summary!.componentsAtRisk, everything.rows.filter((c) => c.worst || c.eol).length);

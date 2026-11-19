@@ -222,7 +222,7 @@ export function ImagePage() {
                       {w.kind} · {workloadPlace(w)}
                     </span>
                   </span>
-                  <Reach internet={w.internet} via={w.via} hosts={w.hosts} />
+                  <Reach internet={w.internet} via={w.via} hosts={w.hosts} name={`${w.kind} ${w.name}`} />
                   {w.byTag && (
                     <span className="text-xs text-kumo-subtle">
                       Named by tag ({w.image.split(":").pop()}): if the tag moved since it started, it still runs the older image.

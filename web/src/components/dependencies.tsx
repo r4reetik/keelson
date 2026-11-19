@@ -17,6 +17,7 @@ import {
   type Severity,
 } from "../lib.ts";
 import { SeverityBadge } from "./ui.tsx";
+import { MoreNames } from "./full-list.tsx";
 
 /** A vulnerability's severity as a badge; Grype's "unknown" reads as Info. */
 export const VulnSeverity = ({ severity }: { severity: string }) => (
@@ -83,6 +84,9 @@ export function VulnTable({
                       {a}
                     </span>
                   ))}
+                  <span className="text-xs">
+                    <MoreNames names={v.aliases} shown={2} title={`Other names of ${v.id}`} noun={["ID", "IDs"]} />
+                  </span>
                   <ExploitedBadges kev={v.kev} ransomware={v.ransomware} />
                   {v.cpeOnly && (
                     <Tooltip content="Matched by product name (CPE) rather than the package's own ecosystem: check it applies">

@@ -27,6 +27,7 @@ import {
   type SurfaceResponse,
 } from "../lib.ts";
 import { Card, DialogHeader, ListCard, NoRows, Page, PageState, SeverityBadge, unreadableText } from "../components/ui.tsx";
+import { MoreNames } from "../components/full-list.tsx";
 import { CopyMenu, DownloadCsvButton, SelectPage, SelectRow, SelectionBar, downloadCsv, useSelection, type CopyItem } from "../components/selection.tsx";
 
 const TITLE = "Attack surface";
@@ -590,10 +591,11 @@ export function SurfacePage() {
                         <div className="max-w-80">
                           <div className="font-mono text-xs text-kumo-default">{a.shodan.ports.join(", ") || "None"}</div>
                           {(a.shodan.products.length > 0 || a.shodan.lastSeen) && (
-                            <div className="truncate text-xs text-kumo-subtle">
+                            <div className="text-xs text-kumo-subtle">
                               {[a.shodan.products.slice(0, 3).join(", "), a.shodan.lastSeen && `seen ${dateTime(a.shodan.lastSeen)}`]
                                 .filter(Boolean)
                                 .join(" · ")}
+                              <MoreNames names={a.shodan.products} shown={3} title={`What Shodan saw on ${a.ip}`} noun={["product", "products"]} />
                             </div>
                           )}
                         </div>
@@ -662,7 +664,12 @@ export function SurfacePage() {
                       ) : (
                         <span>
                           <Badge variant="outline">Not in a connected account</Badge>
-                          {d.nameservers?.length ? <div className="text-xs text-kumo-subtle">{d.nameservers.slice(0, 2).join(", ")}</div> : null}
+                          {d.nameservers?.length ? (
+                            <div className="text-xs text-kumo-subtle">
+                              {d.nameservers.slice(0, 2).join(", ")}
+                              <MoreNames names={d.nameservers} shown={2} title={`Name servers of ${d.name}`} noun={["name server", "name servers"]} />
+                            </div>
+                          ) : null}
                         </span>
                       )}
                     </Table.Cell>
@@ -672,7 +679,17 @@ export function SurfacePage() {
                       ) : (
                         <div className="max-w-80">
                           <div className="tabular-nums">{num(d.certificates)}</div>
-                          {d.issuers.length > 0 && <div className="truncate text-xs text-kumo-subtle">{d.issuers.slice(0, 3).join(", ")}</div>}
+                          {d.issuers.length > 0 && (
+                            <div className="text-xs text-kumo-subtle">
+                              {d.issuers.slice(0, 3).join(", ")}
+                              <MoreNames
+                                names={d.issuers}
+                                shown={3}
+                                title={`Who issued certificates for ${d.name}`}
+                                noun={["certificate authority", "certificate authorities"]}
+                              />
+                            </div>
+                          )}
                         </div>
                       )}
                     </Table.Cell>

@@ -1,6 +1,7 @@
 // The Images page, for the view's scope: its numbers (GET /api/images), then a
 // page at a time of images, running workloads, vulnerabilities and components
 // (the inventory of what the images are made of), with the same filters as CSV.
+// The images one vulnerability or component is in are GET /api/images/within.
 // One image in full is GET /api/images/detail, and its software bill of materials
 // GET /api/images/sbom. The images a repository builds are asked for by account
 // and repository (GET /api/images/built-by), joined across its entity; an account
@@ -8,7 +9,9 @@
 //
 // Lists are served 50 rows at a time, and a row carries only the first few of the
 // images or workloads it names: a registry has hundreds of images, and sending
-// every row at once made the page slow on any laptop.
+// every row at once made the page slow on any laptop. A search is asked for as
+// someone types, so the browser drops one as soon as the next starts, and the
+// one list that takes long to make stops when its request is dropped.
 
 import type { Context } from "hono";
 import type { AppContext, AppEnv } from "../env.ts";
@@ -16,11 +19,13 @@ import type { Routes } from "../router.ts";
 import { ownAccount } from "../access.ts";
 import { badRequest, notFound } from "../errors.ts";
 import {
+  Abandoned,
   componentCsv,
   componentPage,
   componentTypes,
   imageDetail,
   imagePage,
+  imagesWithin,
   imagesBuiltBy,
   imagesSummary,
   imagesView,
@@ -105,13 +110,34 @@ export function imageRoutes(r: Routes, { repo }: AppContext) {
     const { offset, limit } = paging(c);
     return c.json(workloadPage(imagesView(repo, c.get("scope")), filters(c), offset, limit));
   });
-  r.get("/api/images/vulnerabilities", (c) => {
+  r.get("/api/images/vulnerabilities", async (c) => {
     const { offset, limit, full } = paging(c);
-    return c.json(vulnPage(repo, imagesView(repo, c.get("scope")), filters(c), offset, limit, full));
+    try {
+      return c.json(await vulnPage(repo, imagesView(repo, c.get("scope")), filters(c), offset, limit, full, c.req.raw.signal));
+    } catch (e) {
+      // The browser dropped this search for the next one: nobody reads the answer.
+      if (e instanceof Abandoned) return new Response(null, { status: 499 });
+      throw e;
+    }
   });
   r.get("/api/images/components", (c) => {
     const { offset, limit, full } = paging(c);
     return c.json(componentPage(repo, imagesView(repo, c.get("scope")), filters(c), offset, limit, full));
+  });
+  // The images one row of those two lists is in, every one of them: a row carries the first few.
+  r.get("/api/images/within", async (c) => {
+    const list = oneOf(c.req.query("list"), ["vulnerabilities", "components"] as const);
+    const key = c.req.query("of");
+    if (!list || !key) throw badRequest("Name the list (vulnerabilities or components) and the row.");
+    const { offset, limit } = paging(c);
+    try {
+      const images = await imagesWithin(repo, imagesView(repo, c.get("scope")), list, filters(c), key, offset, limit, c.req.raw.signal);
+      if (!images) throw notFound("This row isn't in the view's latest scans any more.");
+      return c.json(images);
+    } catch (e) {
+      if (e instanceof Abandoned) return new Response(null, { status: 499 });
+      throw e;
+    }
   });
   r.get("/api/images/detail", (c) => {
     const id = c.req.query("id");

@@ -35,8 +35,11 @@ export function useShell(): Shell {
   return s;
 }
 
-/** GET a scoped API path; refetches when the scope changes, a scan finishes, or `key` changes. */
-export function useScopedApi<T>(path: string | null, key: unknown = null) {
+/**
+ * GET a scoped API path; refetches when the scope changes, a scan finishes, or `key` changes. `keep` names a list
+ * that keeps its rows on screen while its next ones load (see `useApi`); another view's rows are never kept.
+ */
+export function useScopedApi<T>(path: string | null, key: unknown = null, { keep }: { keep?: string } = {}) {
   const { view, dataVersion } = useShell();
-  return useApi<T>(path ? withScope(path, view.key) : null, [dataVersion, key]);
+  return useApi<T>(path ? withScope(path, view.key) : null, [dataVersion, key], { keep: keep ? `${view.key}|${keep}` : null });
 }
