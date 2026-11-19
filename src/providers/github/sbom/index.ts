@@ -20,6 +20,7 @@ import type { AccountCache } from "../../../store/repo.ts";
 import type { ProgressEvent } from "../../../core/types.ts";
 import type { GithubClient, GithubError, Json } from "../client.ts";
 import type { ActionUse, DependencyInventory, DepPackage, DepUsage, DepVuln, GithubRepo, RepoDependencies } from "../types.ts";
+import { imageBuilds, type BuildRef } from "./builds.ts";
 import { ecosystemOfType, findParts, MAX_FILE_BYTES, MAX_FILES, wanted, type Part } from "./manifests.ts";
 
 /** Bump when what's cached per repository changes shape, so every SBOM is made again. */
@@ -45,6 +46,8 @@ interface Cached {
   sbom: Json | null;
   parts: Part[];
   actions: ActionUse[];
+  /** Container images the workflows build and push. Absent on entries cached before Keelson read them. */
+  builds?: BuildRef[];
   /** npm packages the lock file marks as development only ("name@version"). */
   devPackages: string[];
   languages: Record<string, number> | null;
@@ -170,7 +173,27 @@ async function readRepo(
     .digest("hex")
     .slice(0, 32);
   const prev = cache.get<Cached>(`sbom:${r.name}`);
-  if (prev?.format === FORMAT && prev.key === key) return prev;
+  if (prev?.format === FORMAT && prev.key === key) {
+    if (prev.builds) return prev;
+    // Cached before Keelson read which images workflows push: only the workflows are fetched again, not the SBOM remade.
+    const workflows = new Map<string, string>();
+    let unread = false;
+    await pool(
+      files.filter((f) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(f.path)),
+      BLOB_CONCURRENCY,
+      async (f) => {
+        try {
+          workflows.set(f.path, Buffer.from(String((await client.raw(`${base}/git/blobs/${f.sha}`))?.content ?? ""), "base64").toString("utf8"));
+        } catch {
+          unread = true;
+        }
+      },
+    );
+    if (unread) return prev;
+    const filled = { ...prev, builds: imageBuilds(workflows, `${client.org}/${r.name}`) };
+    cache.put(`sbom:${r.name}`, filled);
+    return filled;
+  }
 
   // Something changed: fetch the files, read them, and let Syft read them from a folder that's deleted right after.
   const contents = new Map<string, string>();
@@ -187,6 +210,7 @@ async function readRepo(
   });
   const parts = findParts(contents);
   const actions = actionUses(contents);
+  const builds = imageBuilds(contents, `${client.org}/${r.name}`);
   const devPackages = npmDevPackages(contents);
   const languages = await client.raw(`${base}/languages`).catch(() => null);
   let sbom: Json | null = null;
@@ -221,6 +245,7 @@ async function readRepo(
     sbom,
     parts,
     actions,
+    builds,
     devPackages,
     languages: languages && typeof languages === "object" ? languages : null,
     partial: partial || listed.partial || missed,
@@ -520,7 +545,7 @@ const riskOf = (category: unknown): "permissive" | "weak" | "strong" | "other" =
 
 /** A repository's packages, each with where it's used, its vulnerabilities and its license's risk. */
 function dependenciesOf(repo: string, c: Cached, vulns: Map<string, DepVuln[]>, licenses: Map<string, LicenseClass>): RepoDependencies {
-  const base = { repo, generatedAt: c.generatedAt, languages: c.languages, parts: c.parts, actions: c.actions, partial: c.partial };
+  const base = { repo, generatedAt: c.generatedAt, languages: c.languages, parts: c.parts, actions: c.actions, builds: c.builds ?? [], partial: c.partial };
   if (!c.sbom) return { ...base, packages: null };
   const artifacts: Json[] = c.sbom.artifacts ?? [];
   const byArtifact = new Map<string, Json>(artifacts.map((a) => [String(a.id), a]));

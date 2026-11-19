@@ -3,6 +3,7 @@
 // compile, and test/github-checks.test.ts asserts each case really makes its
 // check fail.
 
+import { imageCase } from "./helpers/images.ts";
 import type { GithubCheckId } from "../src/providers/github/checks/index.ts";
 import type { EngineOptions } from "../src/core/types.ts";
 import type { DependencyInventory, DepPackage, DepVuln, GithubInventory, GithubRepo, RepoDependencies } from "../src/providers/github/types.ts";
@@ -82,6 +83,7 @@ export function githubInventory(extra: Partial<GithubInventory> = {}): GithubInv
     codeScanning: [],
     secretScanning: [],
     dependencies: dependencies(),
+    images: imageCase("github", "ghcr.io", 0, { repository: "example/web", public: true }),
     ...extra,
   };
 }
@@ -159,6 +161,9 @@ const base = githubInventory();
 const org = base.org!;
 const withRepo = (extra: Partial<GithubRepo>) => githubInventory({ repos: [repo(extra)] });
 
+/** An image of the organization in GitHub's registry, run by a workload the internet reaches, failing image check `n`. */
+export const withImage = (n: 0 | 1 | 2 | 3 | 4) => githubInventory({ images: imageCase("github", "ghcr.io", n, { repository: "example/web", public: true }) });
+
 export const GITHUB_CASES: Record<GithubCheckId, () => GithubInventory> = {
   "GID-001": () => githubInventory({ org: { ...org, twoFactorRequired: false } }),
   "GID-002": () => githubInventory({ org: { ...org, defaultRepoPermission: "write" } }),
@@ -216,6 +221,11 @@ export const GITHUB_CASES: Record<GithubCheckId, () => GithubInventory> = {
       ]),
     }),
   "GLI-001": () => withPackages(pkg({ name: "readline", licenses: ["GPL-3.0-only"], licenseRisk: "strong" })),
+
+  "GIM-001": () => withImage(1),
+  "GIM-002": () => withImage(2),
+  "GIM-003": () => withImage(3),
+  "GIM-004": () => withImage(4),
 };
 
 /** Engine options a case needs beyond the defaults. */

@@ -54,6 +54,8 @@ export const PRODUCTS: Record<string, Product> = {
   actiontrail: { version: "2020-07-06" },
   cs: { version: "2015-12-15" },
   fc: { version: "2023-03-30" },
+  cr: { version: "2018-12-01" },
+  eci: { regionParam: true, version: "2018-08-08" },
   // Security Center answers in two places: Shanghai for accounts on the China site, Singapore for the international one.
   sas: { version: "2018-12-03", ram: "yundun-sas", global: "tds.cn-shanghai.aliyuncs.com" },
   cdn: { version: "2018-05-10", global: "cdn.aliyuncs.com" },
@@ -75,7 +77,7 @@ const UNGATED = new Set(["sts:GetCallerIdentity"]);
 const ALLOWED = new Set(ALIBABA_POLICY_ACTIONS);
 
 /** APIs whose RAM action has another name than the API itself. */
-const RAM_NAME: Record<string, string> = { "cs:DescribeClustersV1": "cs:GetClusters" };
+const RAM_NAME: Record<string, string> = { "cs:DescribeClustersV1": "cs:GetClusters", "cr:ListRepoTag": "cr:ListRepositoryTag" };
 
 /** The RAM action an API call is, as the policy names it ("yundun-sas:DescribeCloudCenterInstances"). */
 export const ramAction = (product: string, action: string) => {

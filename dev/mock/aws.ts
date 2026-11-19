@@ -10,6 +10,8 @@
 // are relative to now. Answers are XML or JSON in the shapes of the AWS API
 // references.
 
+import { installMockTrivy, MOCK_DIGEST, type MockTrivyOptions } from "./trivy.ts";
+
 const DAY = 86_400_000;
 const ago = (days: number) => new Date(Date.now() - days * DAY).toISOString();
 
@@ -24,6 +26,8 @@ export const MOCK_AWS_CLOUDFRONT = "d1mockexample.cloudfront.net";
 export const MOCK_AWS_TASK_TOKEN = "ghp_MOCKmockMOCKmockMOCKmockMOCKmock0001";
 export const MOCK_AWS_BUILD_PASSWORD = "mock-build-password-0001";
 export const MOCK_AWS_SNS_SECRET = "mock-sns-endpoint-secret";
+/** The password of the registry login ECR hands out for Trivy: the only credential the image scanner may be given. */
+export const MOCK_AWS_REGISTRY_PASSWORD = "mock-ecr-registry-password";
 
 interface MockOptions {
   onRequest?: (url: URL, init?: RequestInit) => void;
@@ -31,6 +35,8 @@ interface MockOptions {
   deny?: RegExp[];
   /** Extra enabled regions that refuse every request, like a region closed by a service control policy. */
   refuseRegions?: string[];
+  /** Options for the mock Trivy (dev/mock/trivy.ts), installed with the API. */
+  trivy?: MockTrivyOptions;
 }
 
 const x = (tag: string, ...children: (string | number | boolean)[]) => `<${tag}>${children.join("")}</${tag}>`;
@@ -588,6 +594,7 @@ function lambda(path: string, region: string): unknown {
 }
 
 const sec = (daysAgo: number) => Math.floor((Date.now() - daysAgo * DAY) / 1000);
+const ECR = `${MOCK_AWS_ACCOUNT}.dkr.ecr.${WORK}.amazonaws.com`;
 const ARN = (service: string, resource: string) => `arn:aws:${service}:${WORK}:${MOCK_AWS_ACCOUNT}:${resource}`;
 /** A resource policy that lets anyone in. */
 const OPEN_POLICY = (action: string) => JSON.stringify({ Statement: [{ Effect: "Allow", Principal: { AWS: "*" }, Action: action, Resource: "*" }] });
@@ -665,20 +672,110 @@ function rpc(service: string, action: string, body: Record<string, unknown>, reg
       ]);
     case "secretsmanager:GetResourcePolicy":
       return { ResourcePolicy: OPEN_POLICY("secretsmanager:GetSecretValue") };
+    // "web" is public and runs behind the load balancer; "api" runs a worker inside the network; nothing runs "tools".
     case "ecr:DescribeRepositories":
-      return list("repositories", [{ repositoryName: "web", imageTagMutability: "MUTABLE", imageScanningConfiguration: { scanOnPush: false } }]);
+      return list("repositories", [
+        { repositoryName: "web", imageTagMutability: "MUTABLE", imageScanningConfiguration: { scanOnPush: false } },
+        { repositoryName: "api", imageTagMutability: "IMMUTABLE", imageScanningConfiguration: { scanOnPush: true } },
+        { repositoryName: "tools", imageTagMutability: "IMMUTABLE", imageScanningConfiguration: { scanOnPush: true } },
+      ]);
     case "ecr:GetRepositoryPolicy":
-      return { policyText: OPEN_POLICY("ecr:BatchGetImage") };
+      return body.repositoryName === "web" ? { policyText: OPEN_POLICY("ecr:BatchGetImage") } : notFound("RepositoryPolicyNotFoundException");
     case "ecr:GetRegistryScanningConfiguration":
       return { scanningConfiguration: { scanType: "BASIC", rules: [] } };
-    // The web service runs a privileged container on the host's network, with a GitHub token in its environment.
+    case "ecr:DescribeImages": {
+      const image = (digest: string, tags: string[], pushed: number, pulled: number | null, index = false) => ({
+        imageDigest: digest,
+        imageTags: tags,
+        imagePushedAt: sec(pushed),
+        ...(pulled == null ? {} : { lastRecordedPullTime: sec(pulled) }),
+        imageSizeInBytes: 80_000_000,
+        imageManifestMediaType: index ? "application/vnd.oci.image.index.v1+json" : "application/vnd.oci.image.manifest.v1+json",
+      });
+      const images: Record<string, unknown[]> = {
+        web: [
+          // Pushed as an index, as BuildKit does: the arm64 image and its build attestation are listed beside it, untagged.
+          image(MOCK_DIGEST.web, ["1.4.2", "latest"], 20, 0, true),
+          image(MOCK_DIGEST.webArm, [], 20, 0),
+          image(MOCK_DIGEST.webAttestation, [], 20, 0),
+          image(MOCK_DIGEST.webOld, ["1.4.1"], 60, 45),
+          // Left behind by a build: untagged and never pulled.
+          image(`sha256:${"09".repeat(32)}`, [], 90, null),
+        ],
+        api: [image(MOCK_DIGEST.api, ["2026.11.1"], 6, 0)],
+        tools: [image(MOCK_DIGEST.tools, ["latest"], 420, 300)],
+      };
+      return { imageDetails: work ? (images[String(body.repositoryName)] ?? []) : [] };
+    }
+    // An index's manifest: which images it lists and for which platform. Never a layer.
+    case "ecr:BatchGetImage":
+      return {
+        images: (body.imageIds as { imageDigest: string }[])
+          .filter((i) => i.imageDigest === MOCK_DIGEST.web)
+          .map((i) => ({
+            imageId: i,
+            imageManifestMediaType: "application/vnd.oci.image.index.v1+json",
+            imageManifest: JSON.stringify({
+              schemaVersion: 2,
+              mediaType: "application/vnd.oci.image.index.v1+json",
+              manifests: [
+                { mediaType: "application/vnd.oci.image.manifest.v1+json", digest: MOCK_DIGEST.webArm, platform: { architecture: "arm64", os: "linux" } },
+                {
+                  mediaType: "application/vnd.oci.image.manifest.v1+json",
+                  digest: MOCK_DIGEST.webAttestation,
+                  platform: { architecture: "unknown", os: "unknown" },
+                  annotations: { "vnd.docker.reference.type": "attestation-manifest", "vnd.docker.reference.digest": MOCK_DIGEST.webArm },
+                },
+              ],
+            }),
+          })),
+      };
+    // A registry login, as ECR hands it out: "AWS:<password>" in base64. It is not the access key.
+    case "ecr:GetAuthorizationToken":
+      return {
+        authorizationData: [
+          {
+            authorizationToken: Buffer.from(`AWS:${MOCK_AWS_REGISTRY_PASSWORD}`).toString("base64"),
+            expiresAt: sec(-0.5),
+            proxyEndpoint: `https://${MOCK_AWS_ACCOUNT}.dkr.ecr.${region}.amazonaws.com`,
+          },
+        ],
+      };
+    // The web service runs a privileged container on the host's network, with a GitHub token in its environment, behind
+    // the internet-facing load balancer. The worker runs inside the network, pinned to a digest.
     case "ecs:ListClusters":
       return list("clusterArns", [ARN("ecs", "cluster/main")]);
     case "ecs:ListServices":
-      return { serviceArns: [ARN("ecs", "service/main/web")] };
+      return { serviceArns: [ARN("ecs", "service/main/web"), ARN("ecs", "service/main/worker")] };
     case "ecs:DescribeServices":
-      return { services: [{ serviceName: "web", taskDefinition: ARN("ecs", "task-definition/web:7") }] };
+      return {
+        services: [
+          {
+            serviceName: "web",
+            taskDefinition: ARN("ecs", "task-definition/web:7"),
+            launchType: "EC2",
+            runningCount: 2,
+            loadBalancers: [{ targetGroupArn: TG_WEB, containerName: "web", containerPort: 8080 }],
+          },
+          {
+            serviceName: "worker",
+            taskDefinition: ARN("ecs", "task-definition/worker:3"),
+            launchType: "FARGATE",
+            runningCount: 1,
+            networkConfiguration: { awsvpcConfiguration: { assignPublicIp: "DISABLED", securityGroups: [SG.db], subnets: ["subnet-0mock"] } },
+          },
+        ],
+      };
     case "ecs:DescribeTaskDefinition":
+      if (String(body.taskDefinition).includes("worker"))
+        return {
+          taskDefinition: {
+            family: "worker",
+            revision: 3,
+            networkMode: "awsvpc",
+            containerDefinitions: [{ name: "worker", image: `${ECR}/api@${MOCK_DIGEST.api}`, environment: [{ name: "QUEUE", value: "orders" }] }],
+          },
+        };
       return {
         taskDefinition: {
           family: "web",
@@ -687,12 +784,15 @@ function rpc(service: string, action: string, body: Record<string, unknown>, reg
           containerDefinitions: [
             {
               name: "web",
+              image: `${ECR}/web:1.4.2`,
               privileged: true,
               environment: [
                 { name: "GITHUB_TOKEN", value: MOCK_AWS_TASK_TOKEN },
                 { name: "PORT", value: "8080" },
               ],
             },
+            // A sidecar pulled from Docker Hub.
+            { name: "logs", image: "mock/log-shipper:2.1" },
           ],
         },
       };
@@ -882,6 +982,7 @@ function rdsMock(action: string, q: URLSearchParams, region: string): string | n
 
 export function installMockAws(o: MockOptions = {}): () => void {
   const real = globalThis.fetch;
+  const restoreTrivy = installMockTrivy(o.trivy);
   const regions = ["us-east-1", WORK, ...(o.refuseRegions ?? [])];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
@@ -1049,5 +1150,6 @@ export function installMockAws(o: MockOptions = {}): () => void {
   }) as typeof fetch;
   return () => {
     globalThis.fetch = real;
+    restoreTrivy();
   };
 }

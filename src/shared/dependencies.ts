@@ -3,6 +3,8 @@
 // they're used, their known vulnerabilities and their licenses. Shared by the
 // GitHub scan, the API and the web. Portable: no node: imports.
 
+import type { ImageBuildLink } from "./images.ts";
+
 /** One project inside a repository. A repository with one project has one part, at its root (path ""). */
 export interface Part {
   /** Folder, relative to the repository's root; "" for the root. */
@@ -103,6 +105,8 @@ export interface RepoDependencies {
   /** Null when Syft isn't installed: the parts are known, the packages aren't. */
   packages: DepPackage[] | null;
   actions: ActionUse[];
+  /** Container images its workflows build and push; absent on views made before Keelson read them. */
+  builds?: Omit<ImageBuildLink, "repo">[];
   /** Some manifest files were too large or too many to fetch, or the file list was cut short. */
   partial: boolean;
 }

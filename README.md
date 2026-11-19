@@ -145,7 +145,9 @@ Every organization a GitHub App you register is installed on, and every reposito
 settings and the alerts GitHub's own code security raises, and each repository's manifest and lock files to keep
 a software bill of materials (SBOM) with Anchore's [Syft](https://github.com/anchore/syft),
 [Grype](https://github.com/anchore/grype) and [Grant](https://github.com/anchore/grant), when they are installed.
-It doesn't read or run your code, and never reads a leaked secret's value.
+It doesn't read or run your code, and never reads a leaked secret's value. It also lists the organization's
+container packages in GitHub Container Registry and reads its workflows for the images they push, so each image
+can be followed back to the repository that builds it.
 
 | Area | Examples |
 |---|---|
@@ -156,6 +158,40 @@ It doesn't read or run your code, and never reads a leaked secret's value.
 | Deployments | Public repositories that can run jobs on your self-hosted runners (critical when a runner keeps state between jobs and outside contributors' pull requests run without approval), pull requests from forks of private repositories that get secrets or a write token, workflows whose GITHUB_TOKEN can write by default, workflows that can approve pull requests, any third-party action allowed to run |
 | TLS & HTTPS | Webhooks that skip certificate checks or send over plain HTTP, Pages sites that don't enforce HTTPS |
 | Supply chain | Open critical and high Dependabot alerts, dependencies with a vulnerability attackers are exploiting (CISA's catalog), with a critical or high vulnerability or one likely to be exploited soon (FIRST's EPSS), or known to be malicious; third-party actions used by a tag that can be moved; projects that install dependencies without a lock file; dependencies under a strong copyleft license. A monorepo's findings name the project in it that uses each package, directly or through another package, and the smallest upgrade that fixes it |
+
+### Container images
+
+Images in Amazon ECR, Alibaba Cloud Container Registry (Enterprise Edition) and GitHub Container Registry, and the
+images your workloads run from public registries such as Docker Hub, scanned with Aqua's
+[Trivy](https://github.com/aquasecurity/trivy) when it is installed where Keelson runs. A registry can hold
+thousands of images, so Keelson scans the ones that matter: every image a workload runs, images pulled in the
+last 30 days (something runs them that Keelson can't see, such as a Kubernetes cluster), and the newest image of
+each repository. Each image is followed from the repository that builds it (its own source label, the GitHub
+package's repository, or a workflow that pushes an image of its name) to the workloads that run it (ECS
+services, Elastic Container Instance groups, Function Compute functions built from an image) and to how the
+internet reaches them: an internet-facing load balancer with the hostnames that point at it, or a public address
+with an open port.
+
+| Area | Examples |
+|---|---|
+| Supply chain | An image in use with a vulnerability attackers are exploiting (CISA's catalog), with critical or high vulnerabilities that have a fix, or built on an operating system release or a runtime (Node.js, Python, nginx…) past its end of life. The same vulnerability is rated higher in a service the internet reaches than in one inside the network, and images nothing runs are listed without findings |
+| Secrets | A credential stored in an image: in a file, in an environment variable of the image, or in its build history. Critical when anyone can pull the image |
+
+Every scanned image has a software bill of materials, to download as CycloneDX (with its vulnerabilities) or SPDX,
+and the same inventory across all of them: each package, runtime and operating system the images are made of, at
+each version, with how many images hold it and whether it is vulnerable or past its end of life. Keelson tells the
+base image's layers from the image's own, so a component says whether the base image brought it. A runtime an
+official image installs from a tarball (Node.js in `node`, Python in `python`) is in no package list and no scanner
+matches vulnerabilities to it; Keelson reads its version from the image and checks its release line against
+[endoflife.date](https://endoflife.date).
+
+Each vulnerability says where it is fixed: in the base image (it came with a layer the base brought), in the
+repository's code (it still depends on a vulnerable version), by a rebuild (the code already moved on and the
+image is behind it), or in the image's own build. Keelson keeps the packages, the vulnerabilities and the kind and
+place of each credential, never an image's files or a credential's value. Scanners run at the lowest priority on
+at most half the machine's cores, so a scan doesn't take over a laptop. Kubernetes workloads (EKS, ACK) and Lambda functions
+built from an image aren't read yet, and GitHub doesn't let a GitHub App pull private packages, so those are
+listed with where they run but not scanned.
 
 ### Sonar: external attack surface
 
@@ -246,6 +282,7 @@ finding has its own page with a history of each scan and triage change, to share
 - **Resources** (Alibaba Cloud). Every instance, load balancer, bucket, database, function, cluster, security group, RAM user and role, in Alibaba Cloud's words: where it is, how the internet reaches it, and its open findings. Regions are a filter, named, and only the ones in use.
 - **Repositories** (GitHub). Every repository, filtered by language or visibility, with picked ones copied as `owner/repo` or downloaded: how its default branch is protected, secret scanning and push protection, open security alerts, what it depends on, its Pages site and its open findings. Each repository's page lists its projects (every part of a monorepo, with its ecosystems, lock file and base images), every package with where it's used, its known vulnerabilities and license, and downloads the SBOM as CycloneDX, SPDX or Syft JSON.
 - **Dependencies** (GitHub). Every package across your repositories' SBOMs, filtered by vulnerability status (exploited, has a fix, no fix yet, malicious), severity, package manager, repository, license risk, direct or not, runtime or development, and the triage of its findings, with each package's repositories and findings a click away. A Vulnerabilities tab lists each CVE with the packages it affects, and a Licenses tab is Grant's report: every license with its risk class. Filter by language as well as package manager. Tick packages, vulnerabilities or licenses (or every one that matches) to copy the repositories they affect as `owner/repo` or links, the IDs or the upgrades to make, or download them as CSV. Packages export as CSV.
+- **Images** (AWS, Alibaba Cloud, GitHub). Every container image Keelson scanned, most exposed first: its registry, whether a workload runs it and whether the internet reaches that workload, its vulnerabilities, the operating system and runtime it is built on, the repository that builds it and its findings. A **Running** tab lists each workload with its images and how it is reached; **Vulnerabilities** works across every image (which images have this CVE, which of them face the internet, which a newer base image would fix); **Components** is the inventory: every package, runtime and operating system at each version, with where it is and whether it is vulnerable or unsupported. An image's own page shows the chain from repository to registry to workloads, what it is built on, the credentials stored in it, each vulnerability with where to fix it, and downloads its SBOM. Every list loads a page at a time. Tick rows to copy images, digests, repositories, workloads, hostnames, components or upgrades, or download them as CSV; a repository's page lists the images it builds.
 - **Activity** (Cloudflare). Seven days of audit log, filtered down to changes, with destructive actions highlighted.
 - **Value** (Cloudflare). What you pay for, the traffic and threats it handled, and features your plans include but that are switched off.
 - **Audit report.** A print-ready report for auditors and management (use the browser's Save as PDF). Findings also export as CSV and JSON.
@@ -311,6 +348,12 @@ buckets or databases. An access key belongs to one account, so each account need
 (the ones starting with ASIA) aren't accepted because they expire within hours. The IAM actions each source
 needs are in [docs/permissions.md](docs/permissions.md#aws).
 
+To have the images in ECR scanned, add an inline policy to the user that allows `ecr:GetAuthorizationToken`,
+`ecr:BatchGetImage` and `ecr:GetDownloadUrlForLayer` on every resource, and install Trivy where Keelson runs
+(it isn't in the Docker image yet). All three only read: Keelson asks ECR for a registry login that lasts twelve
+hours, and Trivy pulls each image with it to look inside. Trivy never gets the access key. Without the policy,
+images are listed with where they run, and not scanned.
+
 ### Alibaba Cloud
 
 In Add accounts, choose Alibaba Cloud and copy the policy it shows. In each account's RAM console, create a custom
@@ -321,6 +364,10 @@ let it read the files in your OSS buckets and the values of your KMS secrets. An
 each account needs its own; STS tokens aren't accepted because they expire within hours, and the main account's own
 AccessKey is reported as a finding. The RAM actions each source needs are in
 [docs/permissions.md](docs/permissions.md#alibaba-cloud).
+
+One action in the policy reads data rather than configuration: `cr:PullRepository`, which lets Trivy pull images
+from Container Registry to scan them, with a registry login that lasts an hour. Remove it (and
+`cr:GetAuthorizationToken`) from the policy if you don't want images pulled: they are then listed, not scanned.
 
 ### GitHub
 
@@ -339,6 +386,9 @@ To keep an SBOM of each repository, give the App **Contents: Read-only** and ins
 Keelson runs (they aren't in the Docker image yet). Keelson fetches only manifest and lock files, workflows and
 Dockerfiles, never the code, and makes a repository's SBOM again only when one of them changes. Grype keeps its
 vulnerability database, about 3 GB, in the data folder and downloads it from Anchore on the first scan.
+
+Container packages in GitHub Container Registry need no extra permission to list. Public ones are scanned with
+Trivy; GitHub's registry refuses a GitHub App for private ones, so those are listed and not scanned.
 
 ### Sonar (Shodan, optional)
 
@@ -457,11 +507,11 @@ than roughly 20–30. Confirm with the record's owner before deleting anything.
 
 **Can Keelson change anything in my account?** No. The scanner only sends GET requests (and, to Cloudflare,
 GraphQL queries; to GitHub, one request for a read-only token; to AWS services that only accept POST, their
-named read actions; to Alibaba Cloud, only the read actions its policy names), and tests that run full scans fail the build if it ever sends anything else. Give Cloudflare a read-only token, AWS a user with only the SecurityAudit policy, Alibaba Cloud a RAM user with
+named read actions; to Alibaba Cloud, only the read actions its policy names), and tests that run full scans fail the build if it ever sends anything else. Scanning container images pulls them from your registries, which also only reads. Give Cloudflare a read-only token, AWS a user with only the SecurityAudit policy, Alibaba Cloud a RAM user with
 Keelson's read-only policy and GitHub an App with read-only permissions; Vercel has no read-only tokens, so its token can do what its user's role
 allows, and Keelson still only reads.
 
-**Does any data leave my machine?** Only requests to the APIs of the platforms you connect and public DNS, the optional takeover
+**Does any data leave my machine?** Only requests to the APIs of the platforms you connect and public DNS, the scanners' own downloads (Trivy's and Grype's vulnerability databases, CISA's list of known exploited vulnerabilities, runtimes' support dates from endoflife.date, and public images your workloads run), the optional takeover
 check (one GET to your own hostnames that point at cloud providers), alerts to webhooks you configure, and the
 update check.
 The daily update check only reads GitHub's public list of releases. There's no telemetry, no account, and

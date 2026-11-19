@@ -3,6 +3,7 @@
 // the key's RAM user the custom policy from the Add accounts flow; nothing more.
 
 import { collectAlibaba } from "./inventory.ts";
+import { scanAlibabaImages } from "./images.ts";
 import { evaluateAlibaba } from "./engine.ts";
 import { ALIBABA_CHECKS } from "./catalog.ts";
 import { clientFor, listAlibabaAccounts, probeAlibaba, verifyAlibabaKey } from "./permissions.ts";
@@ -17,7 +18,7 @@ export const alibaba: Provider = {
   verify: (token) => verifyAlibabaKey(token),
   listAccounts: listAlibabaAccounts,
   probe: probeAlibaba,
-  async scan({ token, account, engine, previous, onProgress }) {
+  async scan({ token, account, engine, previous, cache, toolDir, onProgress }) {
     const client = clientFor(token, account.id);
     try {
       const inv = await collectAlibaba(client, onProgress);
@@ -26,13 +27,20 @@ export const alibaba: Provider = {
       // Addresses the account held at its last complete scan and doesn't now were released: DNS that still points at them is dangling.
       const history = addressHistory(previous?.addressHistory, inv.skippedRegions.length ? null : ownAddresses(inv), inv.now);
       inv.released = history.released;
+      await scanAlibabaImages(client, inv, { cache, toolDir, related: engine.related ?? {}, onProgress, previous: previous?.images });
       onProgress({ phase: "Evaluating checks" });
       const evaluation = evaluateAlibaba(inv, engine);
       const failures = evaluation.findings.filter((f) => !f.pass);
       return {
         accountName: inv.accountName,
         evaluation,
-        snapshot: { resources: resourceView(inv, failures), links: alibabaLinks(inv), ownedDomains: hostedDomains(inv), addressHistory: history },
+        snapshot: {
+          resources: resourceView(inv, failures),
+          links: alibabaLinks(inv),
+          ownedDomains: hostedDomains(inv),
+          addressHistory: history,
+          images: inv.images?.snapshot,
+        },
         coverage: [...client.coverage.values()].map((c) =>
           c.ok ? c : { ...c, skippedChecks: ALIBABA_CHECKS.filter((ch) => ch.requires?.includes(c.key)).map((ch) => ch.id) },
         ),

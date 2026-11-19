@@ -64,7 +64,10 @@ export const READ_ACTIONS: Record<string, readonly string[]> = {
   config: ["DescribeConfigurationRecorderStatus"],
   acm: ["ListCertificates"],
   secretsmanager: ["ListSecrets", "GetResourcePolicy"],
-  ecr: ["DescribeRepositories", "GetRepositoryPolicy", "GetRegistryScanningConfiguration"],
+  // GetAuthorizationToken changes nothing: it returns a registry login, valid for 12 hours, that can do what the key's
+  // user can (pull, with the policy Keelson asks for). Trivy pulls images with it, so it never gets the access key.
+  // BatchGetImage returns an image's manifest (which layers and, for an index, which platforms it has), never its layers.
+  ecr: ["DescribeRepositories", "GetRepositoryPolicy", "GetRegistryScanningConfiguration", "DescribeImages", "GetAuthorizationToken", "BatchGetImage"],
   ecs: ["ListClusters", "ListServices", "DescribeServices", "DescribeTaskDefinition"],
   dynamodb: ["ListTables", "DescribeContinuousBackups"],
   "cognito-idp": ["ListUserPools", "DescribeUserPool"],

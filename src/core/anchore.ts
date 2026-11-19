@@ -14,7 +14,7 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { availableParallelism, constants as osConstants, setPriority, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { env } from "../env.ts";
 
@@ -66,26 +66,58 @@ const QUIET: Record<AnchoreTool, Record<string, string>> = {
 
 const PROXY = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR"];
 
+/**
+ * Cores a scanner may use: half of the machine's, at most four. Scanners are written in Go and take every core they
+ * find; on a laptop that makes everything else stutter for as long as a scan runs.
+ */
+export const scannerCpus = (): number => Math.max(1, Math.min(4, Math.floor(availableParallelism() / 2)));
+
 /** Runs a tool to the end and resolves with its standard output; rejects with its last error line when it fails. */
-export async function runTool(
+export function runTool(
   tool: AnchoreTool,
   bin: string,
   args: string[],
   { seconds, extraEnv = {}, cwd, okCodes = [0] }: { seconds: number; extraEnv?: Record<string, string>; cwd?: string; okCodes?: number[] },
 ): Promise<string> {
-  const home = await mkdtemp(join(tmpdir(), `keelson-${tool}-`));
+  return runChild(label(tool), bin, args, { seconds, env: { ...QUIET[tool], ...extraEnv }, cwd, okCodes, fail: (m) => new AnchoreError(m) });
+}
+
+/**
+ * Runs a scanner as a child process with nothing of Keelson's environment: only the PATH, a home folder of its own
+ * (deleted afterwards), proxy settings and the variables given. Shared by the Anchore tools and Trivy (./trivy.ts).
+ */
+export async function runChild(
+  name: string,
+  bin: string,
+  args: string[],
+  {
+    seconds,
+    env: extra = {},
+    cwd,
+    okCodes = [0],
+    fail = (m: string) => new Error(m),
+  }: { seconds: number; env?: Record<string, string>; cwd?: string; okCodes?: number[]; fail?: (message: string) => Error },
+): Promise<string> {
+  const home = await mkdtemp(join(tmpdir(), `keelson-${name.toLowerCase()}-`));
   const childEnv: NodeJS.ProcessEnv = {
     PATH: process.env.PATH ?? "",
     HOME: home,
     XDG_CACHE_HOME: join(home, ".cache"),
     TMPDIR: home,
-    ...QUIET[tool],
-    ...extraEnv,
+    // Go's runtime reads this: the scanner's work is spread over this many cores and no more.
+    GOMAXPROCS: String(scannerCpus()),
+    ...extra,
   };
   for (const k of PROXY) if (process.env[k]) childEnv[k] = process.env[k];
   try {
     return await new Promise<string>((resolve, reject) => {
       const child = spawn(bin, args, { env: childEnv, cwd: cwd ?? home, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+      // The lowest priority: a scan takes what's free and gives way to whatever the person at the machine is doing.
+      try {
+        if (child.pid) setPriority(child.pid, osConstants.priority.PRIORITY_LOW);
+      } catch {
+        /* the scan still runs, at normal priority */
+      }
       const kill = () => {
         try {
           process.kill(-child.pid!, "SIGKILL");
@@ -110,14 +142,14 @@ export async function runTool(
       }, seconds * 1000);
       child.once("error", (e) => {
         clearTimeout(timer);
-        reject(new AnchoreError(`${label(tool)} couldn't run: ${e.message}`));
+        reject(fail(`${name} couldn't run: ${e.message}`));
       });
       child.once("close", (code) => {
         clearTimeout(timer);
-        if (timedOut) return reject(new AnchoreError(`${label(tool)} didn't finish within ${Math.round(seconds / 60)} minutes.`));
-        if (size > MAX_OUTPUT) return reject(new AnchoreError(`${label(tool)}'s output was larger than Keelson reads.`));
+        if (timedOut) return reject(fail(`${name} didn't finish within ${Math.round(seconds / 60)} minutes.`));
+        if (size > MAX_OUTPUT) return reject(fail(`${name}'s output was larger than Keelson reads.`));
         if (code != null && okCodes.includes(code)) return resolve(Buffer.concat(out).toString("utf8"));
-        reject(new AnchoreError(`${label(tool)} failed: ${lastError(err) || `exit code ${code}`}`));
+        reject(fail(`${name} failed: ${lastError(err) || `exit code ${code}`}`));
       });
     });
   } finally {

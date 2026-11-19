@@ -55,6 +55,9 @@ export const ALIBABA_ACTIONS = {
   ],
   mongodb: ["dds:DescribeDBInstances", "dds:DescribeSecurityIps", "dds:DescribeShardingNetworkAddress", "dds:DescribeDBInstanceSSL"],
   functions: ["fc:ListFunctions", "fc:ListTriggers"],
+  registries: ["cr:ListInstance", "cr:ListInstanceEndpoint", "cr:ListRepository", "cr:ListRepositoryTag"],
+  imagePull: ["cr:GetAuthorizationToken"],
+  containerGroups: ["eci:DescribeContainerGroups"],
   kms: ["kms:ListKeys", "kms:DescribeKey", "kms:ListSecrets", "kms:DescribeSecret"],
   clusters: ["cs:GetClusters"],
   actiontrail: ["actiontrail:DescribeTrails"],
@@ -63,8 +66,15 @@ export const ALIBABA_ACTIONS = {
   dns: ["alidns:DescribeDomains", "alidns:DescribeDomainRecords"],
 } as const satisfies Record<string, readonly string[]>;
 
+/**
+ * The one action in the policy that reads data rather than configuration: pulling an image's layers from Container
+ * Registry, which Trivy does with a temporary registry login to scan the image. It is a permission of the registry
+ * itself, not an API call Keelson's client sends. Leave it out of the policy and images are listed but not scanned.
+ */
+export const ALIBABA_DATA_ACTIONS: string[] = ["cr:PullRepository"];
+
 /** Every action, once, sorted: what the custom policy allows. */
-export const ALIBABA_POLICY_ACTIONS: string[] = [...new Set(Object.values(ALIBABA_ACTIONS).flat())].sort();
+export const ALIBABA_POLICY_ACTIONS: string[] = [...new Set([...Object.values(ALIBABA_ACTIONS).flat(), ...ALIBABA_DATA_ACTIONS])].sort();
 
 /** The custom RAM policy to give Keelson's RAM user, as the console's JSON editor takes it. */
 export const alibabaPolicy = (): string =>

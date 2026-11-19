@@ -4,6 +4,7 @@
 
 import { GithubClient } from "./client.ts";
 import { collectGithub } from "./inventory.ts";
+import { scanGithubImages } from "./images.ts";
 import { evaluateGithub } from "./engine.ts";
 import { GITHUB_CHECKS } from "./catalog.ts";
 import { listGithubAccounts, orgIdOf, probeGithub, verifyGithubApp } from "./permissions.ts";
@@ -21,12 +22,13 @@ export const github: Provider = {
   verify: (token) => verifyGithubApp(token),
   listAccounts: listGithubAccounts,
   probe: probeGithub,
-  async scan({ token, account, engine, cache, toolDir, onProgress }) {
+  async scan({ token, account, engine, previous, cache, toolDir, onProgress }) {
     const client = new GithubClient(token);
     try {
       onProgress({ phase: "Connecting to the organization" });
       await client.connect(orgIdOf(account.id));
       const inv = await collectGithub(client, account.id, onProgress, { cache, toolDir });
+      await scanGithubImages(client, inv, { cache, toolDir, related: engine.related ?? {}, onProgress, previous: previous?.images });
       onProgress({ phase: "Evaluating checks" });
       const evaluation = evaluateGithub(inv, engine);
       const failures = evaluation.findings.filter((f) => !f.pass);
@@ -34,7 +36,7 @@ export const github: Provider = {
       return {
         accountName: inv.accountName,
         evaluation,
-        snapshot: { repos: repoRows(inv, failures), links: githubLinks(inv) },
+        snapshot: { repos: repoRows(inv, failures), links: githubLinks(inv), images: inv.images?.snapshot },
         coverage: [...client.coverage.values()].map((c) =>
           c.ok ? c : { ...c, skippedChecks: GITHUB_CHECKS.filter((ch) => ch.requires?.includes(c.key)).map((ch) => ch.id) },
         ),

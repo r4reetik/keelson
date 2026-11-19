@@ -93,23 +93,23 @@ const OTHER_USES: Record<string, string> = {
   securityCenter: "Imported Security Center insights",
 };
 
+/** A source's actions as code, each on its own; anything that isn't a list of actions (a tool to install, a public file) as the sentence it is. */
+function actions(permission: string): string {
+  const parts = permission.split(", ");
+  return parts.every((a) => /^[a-z0-9-]+:[A-Za-z*]+$/.test(a)) ? parts.map((a) => `\`${a}\``).join(", ") : permission;
+}
+
 export function permissionsDoc(): string {
   const needs = (k: string, provider = "cloudflare") => CHECKS.filter((c) => c.provider === provider && c.requires?.includes(k)).map((c) => c.id);
   const awsRows = AWS_SOURCE_KEYS.map((k) => {
     const s = AWS_SOURCES[k];
     const ids = needs(k, "aws");
-    return `| ${s.label}${s.regional ? " (every enabled region)" : ""} | ${s.permission
-      .split(", ")
-      .map((a) => `\`${a}\``)
-      .join(", ")} | ${ids.length ? ids.join(", ") : "Supporting data for other checks"} |`;
+    return `| ${s.label}${s.regional ? " (every enabled region)" : ""} | ${actions(s.permission)} | ${ids.length ? ids.join(", ") : "Supporting data for other checks"} |`;
   });
   const alibabaRows = ALIBABA_SOURCE_KEYS.map((k) => {
     const s = ALIBABA_SOURCES[k];
     const ids = needs(k, "alibaba");
-    return `| ${s.label}${s.regional ? " (every available region)" : ""} | ${s.permission
-      .split(", ")
-      .map((a) => `\`${a}\``)
-      .join(", ")} | ${ids.length ? ids.join(", ") : "Supporting data for other checks"} |`;
+    return `| ${s.label}${s.regional ? " (every available region)" : ""} | ${actions(s.permission)} | ${ids.length ? ids.join(", ") : "Supporting data for other checks"} |`;
   });
   const vercelRows = VERCEL_SOURCE_KEYS.map((k) => {
     const s = VERCEL_SOURCES[k];

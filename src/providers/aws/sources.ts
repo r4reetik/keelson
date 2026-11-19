@@ -196,6 +196,25 @@ const DEFS = {
     probe: (c) => c.rpc("ecr", HOME_REGION, "DescribeRepositories", { maxResults: 1 }),
     regional: true,
   },
+  ecrImages: {
+    label: "ECR images: tags, digests, and when each was pushed and last pulled",
+    permission: "ecr:DescribeImages",
+    regional: true,
+  },
+  imagePull: {
+    label: "Pulling ECR images, for Trivy to scan",
+    permission:
+      "ecr:GetAuthorizationToken, ecr:BatchGetImage, ecr:GetDownloadUrlForLayer. SecurityAudit doesn't grant them: add them to the key's user in an inline policy (all three only read)",
+  },
+  trivy: {
+    label: "Packages, vulnerabilities and stored credentials in container images (Aqua Trivy)",
+    permission:
+      "Trivy installed where Keelson runs: on the PATH, or its path in KEELSON_TRIVY (not in the Docker image yet). Its database, about 1.6 GB, is downloaded into the data folder",
+  },
+  kev: {
+    label: "CISA's catalog of known exploited vulnerabilities",
+    permission: "None: a public file, read from www.cisa.gov without a credential",
+  },
   ecs: {
     label: "ECS services and their task definitions (environment variables scanned for credentials, never stored)",
     permission: "ecs:ListClusters, ecs:ListServices, ecs:DescribeServices, ecs:DescribeTaskDefinition",

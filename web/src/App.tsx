@@ -164,6 +164,7 @@ function AppShell({ session, refreshSession, standalone }: { session: Session; r
   const [dataVersion, setDataVersion] = useState(0);
   const toasts = useKumoToastManager();
   const wasRunning = useRef(false);
+  const lastScan = useRef<number | null>(null);
   const failedPolls = useRef(0);
   const [key, setScope] = useScopeKey();
   // A removed account or entity falls back to the default view, and so does an empty one: "All accounts" holds nothing
@@ -190,7 +191,13 @@ function AppShell({ session, refreshSession, standalone }: { session: Session; r
           toasts.add({ title: `Scan of ${s.lastFailed.account} failed`, description: s.lastFailed.error, variant: "error" });
         } else toasts.add({ title: "Scan complete", description: "Findings and scores are up to date.", variant: "success" });
         void refreshSession();
+      } else if (s.running && lastScan.current != null && s.scanId != null && s.scanId !== lastScan.current) {
+        // One account of a queue finished and the next began: its results are in, though the queue goes on (an account
+        // with images to scan can take half an hour, and the pages showed the scan before until every account was done).
+        setDataVersion((v) => v + 1);
+        void refreshSession();
       }
+      lastScan.current = s.running ? s.scanId : null;
       wasRunning.current = s.running;
       if (failedPolls.current >= POLL_FAILURES_SHOWN) toasts.add({ title: "Connected to Keelson again", variant: "success" });
       failedPolls.current = 0;

@@ -5,6 +5,8 @@
 
 import type { AwsSourceKey } from "./sources.ts";
 import type { Prefixes } from "../../core/aws-ranges.ts";
+import type { ImageHighlights } from "../../core/images.ts";
+import type { ImagesSnapshot, WorkloadLink } from "../../shared/images.ts";
 
 /** The name findings use for resources that aren't in a region (IAM, S3 settings, CloudFront, Route 53). */
 export const GLOBAL = "Global";
@@ -305,6 +307,35 @@ export interface AwsRepository {
   immutableTags: boolean;
   /** Its repository policy lets anyone pull or push. null: unread. */
   publicPolicy: boolean | null;
+  /** Its images that are tagged or were pulled lately; null when they couldn't be listed, undefined when not read. */
+  images?: AwsRepoImage[] | null;
+}
+
+export interface AwsRepoImage {
+  digest: string;
+  tags: string[];
+  pushedAt: string | null;
+  /** When it was last pulled; AWS records it at most once a day. */
+  pulledAt: string | null;
+  /** It is an index: a list of images, one per platform, with their build attestations beside them. */
+  index?: boolean;
+  /** The platforms an index has an image for ("linux/arm64"), once its manifest was read. */
+  platforms?: string[];
+}
+
+/** An ECS service: what it runs and how the internet could reach it. */
+export interface AwsService {
+  name: string;
+  cluster: string;
+  /** "family:revision". */
+  taskDefinition: string;
+  running: number | null;
+  /** Its tasks get a public address (awsvpc networking with assignPublicIp); null when its tasks use their instance's network. */
+  publicIp: boolean | null;
+  securityGroups: string[];
+  /** Target groups its tasks are registered in, by ARN, and classic load balancers by name. */
+  targetGroups: string[];
+  classicLoadBalancers: string[];
 }
 
 /** An ECS task definition that a service runs. */
@@ -316,6 +347,8 @@ export interface AwsTaskDefinition {
   /** Host namespaces it shares: "network", "process", "IPC". */
   hostNamespaces: string[];
   secret: FoundSecret | null;
+  /** Each container's image, as the task definition writes it. */
+  containers?: { name: string; image: string }[];
 }
 
 export interface AwsKubernetes {
@@ -404,6 +437,8 @@ export interface AwsRegion {
   secrets?: AwsSecret[] | null;
   repositories?: AwsRepository[] | null;
   taskDefinitions?: AwsTaskDefinition[] | null;
+  /** ECS services; null when unread, like the task definitions they run. */
+  services?: AwsService[] | null;
   kubernetes?: AwsKubernetes[] | null;
   tables?: { name: string; pitr: boolean | null }[] | null;
   userPools?: { id: string; name: string; mfa: string }[] | null;
@@ -506,6 +541,8 @@ export interface AwsInventory {
   released: { ip: string; at: string }[];
   /** AWS's published EC2 address ranges, to recognise a record that points at an AWS address. Held for the scan, never stored. */
   ec2Prefixes: Prefixes | null;
+  /** The images this scan looked at and what Trivy found in each, with the workloads known in the entity (set by the provider). */
+  images?: { snapshot: ImagesSnapshot; scans: Map<string, ImageHighlights>; workloads: WorkloadLink[] };
 }
 
 export type { Related } from "../../core/types.ts";

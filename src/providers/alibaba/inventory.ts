@@ -1187,6 +1187,8 @@ async function readFunctions(client: AlibabaClient, region: string): Promise<Ali
       role: f.role ? String(f.role).split("/").pop()! : null,
       anonymousTriggers: anonymous,
       envSecret: f.environmentVariables && typeof f.environmentVariables === "object" ? secretInVariables(f.environmentVariables) : null,
+      // Only the image's name: the registry password a function can carry beside it is never read.
+      image: str(f.customContainerConfig?.image),
     });
   });
   return out.sort((a, b) => a.name.localeCompare(b.name));

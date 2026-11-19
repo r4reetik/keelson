@@ -3,6 +3,7 @@
 // doesn't compile, and test/alibaba-checks.test.ts asserts each case really makes
 // its check fail.
 
+import { imageCase } from "./helpers/images.ts";
 import type { AlibabaCheckId } from "../src/providers/alibaba/checks/index.ts";
 import type { EngineOptions } from "../src/core/types.ts";
 import type {
@@ -174,6 +175,7 @@ export function alibabaInventory(extra: Partial<AlibabaInventory> = {}): Alibaba
       },
     ],
     released: [],
+    images: imageCase("alibaba", "example-registry.cn-hangzhou.cr.aliyuncs.com", 0, { region: "cn-hangzhou", repository: "shop/web" }),
     ...extra,
   };
 }
@@ -188,6 +190,11 @@ const withGithubRole = (subjects: string[]) =>
     ],
   });
 const instance = region().instances![0];
+
+/** An image in the account's registry instance, run by a workload the internet reaches, failing image check `n`. */
+const ACR = "example-registry.cn-hangzhou.cr.aliyuncs.com";
+export const withImage = (n: 0 | 1 | 2 | 3 | 4) =>
+  alibabaInventory({ images: imageCase("alibaba", ACR, n, { region: "cn-hangzhou", repository: "shop/web" }) });
 
 export const ALIBABA_CASES: Record<AlibabaCheckId, () => AlibabaInventory> = {
   "LID-001": () => alibabaInventory({ root: { accessKeys: 1, mfa: true } }),
@@ -288,6 +295,11 @@ export const ALIBABA_CASES: Record<AlibabaCheckId, () => AlibabaInventory> = {
 
   // The fixture's load balancer uses a group that lets everyone reach 443; a Cloudflare-proxied hostname points at it.
   "XP-018": () => alibabaInventory(),
+
+  "LIM-001": () => withImage(1),
+  "LIM-002": () => withImage(2),
+  "LIM-003": () => withImage(3),
+  "LIM-004": () => withImage(4),
 };
 
 const GITHUB_ENTITY: Partial<EngineOptions["related"]> = {

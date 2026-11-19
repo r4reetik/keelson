@@ -10,9 +10,10 @@ import integrations from "./integrations.ts";
 import pages from "./pages.ts";
 import releases from "./releases.ts";
 import dependencies from "./dependencies.ts";
+import images from "./images.ts";
 import type { CheckModule } from "../../../core/checks/define.ts";
 
-export const GITHUB_MODULES = [identity, branches, codeSecurity, actions, integrations, pages, releases, dependencies] as const;
+export const GITHUB_MODULES = [identity, branches, codeSecurity, actions, integrations, pages, releases, dependencies, images] as const;
 
 type IdsOf<M> = M extends CheckModule<infer Id, infer _C, infer _S> ? Id : never;
 export type GithubCheckId = IdsOf<(typeof GITHUB_MODULES)[number]>;

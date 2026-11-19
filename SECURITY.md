@@ -29,6 +29,9 @@ AWS access keys, Alibaba Cloud AccessKeys, GitHub App private keys, a Shodan API
   as POST, as Cloudflare requires, and only ever queries). Use a Cloudflare token with read permissions;
   Keelson never needs anything else. Vercel can't issue read-only tokens, so a Vercel token can do what its
   user's role allows: Keelson still only sends GET requests to Vercel, and tests fail on anything else.
+  Scanning container images pulls them from your registries with a registry login that expires within hours:
+  three ECR read actions on AWS and one registry permission on Alibaba Cloud, each optional. Trivy, which reads the
+  images, gets that login for the one registry host and never an account's own credential.
   For AWS, give the access key's user only the managed SecurityAudit policy; Keelson sends signed GET requests,
   and to services whose APIs only accept POST (CloudTrail, KMS, ECS and others) only the read actions it names
   (Describe, List, Get). The client refuses any other action before sending it, and tests fail on anything else.

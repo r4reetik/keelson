@@ -137,6 +137,69 @@ tools when they're installed where Keelson runs (`src/core/anchore.ts`: `KEELSON
 The tools never get Keelson's environment: each runs with the PATH, a temporary home, proxy settings and its own
 settings only. The mock (`dev/mock/anchore.ts`) replaces them in tests and the mock dev server.
 
+## Container images: from the repository to what runs
+
+AWS, Alibaba Cloud and GitHub scans also look at container images (`src/core/images.ts`, shared by the three),
+with Aqua's Trivy when it's installed where Keelson runs (`src/core/trivy.ts`: `KEELSON_TRIVY`, or `trivy` on the
+PATH):
+
+1. **What exists.** Each platform lists its registry: ECR repositories' images with their tags, push and last
+   pull dates (`ecr:DescribeImages`), Container Registry Enterprise Edition instances' repositories and tags, and
+   the GitHub organization's container packages. An image pushed as an index (several platforms, or with build
+   attestations) appears in ECR as the index and each of its parts; the index's manifest is read
+   (`ecr:BatchGetImage`) and its parts folded into it, with the platforms it has. It also lists the workloads that run images and publishes them to
+   the entity (`awsWorkloads`, `alibabaWorkloads`): ECS services with their task definitions' images, Elastic
+   Container Instance groups, Function Compute functions built from an image. Each workload says how the internet
+   reaches it: an internet-facing load balancer whose rules forward to it, or a public address with a port its
+   security groups open to anyone. A GitHub scan reads its workflows for the images they push
+   (`sbom/builds.ts`, published as `githubImageBuilds`).
+2. **What is scanned.** `pickImages` takes every image a workload in the entity runs, images pulled in the last 30
+   days (the newest three of each repository), and the newest image of each repository, most exposed first, at
+   most 400 a scan. An image is scanned by the
+   account whose registry holds it; one a workload runs from a public registry (Docker Hub, ECR Public, a public
+   GitHub package of another organization) by the account that runs it, without a login.
+3. **The scan.** Trivy's database is updated first, on its own. Then each image is pulled by digest with
+   `trivy image --image-src remote --scanners vuln,secret`, one at a time (two processes can't share Trivy's
+   cache), until 30 minutes have passed; the rest wait for the next scan, which starts with the images workloads run,
+   then the ones never scanned, then the rest from the stalest. Trivy runs at the lowest priority, on
+   at most half the cores (`GOMAXPROCS`, `--parallel`) and with a soft memory ceiling (`GOMEMLIMIT`). An image
+   with no linux/amd64 build is asked for by a platform it has, and what turns out not to be an image (an
+   attestation) is dropped and not asked for again. The registry login (ECR's 12-hour token,
+   Container Registry's one-hour temporary user) goes to Trivy in a Docker configuration file written for that run
+   and that registry host, never through `TRIVY_USERNAME` and `TRIVY_PASSWORD`, which Trivy would offer to the
+   registries its database comes from too.
+   An image is pulled once: one named by its digest never changes. After the pull Trivy writes its own bill of
+   materials for the packages it read (`trivy convert`), which Keelson keeps beside the result (`imgsbom:…`), and
+   every later scan gives that to `trivy sbom` to match against the current database. That contacts nothing, takes
+   a fraction of a second, and is done for every image whatever is left of the 30 minutes. Only an image named by a
+   tag alone is asked for again, after 20 hours, since the tag may have moved.
+4. **What is kept.** `reduceReport` keeps each package, each vulnerability (with whether it is on CISA's list of
+   known exploited vulnerabilities, read by `src/core/kev.ts` once a day), the operating system and whether it is
+   past its end of life, the user, the build date and the source repository, revision and base image labels. From
+   the build history it tells the layers the base image brought from the ones the image's own build added, and
+   marks each package and vulnerability with which it is in. The runtime an official image is built around is
+   read from the variable it records its version in, and `src/core/eol.ts` says whether that release line still
+   gets fixes (endoflife.date, once a day). A credential
+   Trivy finds in a file keeps its kind and the file's path; the image's environment variables and build history
+   are scanned in memory with the shared patterns and only the kind is kept. The result is cached per image
+   (`img:<registry>/<repository>@<digest>` in `provider_cache`); the snapshot holds a summary of each, and one
+   compact index per account (`imgindex`, `src/core/image-index.ts`) says which package and which vulnerability is
+   in which image, as flat arrays of numbers.
+5. **Checks.** `src/core/image-checks.ts` defines four checks once, instantiated per platform (`AIM-`, `LIM-`,
+   `GIM-`): a known exploited vulnerability, critical or high vulnerabilities with a fix, an operating system or
+   runtime past its end of life, and a stored credential. A finding is one per image repository, whatever the tag. Vulnerability findings
+   are only for images in use, rated by exposure: internet-facing, running inside the network, or pulled lately.
+6. **The page.** `src/server/images.ts` joins, inside one entity, each image with the workloads that run it, the
+   hostnames that point at their load balancers, the repository that builds it and its findings. The view is built
+   once per set of scans and kept until one changes; every list (`/api/images/list`, `/workloads`,
+   `/vulnerabilities`, `/components`) is filtered and paged on the server, and the lists across images read the
+   compact indexes rather than each image's full result. An image's page (`/api/images/detail`) says what the image
+   is built on and where each vulnerability is fixed, by its layer and by comparing its application packages with
+   the dependencies of the repository that builds it (`fixPlaces`). `/api/images/sbom` writes its software bill of
+   materials (CycloneDX 1.6 or SPDX 2.3, `src/server/image-sbom.ts`) from the stored result.
+
+The mock (`dev/mock/trivy.ts`) replaces Trivy, CISA's list and the support dates in tests and the mock dev server.
+
 ## Sonar: the view from outside
 
 Sonar (`src/providers/internet/`) is a provider without an API of its own. Its provider is `internet`, and

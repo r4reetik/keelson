@@ -17,7 +17,20 @@ import { allowsAnyone } from "./policy.ts";
 import { HOME_REGION } from "./sources.ts";
 import { at, bool, find, items, text, type XmlNode } from "../../core/xml.ts";
 import { secretInVariables, secretKindIn } from "../../core/secret-patterns.ts";
-import type { AwsDatabase, AwsKafka, AwsKey, AwsKubernetes, AwsRegion, AwsSearchDomain, AwsTaskDefinition, AwsTrail, AwsWebAcl, FoundSecret } from "./types.ts";
+import type {
+  AwsDatabase,
+  AwsKafka,
+  AwsKey,
+  AwsKubernetes,
+  AwsRegion,
+  AwsRepoImage,
+  AwsSearchDomain,
+  AwsService,
+  AwsTaskDefinition,
+  AwsTrail,
+  AwsWebAcl,
+  FoundSecret,
+} from "./types.ts";
 
 /** Items read one request each (keys, secrets, tables, repositories…) stop here in a region. */
 const MAX_ITEMS = 200;
@@ -35,7 +48,7 @@ export async function readServices(client: AwsClient, region: string, databases:
     certificates,
     secrets,
     repositories,
-    taskDefinitions,
+    containers,
     kubernetes,
     tables,
     cognito,
@@ -67,7 +80,7 @@ export async function readServices(client: AwsClient, region: string, databases:
     client.readIn("acm", [], () => readCertificates(client, region)),
     client.readIn("secrets", [], () => readSecrets(client, region)),
     client.readIn("ecr", [], () => readRepositories(client, region)),
-    client.readIn("ecs", [], () => readTaskDefinitions(client, region)),
+    client.readIn("ecs", { taskDefinitions: [], services: [] }, () => readContainers(client, region)),
     client.readIn("eks", [], () => readKubernetes(client, region)),
     client.readIn("dynamodb", [], () => readTables(client, region)),
     client.readIn("cognito", { userPools: [], identityPools: [] }, () => readCognito(client, region)),
@@ -133,7 +146,8 @@ export async function readServices(client: AwsClient, region: string, databases:
     certificates,
     secrets,
     repositories,
-    taskDefinitions,
+    taskDefinitions: containers ? containers.taskDefinitions : null,
+    services: containers ? containers.services : null,
     kubernetes,
     tables,
     userPools: cognito ? cognito.userPools : null,
@@ -393,24 +407,75 @@ async function readRepositories(client: AwsClient, region: string) {
         rules.some((rule) => arr(rule.repositoryFilters).some((f) => wildcard(String(f?.filter ?? ""), name))),
       immutableTags: String(r.imageTagMutability ?? "").startsWith("IMMUTABLE"),
       publicPolicy,
+      images: await client.read("ecrImages", () => readImages(client, region, name)),
     };
   });
 }
 
-/** The task definitions that ECS services run: what is really running, not every revision ever registered. */
-async function readTaskDefinitions(client: AwsClient, region: string): Promise<AwsTaskDefinition[]> {
+/** Pages of a repository's images that are read: a repository with more keeps the ones the first pages list. */
+const IMAGE_PAGES = 5;
+const PULLED_MS = 30 * 86_400_000;
+
+/**
+ * A repository's images worth knowing: the tagged ones and those pulled in the last 30 days. Untagged images nobody
+ * pulls are what a build leaves behind.
+ */
+async function readImages(client: AwsClient, region: string, repositoryName: string): Promise<AwsRepoImage[]> {
+  const out: AwsRepoImage[] = [];
+  let next: string | undefined;
+  for (let page = 0; page < IMAGE_PAGES; page++) {
+    const body = await client.rpc("ecr", region, "DescribeImages", { repositoryName, maxResults: 1000, ...(next ? { nextToken: next } : {}) });
+    for (const d of arr(body?.imageDetails)) {
+      const iso = (v: unknown) => (ms(v) != null ? new Date(ms(v)!).toISOString() : null);
+      const image = {
+        digest: String(d.imageDigest ?? ""),
+        tags: arr(d.imageTags).map(String),
+        pushedAt: iso(d.imagePushedAt),
+        pulledAt: iso(d.lastRecordedPullTime),
+        ...(/image\.index|manifest\.list/.test(String(d.imageManifestMediaType ?? "")) ? { index: true } : {}),
+      };
+      const pulled = image.pulledAt ? Date.now() - Date.parse(image.pulledAt) < PULLED_MS : false;
+      if (image.digest && (image.tags.length || pulled)) out.push(image);
+    }
+    next = str(body?.nextToken) ?? undefined;
+    if (!next) break;
+  }
+  return out;
+}
+
+/** The ECS services, and the task definitions they run: what is really running, not every revision ever registered. */
+async function readContainers(client: AwsClient, region: string): Promise<{ taskDefinitions: AwsTaskDefinition[]; services: AwsService[] }> {
   const clusters = await rpcAll(client, "ecs", region, "ListClusters", { maxResults: 100 }, "clusterArns", ["nextToken", "nextToken"]);
   const usedBy = new Map<string, string[]>();
+  const services: (AwsService & { arn: string })[] = [];
   for (const cluster of clusters.slice(0, MAX_ITEMS)) {
     const arns = await rpcAll(client, "ecs", region, "ListServices", { cluster, maxResults: 100 }, "serviceArns", ["nextToken", "nextToken"]);
     for (let i = 0; i < arns.length && i < MAX_ITEMS; i += 10) {
       const body = await client.rpc("ecs", region, "DescribeServices", { cluster, services: arns.slice(i, i + 10) });
       for (const s of arr(body?.services)) {
         const td = String(s.taskDefinition ?? "");
-        if (td) usedBy.set(td, [...(usedBy.get(td) ?? []), String(s.serviceName ?? "")]);
+        if (!td) continue;
+        usedBy.set(td, [...(usedBy.get(td) ?? []), String(s.serviceName ?? "")]);
+        const vpc = s.networkConfiguration?.awsvpcConfiguration;
+        services.push({
+          arn: td,
+          name: String(s.serviceName ?? ""),
+          cluster: tail(String(cluster)),
+          taskDefinition: "",
+          running: Number.isFinite(Number(s.runningCount)) ? Number(s.runningCount) : null,
+          publicIp: vpc ? vpc.assignPublicIp === "ENABLED" : null,
+          securityGroups: arr(vpc?.securityGroups).map(String),
+          targetGroups: arr(s.loadBalancers)
+            .map((l) => str(l?.targetGroupArn))
+            .filter((x): x is string => !!x),
+          classicLoadBalancers: arr(s.loadBalancers)
+            .map((l) => str(l?.loadBalancerName))
+            .filter((x): x is string => !!x),
+        });
       }
     }
   }
+  const names = new Map<string, string>();
   const defs = await each([...usedBy.keys()], async (arn): Promise<AwsTaskDefinition> => {
     const td = (await client.rpc("ecs", region, "DescribeTaskDefinition", { taskDefinition: arn }))?.taskDefinition ?? {};
     const containers = arr(td.containerDefinitions);
@@ -420,17 +485,23 @@ async function readTaskDefinitions(client: AwsClient, region: string): Promise<A
       const found = secretInVariables(Object.fromEntries(arr(c.environment).map((e) => [String(e?.name ?? ""), e?.value])));
       if (found && (!secret || (secret.likely && !found.likely))) secret = { ...found, where: `${c.name}: ${found.where}` };
     }
+    const name = `${td.family ?? tail(arn)}:${td.revision ?? ""}`;
+    names.set(arn, name);
     return {
-      name: `${td.family ?? tail(arn)}:${td.revision ?? ""}`,
+      name,
       services: usedBy.get(arn) ?? [],
       privileged: containers.filter((c) => c.privileged === true).map((c) => String(c.name ?? "")),
       hostNamespaces: [td.networkMode === "host" && "network", td.pidMode === "host" && "process", td.ipcMode === "host" && "IPC"].filter(
         (x): x is string => !!x,
       ),
       secret,
+      containers: containers.map((c) => ({ name: String(c.name ?? ""), image: String(c.image ?? "") })).filter((c) => c.image),
     };
   });
-  return defs.sort((a, b) => a.name.localeCompare(b.name));
+  return {
+    taskDefinitions: defs.sort((a, b) => a.name.localeCompare(b.name)),
+    services: services.map(({ arn, ...s }) => ({ ...s, taskDefinition: names.get(arn) ?? tail(arn) })).sort((a, b) => a.name.localeCompare(b.name)),
+  };
 }
 
 async function readKubernetes(client: AwsClient, region: string): Promise<AwsKubernetes[]> {

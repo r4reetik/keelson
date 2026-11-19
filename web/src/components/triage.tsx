@@ -95,7 +95,9 @@ export function FindingHeader({ f, actions, hideTitle }: { f: Finding; actions?:
 /** What was found, why it matters, how to fix it, and the evidence. */
 export function FindingBody({ f }: { f: Finding }) {
   const chain = f.evidence?.chain;
-  const shown = new Set(["securityCenter", "chain", ...DEPENDENCY_EVIDENCE_KEYS]);
+  const shown = new Set(["securityCenter", "chain", "image", ...DEPENDENCY_EVIDENCE_KEYS]);
+  // Image findings name their images: each opens on its own page, with its packages, where it runs and where to fix it.
+  const images = (f.evidence?.image as { images?: { key?: string; repository: string; tag: string | null }[] } | undefined)?.images?.filter((i) => i.key) ?? [];
   const rest = f.evidence ? Object.fromEntries(Object.entries(f.evidence).filter(([k]) => !shown.has(k))) : {};
   const raw = Object.keys(rest).length ? JSON.stringify(rest, null, 2) : null;
   const sc = f.evidence?.securityCenter;
@@ -128,6 +130,21 @@ export function FindingBody({ f }: { f: Finding }) {
               </li>
             ))}
           </ol>
+        </Section>
+      )}
+      {images.length > 0 && (
+        <Section label={images.length === 1 ? "The image" : "The images"}>
+          <ul className="flex flex-col gap-1">
+            {images.map((i) => (
+              <li key={i.key}>
+                <Link href={`/images/view?id=${encodeURIComponent(`${f.accountId}~${i.key}`)}`}>
+                  {i.repository}
+                  {i.tag ? `:${i.tag}` : ""}
+                </Link>
+                <span className="text-kumo-subtle"> · every vulnerability, where it is fixed, what runs it and who builds it</span>
+              </li>
+            ))}
+          </ul>
         </Section>
       )}
       {raw && (

@@ -14,6 +14,7 @@
 
 import { signAcs3, signOss4 } from "../../src/providers/alibaba/sign.ts";
 import { productOfHost } from "../../src/providers/alibaba/client.ts";
+import { installMockTrivy, MOCK_DIGEST, type MockTrivyOptions } from "./trivy.ts";
 
 const DAY = 86_400_000;
 const ago = (days: number) => new Date(Date.now() - days * DAY).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -34,6 +35,10 @@ export const MOCK_ALIBABA_IP = "203.0.113.20";
 /** An EIP the account gives up between the dev server's scans, which a DNS record still points at. */
 export const MOCK_ALIBABA_RELEASED_IP = "203.0.113.21";
 export const MOCK_ALIBABA_DOMAIN = "mock-alibaba.example";
+/** The password of the registry login Container Registry hands out for Trivy: the only credential the image scanner may be given. */
+export const MOCK_ALIBABA_REGISTRY_PASSWORD = "mock-acr-registry-password";
+/** A value the mock returns in a container group's environment, so the scanner's job of dropping it is tested. */
+export const MOCK_ALIBABA_POD_SECRET = "mock-pod-env-value-DO-NOT-STORE";
 
 /** Switches for the dev server and tests: the EIP is released between scans. */
 export const mockAlibaba = { released: false };
@@ -48,6 +53,8 @@ interface MockOptions {
   refuseRegions?: string[];
   /** Hosts that answer every request with 503, as Function Compute's endpoint does in a region it isn't offered in. */
   unavailable?: RegExp[];
+  /** Options for the mock Trivy (dev/mock/trivy.ts), installed with the API. */
+  trivy?: MockTrivyOptions;
 }
 
 const WORK = "cn-hangzhou";
@@ -574,6 +581,65 @@ function rpc(product: string, action: string, q: URLSearchParams, region: string
     case "kms:DescribeSecret":
       return { SecretName: q.get("SecretName"), CreateTime: ago(500), AutomaticRotation: "Disabled", SecretType: "Generic" };
 
+    // One Enterprise Edition registry: the storefront's image, which a container group with a public address runs.
+    case "cr:ListInstance":
+      return {
+        TotalCount: work ? 1 : 0,
+        Instances: work ? [{ InstanceId: "cri-mock0000000001", InstanceName: "mock-registry", InstanceStatus: "RUNNING", RegionId: WORK }] : [],
+      };
+    case "cr:ListInstanceEndpoint":
+      return {
+        Endpoints: [
+          {
+            EndpointType: "internet",
+            Enable: true,
+            Status: "RUNNING",
+            Domains: [{ Domain: `mock-registry-registry.${WORK}.cr.aliyuncs.com`, Type: "SYSTEM" }],
+          },
+          { EndpointType: "vpc", Enable: true, Status: "RUNNING", Domains: [{ Domain: `mock-registry-registry-vpc.${WORK}.cr.aliyuncs.com`, Type: "SYSTEM" }] },
+        ],
+      };
+    case "cr:ListRepository":
+      return {
+        TotalCount: "1",
+        Repositories: [{ RepoId: "crr-mock0000000001", RepoName: "storefront", RepoNamespaceName: "shop", RepoType: "PRIVATE", RepoStatus: "NORMAL" }],
+      };
+    case "cr:ListRepoTag":
+      return {
+        TotalCount: "2",
+        Images: [
+          { Tag: "3.2.0", Digest: MOCK_DIGEST.acrShop.replace("sha256:", ""), ImageUpdate: String(Date.now() - 200 * DAY), Status: "NORMAL" },
+          { Tag: "stable", Digest: MOCK_DIGEST.acrShop.replace("sha256:", ""), ImageUpdate: String(Date.now() - 200 * DAY), Status: "NORMAL" },
+        ],
+      };
+    // A registry login, as Container Registry hands it out: a temporary user and password. It is not the AccessKey.
+    case "cr:GetAuthorizationToken":
+      return { TempUsername: "cr_temp_user", AuthorizationToken: MOCK_ALIBABA_REGISTRY_PASSWORD, ExpireTime: Date.now() + 3600_000 };
+    // Two pods of the storefront with public addresses in the group that is open to anyone, and a job from Docker Hub.
+    case "eci:DescribeContainerGroups": {
+      const pod = (id: string, name: string, image: string, ip: string | null, sg: string) => ({
+        ContainerGroupId: id,
+        ContainerGroupName: name,
+        Status: "Running",
+        InternetIp: ip ?? "",
+        IntranetIp: "10.0.3.10",
+        SecurityGroupId: sg,
+        RegionId: WORK,
+        Containers: [{ Name: "main", Image: image, EnvironmentVars: [{ Key: "PAYMENT_API_KEY", Value: MOCK_ALIBABA_POD_SECRET }] }],
+      });
+      const shop = `mock-registry-registry-vpc.${WORK}.cr.aliyuncs.com/shop/storefront:3.2.0`;
+      return {
+        TotalCount: work ? 3 : 0,
+        ContainerGroups: work
+          ? [
+              pod("eci-mock0001", "storefront-7d9f8c6b5d-abcde", shop, "203.0.113.30", SG.all),
+              pod("eci-mock0002", "storefront-7d9f8c6b5d-fghij", shop, "203.0.113.31", SG.all),
+              pod("eci-mock0003", "report-job", "ghcr.io/mock-org/web:latest", null, SG.db),
+            ]
+          : [],
+      };
+    }
+
     case "actiontrail:DescribeTrails":
       return {
         TrailList: work
@@ -698,6 +764,7 @@ const regionOf = (host: string, q: URLSearchParams) =>
 
 export function installMockAlibaba(o: MockOptions = {}): () => void {
   const real = globalThis.fetch;
+  const restoreTrivy = installMockTrivy(o.trivy);
   extraRegions = o.refuseRegions ?? [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
@@ -770,5 +837,6 @@ export function installMockAlibaba(o: MockOptions = {}): () => void {
   return () => {
     globalThis.fetch = real;
     extraRegions = [];
+    restoreTrivy();
   };
 }

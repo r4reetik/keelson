@@ -5,6 +5,7 @@
 import type { AwsCheckId } from "../src/providers/aws/checks/index.ts";
 import type { EngineOptions } from "../src/core/types.ts";
 import { toPrefixes } from "../src/core/aws-ranges.ts";
+import { imageCase } from "./helpers/images.ts";
 import type { AwsBucket, AwsDistribution, AwsInventory, AwsRegion, AwsRole, AwsSecurityGroup, AwsUser, PublicAccessBlock } from "../src/providers/aws/types.ts";
 
 export const NOW = Date.parse("2026-06-01T00:00:00Z");
@@ -191,6 +192,7 @@ export function awsInventory(extra: Partial<AwsInventory> = {}): AwsInventory {
       },
     ],
     ec2Prefixes: toPrefixes(["198.51.100.0/24"]),
+    images: imageCase("aws", `111122223333.dkr.ecr.${R}.amazonaws.com`, 0, { region: R }),
     ...extra,
   };
 }
@@ -336,7 +338,18 @@ export const AWS_CASES: Record<AwsCheckId, () => AwsInventory> = {
   "AED-010": () => withDist({ origins: [{ domain: "gone-assets.s3.amazonaws.com", protocolPolicy: null, s3: true, restricted: true, missingBucket: true }] }),
   "AED-011": () => withRegion({ certificates: [{ ...region().certificates![0], notAfter: days(10) }] }),
   "AED-012": () => awsInventory({ serverCertificates: [{ name: "legacy-cert", expiresAt: days(-10) }] }),
+
+  "AIM-001": () => withImage(1),
+  "AIM-002": () => withImage(2),
+  "AIM-003": () => withImage(3),
+  "AIM-004": () => withImage(4),
 };
+
+/** The account's ECR registry in the fixture's region. */
+export const ECR = `111122223333.dkr.ecr.${R}.amazonaws.com`;
+export function withImage(n: 0 | 1 | 2 | 3 | 4, entry: Parameters<typeof imageCase>[3] = {}) {
+  return awsInventory({ images: imageCase("aws", ECR, n, { region: R, ...entry }) });
+}
 
 /** Engine options a case needs beyond the defaults: checks that span providers read the entity's other accounts. */
 /** A role GitHub Actions can assume, with these subjects on its trust policy. */

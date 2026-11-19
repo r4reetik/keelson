@@ -197,10 +197,14 @@ export interface GithubInventory {
   secretScanning: SecretAlert[] | null;
   /** Each repository's dependencies, from its manifest and lock files (Syft, Grype, Grant); null when none could be read. */
   dependencies: DependencyInventory | null;
+  /** The images this scan looked at and what Trivy found in each, with the workloads known in the entity (set by the provider). */
+  images?: { snapshot: ImagesSnapshot; scans: Map<string, ImageHighlights>; workloads: WorkloadLink[] };
 }
 
 export type { ActionUse, DepPackage, DepUsage, DepVuln, RepoDependencies } from "../../shared/dependencies.ts";
 import type { RepoDependencies } from "../../shared/dependencies.ts";
+import type { ImageHighlights } from "../../core/images.ts";
+import type { ImagesSnapshot, WorkloadLink } from "../../shared/images.ts";
 
 export interface DependencyInventory {
   repos: RepoDependencies[];

@@ -37,28 +37,30 @@ of those accounts, and are skipped when the entity has no scanned account on the
 | Vercel | [Change risk](#vercel-change-risk) | 1 |
 | AWS | [Attack surface](#aws-attack-surface) | 28 |
 | AWS | [Identity & access](#aws-identity--access) | 19 |
-| AWS | [Secrets](#aws-secrets) | 10 |
+| AWS | [Secrets](#aws-secrets) | 11 |
 | AWS | [TLS & HTTPS](#aws-tls--https) | 11 |
 | AWS | [WAF & bots](#aws-waf--bots) | 4 |
 | AWS | [DNS](#aws-dns) | 5 |
 | AWS | [Platform](#aws-platform) | 15 |
+| AWS | [Supply chain](#aws-supply-chain) | 3 |
 | AWS | [Monitoring](#aws-monitoring) | 8 |
 | AWS | [Change risk](#aws-change-risk) | 2 |
 | Alibaba Cloud | [Attack surface](#alibaba-cloud-attack-surface) | 13 |
 | Alibaba Cloud | [Identity & access](#alibaba-cloud-identity--access) | 20 |
-| Alibaba Cloud | [Secrets](#alibaba-cloud-secrets) | 5 |
+| Alibaba Cloud | [Secrets](#alibaba-cloud-secrets) | 6 |
 | Alibaba Cloud | [TLS & HTTPS](#alibaba-cloud-tls--https) | 4 |
 | Alibaba Cloud | [WAF & bots](#alibaba-cloud-waf--bots) | 1 |
 | Alibaba Cloud | [DNS](#alibaba-cloud-dns) | 5 |
 | Alibaba Cloud | [Platform](#alibaba-cloud-platform) | 4 |
+| Alibaba Cloud | [Supply chain](#alibaba-cloud-supply-chain) | 3 |
 | Alibaba Cloud | [Monitoring](#alibaba-cloud-monitoring) | 3 |
 | Alibaba Cloud | [Change risk](#alibaba-cloud-change-risk) | 1 |
 | GitHub | [Identity & access](#github-identity--access) | 9 |
 | GitHub | [Deployments](#github-deployments) | 5 |
-| GitHub | [Secrets](#github-secrets) | 3 |
+| GitHub | [Secrets](#github-secrets) | 4 |
 | GitHub | [TLS & HTTPS](#github-tls--https) | 3 |
 | GitHub | [Platform](#github-platform) | 4 |
-| GitHub | [Supply chain](#github-supply-chain) | 7 |
+| GitHub | [Supply chain](#github-supply-chain) | 10 |
 | GitHub | [Change risk](#github-change-risk) | 5 |
 | Internet | [Attack surface](#internet-attack-surface) | 8 |
 | Internet | [TLS & HTTPS](#internet-tls--https) | 1 |
@@ -2450,6 +2452,18 @@ Task definitions are readable by anyone who can describe them, in every revision
 2. Store it in Secrets Manager or Parameter Store.
 3. Register a revision that passes it under secrets (valueFrom) instead of environment, and deregister the old revisions.
 
+#### AIM-004: Credential stored inside an image
+
+**Severity:** High · **Reads:** ECR repositories, their policies and image scanning, ECR images: tags, digests, and when each was pushed and last pulled, Pulling ECR images, for Trivy to scan, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) · [AWS docs](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/specifying-sensitive-data.html)
+
+Anyone who can pull the image can read the credential, from every copy of the image in every registry and cache, for as long as those exist. Deleting the file in a later layer doesn't remove it from the earlier one.
+
+**How to fix**
+
+1. Rotate the credential: treat it as leaked.
+2. Remove it from the build: pass secrets at run time (the platform's secret store) or with a build secret mount, and add the file to .dockerignore.
+3. Rebuild, deploy, and delete the old image tags.
+
 #### ASC-001: Secret's resource policy lets anyone read it
 
 **Severity:** Critical · **Attack path** · **Reads:** Secrets Manager secrets (names and dates, never values) and their resource policies · [AWS docs](https://docs.aws.amazon.com/secretsmanager/latest/userguide/auth-and-access_resource-policies.html)
@@ -2888,6 +2902,42 @@ Its files and backups are stored in the clear.
 **How to fix**
 
 Encryption can't be turned on in place: create an encrypted file system, copy the data with AWS DataSync, and move the mount targets over.
+
+### AWS: Supply chain
+
+#### AIM-001: Image in use has a vulnerability attackers are exploiting
+
+**Severity:** Critical · **Attack path** · **Reads:** ECR repositories, their policies and image scanning, ECR images: tags, digests, and when each was pushed and last pulled, Pulling ECR images, for Trivy to scan, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy), CISA's catalog of known exploited vulnerabilities · [AWS docs](https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-scanning.html)
+
+A package in the image has a vulnerability on CISA's list of known exploited vulnerabilities (cisa.gov/known-exploited-vulnerabilities-catalog), and something runs the image. Attackers already have working exploits for it, and a service the internet reaches is where they try them first.
+
+**How to fix**
+
+1. Rebuild the image with the fixed versions: update the base image for operating system packages, and the lock file for the application's own dependencies (the Images page says which is which).
+2. Push it and deploy the workloads that run it.
+3. Where there is no fix yet, limit who can reach the workload until there is.
+
+#### AIM-002: Image in use has critical or high vulnerabilities with a fix
+
+**Severity:** High · **Reads:** ECR repositories, their policies and image scanning, ECR images: tags, digests, and when each was pushed and last pulled, Pulling ECR images, for Trivy to scan, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) · [AWS docs](https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-scanning.html)
+
+The image runs with packages that have known critical or high vulnerabilities, and fixed versions exist. Each rebuild that doesn't pick them up leaves a known way in for longer.
+
+**How to fix**
+
+1. Rebuild the image with the fixed versions: update the base image for operating system packages, and the lock file for the application's own dependencies (the Images page says which is which).
+2. Push it and deploy the workloads that run it.
+3. Where there is no fix yet, limit who can reach the workload until there is.
+
+#### AIM-003: Image in use is built on an operating system or runtime past its end of life
+
+**Severity:** Medium · **Reads:** ECR repositories, their policies and image scanning, ECR images: tags, digests, and when each was pushed and last pulled, Pulling ECR images, for Trivy to scan, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) · [AWS docs](https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-scanning.html)
+
+The operating system release in the image, or the release line of the runtime it is built around (Node.js, Python, nginx…), no longer gets security fixes. Vulnerabilities found in it from now on stay open, and scanners stop reporting them for it.
+
+**How to fix**
+
+Change the Dockerfile's FROM line to a release that is still supported (or to the newest tag of the same base image), rebuild, test and deploy.
 
 ### AWS: Monitoring
 
@@ -3387,6 +3437,18 @@ Environment variables are readable by anyone who can view the function's configu
 2. Store it in KMS Secrets Manager and read it at run time with the function's RAM role.
 3. Remove the variable from the function.
 
+#### LIM-004: Credential stored inside an image
+
+**Severity:** High · **Reads:** Container Registry Enterprise Edition instances, their repositories and image tags, Pulling images from Container Registry, for Trivy to scan, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/acr/user-guide/scan-container-images)
+
+Anyone who can pull the image can read the credential, from every copy of the image in every registry and cache, for as long as those exist. Deleting the file in a later layer doesn't remove it from the earlier one.
+
+**How to fix**
+
+1. Rotate the credential: treat it as leaked.
+2. Remove it from the build: pass secrets at run time (the platform's secret store) or with a build secret mount, and add the file to .dockerignore.
+3. Rebuild, deploy, and delete the old image tags.
+
 #### LKM-001: KMS key doesn't rotate automatically
 
 **Severity:** Low · **Reads:** KMS keys and secrets (names and dates, never values) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/kms/key-management-service/user-guide/configure-key-rotation)
@@ -3568,6 +3630,42 @@ Transparent data encryption is off, so the database's files and backups are stor
 **How to fix**
 
 In the RDS console → the instance → Data Security → TDE, turn on TDE with a KMS key. It can't be turned off again, so check the engine version's notes first.
+
+### Alibaba Cloud: Supply chain
+
+#### LIM-001: Image in use has a vulnerability attackers are exploiting
+
+**Severity:** Critical · **Attack path** · **Reads:** Container Registry Enterprise Edition instances, their repositories and image tags, Pulling images from Container Registry, for Trivy to scan, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy), CISA's catalog of known exploited vulnerabilities · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/acr/user-guide/scan-container-images)
+
+A package in the image has a vulnerability on CISA's list of known exploited vulnerabilities (cisa.gov/known-exploited-vulnerabilities-catalog), and something runs the image. Attackers already have working exploits for it, and a service the internet reaches is where they try them first.
+
+**How to fix**
+
+1. Rebuild the image with the fixed versions: update the base image for operating system packages, and the lock file for the application's own dependencies (the Images page says which is which).
+2. Push it and deploy the workloads that run it.
+3. Where there is no fix yet, limit who can reach the workload until there is.
+
+#### LIM-002: Image in use has critical or high vulnerabilities with a fix
+
+**Severity:** High · **Reads:** Container Registry Enterprise Edition instances, their repositories and image tags, Pulling images from Container Registry, for Trivy to scan, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/acr/user-guide/scan-container-images)
+
+The image runs with packages that have known critical or high vulnerabilities, and fixed versions exist. Each rebuild that doesn't pick them up leaves a known way in for longer.
+
+**How to fix**
+
+1. Rebuild the image with the fixed versions: update the base image for operating system packages, and the lock file for the application's own dependencies (the Images page says which is which).
+2. Push it and deploy the workloads that run it.
+3. Where there is no fix yet, limit who can reach the workload until there is.
+
+#### LIM-003: Image in use is built on an operating system or runtime past its end of life
+
+**Severity:** Medium · **Reads:** Container Registry Enterprise Edition instances, their repositories and image tags, Pulling images from Container Registry, for Trivy to scan, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/acr/user-guide/scan-container-images)
+
+The operating system release in the image, or the release line of the runtime it is built around (Node.js, Python, nginx…), no longer gets security fixes. Vulnerabilities found in it from now on stay open, and scanners stop reporting them for it.
+
+**How to fix**
+
+Change the Dockerfile's FROM line to a release that is still supported (or to the newest tag of the same base image), rebuild, test and deploy.
 
 ### Alibaba Cloud: Monitoring
 
@@ -3795,6 +3893,18 @@ GitHub found a credential in the code or its history. Anyone who can read the re
 1. Revoke or rotate the credential where it was issued. Deleting the commit doesn't help: the value stays in clones and forks.
 2. Close the alert in the repository's Security → Secret scanning as Revoked.
 
+#### GIM-004: Credential stored inside an image
+
+**Severity:** High · **Reads:** Container packages in GitHub Container Registry, and their tags, Packages, vulnerabilities and stored credentials in public container images (Aqua Trivy) · [GitHub docs](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
+
+Anyone who can pull the image can read the credential, from every copy of the image in every registry and cache, for as long as those exist. Deleting the file in a later layer doesn't remove it from the earlier one.
+
+**How to fix**
+
+1. Rotate the credential: treat it as leaked.
+2. Remove it from the build: pass secrets at run time (the platform's secret store) or with a build secret mount, and add the file to .dockerignore.
+3. Rebuild, deploy, and delete the old image tags.
+
 ### GitHub: TLS & HTTPS
 
 #### GHK-001: Webhook doesn't verify the receiver's certificate
@@ -3946,6 +4056,40 @@ The package's license (such as GPL or AGPL) requires software that includes it t
 **How to fix**
 
 Check with whoever looks after licensing whether this use is allowed: it depends on how the software is distributed or offered. Otherwise replace the package with one under a permissive license. Mark the finding as accepted when the use is cleared.
+
+#### GIM-001: Image in use has a vulnerability attackers are exploiting
+
+**Severity:** Critical · **Attack path** · **Reads:** Container packages in GitHub Container Registry, and their tags, Packages, vulnerabilities and stored credentials in public container images (Aqua Trivy), CISA's catalog of known exploited vulnerabilities · [GitHub docs](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
+
+A package in the image has a vulnerability on CISA's list of known exploited vulnerabilities (cisa.gov/known-exploited-vulnerabilities-catalog), and something runs the image. Attackers already have working exploits for it, and a service the internet reaches is where they try them first.
+
+**How to fix**
+
+1. Rebuild the image with the fixed versions: update the base image for operating system packages, and the lock file for the application's own dependencies (the Images page says which is which).
+2. Push it and deploy the workloads that run it.
+3. Where there is no fix yet, limit who can reach the workload until there is.
+
+#### GIM-002: Image in use has critical or high vulnerabilities with a fix
+
+**Severity:** High · **Reads:** Container packages in GitHub Container Registry, and their tags, Packages, vulnerabilities and stored credentials in public container images (Aqua Trivy) · [GitHub docs](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
+
+The image runs with packages that have known critical or high vulnerabilities, and fixed versions exist. Each rebuild that doesn't pick them up leaves a known way in for longer.
+
+**How to fix**
+
+1. Rebuild the image with the fixed versions: update the base image for operating system packages, and the lock file for the application's own dependencies (the Images page says which is which).
+2. Push it and deploy the workloads that run it.
+3. Where there is no fix yet, limit who can reach the workload until there is.
+
+#### GIM-003: Image in use is built on an operating system or runtime past its end of life
+
+**Severity:** Medium · **Reads:** Container packages in GitHub Container Registry, and their tags, Packages, vulnerabilities and stored credentials in public container images (Aqua Trivy) · [GitHub docs](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
+
+The operating system release in the image, or the release line of the runtime it is built around (Node.js, Python, nginx…), no longer gets security fixes. Vulnerabilities found in it from now on stay open, and scanners stop reporting them for it.
+
+**How to fix**
+
+Change the Dockerfile's FROM line to a release that is still supported (or to the newest tag of the same base image), rebuild, test and deploy.
 
 ### GitHub: Change risk
 

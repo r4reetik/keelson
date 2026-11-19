@@ -4,6 +4,7 @@
 // Sonar compare against. The shapes are AWS's, so the code that reads them works for
 // both clouds.
 
+import { workloadLinks } from "./images.ts";
 import { countBySeverity } from "../../shared/severity.ts";
 import type { AwsExposureLink, AwsLoadBalancerLink, AwsOrigin, AwsTargetLink, ProviderLinks, ResourceRow, ResourcesView } from "../../shared/api.ts";
 import type { Result } from "../../core/types.ts";
@@ -441,6 +442,7 @@ export function alibabaLinks(inv: AlibabaInventory): ProviderLinks {
   const dns = alidnsRecords(inv);
   const loadBalancers = complete ? loadBalancerLinks(inv) : null;
   const exposure = complete ? exposureLinks(inv) : null;
+  const workloads = complete ? workloadLinks(inv) : null;
   return {
     alibabaAccounts: [inv.accountId],
     alibabaReleased: inv.released,
@@ -449,6 +451,7 @@ export function alibabaLinks(inv: AlibabaInventory): ProviderLinks {
     ...(origins ? { alibabaOrigins: origins } : {}),
     ...(loadBalancers ? { alibabaLoadBalancers: loadBalancers } : {}),
     ...(exposure ? { alibabaExposure: exposure } : {}),
+    ...(workloads ? { alibabaWorkloads: workloads } : {}),
     ...(dns ? { alidnsZones: hostedDomains(inv), alidnsDns: dns } : {}),
   };
 }

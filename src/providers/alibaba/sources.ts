@@ -19,8 +19,8 @@ export interface AlibabaSource {
 /** Where global APIs and probes are asked: every account can call Hangzhou's endpoints, wherever its resources are. */
 export const HOME_REGION = "cn-hangzhou";
 
-type Key = keyof typeof ALIBABA_ACTIONS;
-const LABELS: Record<Key, { label: string; probe?: AlibabaSource["probe"]; regional?: boolean }> = {
+type Key = keyof typeof ALIBABA_ACTIONS | "trivy" | "kev";
+const LABELS: Record<Key, { label: string; probe?: AlibabaSource["probe"]; regional?: boolean; permission?: string }> = {
   identity: { label: "Account identity and alias", probe: (c) => c.rpc("sts", null, "GetCallerIdentity") },
   accountSecurity: {
     label: "Main account's AccessKeys and MFA (RAM's security practice report)",
@@ -88,6 +88,29 @@ const LABELS: Record<Key, { label: string; probe?: AlibabaSource["probe"]; regio
     regional: true,
   },
   functions: { label: "Function Compute functions and triggers (environment variables scanned for credentials, never stored)", regional: true },
+  registries: {
+    label: "Container Registry Enterprise Edition instances, their repositories and image tags",
+    probe: (c) => c.rpc("cr", HOME_REGION, "ListInstance", { PageNo: "1", PageSize: "1" }),
+    regional: true,
+  },
+  imagePull: {
+    label: "Pulling images from Container Registry, for Trivy to scan",
+    permission: "cr:GetAuthorizationToken, cr:PullRepository",
+  },
+  containerGroups: {
+    label: "Elastic Container Instance groups and their images (environment variables dropped)",
+    probe: (c) => c.rpc("eci", HOME_REGION, "DescribeContainerGroups", { RegionId: HOME_REGION, Limit: "1" }),
+    regional: true,
+  },
+  trivy: {
+    label: "Packages, vulnerabilities and stored credentials in container images (Aqua Trivy)",
+    permission:
+      "Trivy installed where Keelson runs: on the PATH, or its path in KEELSON_TRIVY (not in the Docker image yet). Its database, about 1.6 GB, is downloaded into the data folder",
+  },
+  kev: {
+    label: "CISA's catalog of known exploited vulnerabilities",
+    permission: "None: a public file, read from www.cisa.gov without a credential",
+  },
   kms: {
     label: "KMS keys and secrets (names and dates, never values)",
     probe: (c) => c.rpc("kms", HOME_REGION, "ListKeys", { PageSize: "1" }),
@@ -108,6 +131,9 @@ const LABELS: Record<Key, { label: string; probe?: AlibabaSource["probe"]; regio
 
 export type AlibabaSourceKey = Key;
 export const ALIBABA_SOURCES = Object.fromEntries(
-  Object.entries(LABELS).map(([k, v]) => [k, { ...v, permission: ALIBABA_ACTIONS[k as Key].join(", ") || "None" }]),
+  Object.entries(LABELS).map(([k, v]) => [
+    k,
+    { ...v, permission: v.permission ?? ((ALIBABA_ACTIONS as Record<string, readonly string[]>)[k] ?? []).join(", ") },
+  ]),
 ) as Record<AlibabaSourceKey, AlibabaSource>;
 export const ALIBABA_SOURCE_KEYS = Object.keys(LABELS) as AlibabaSourceKey[];

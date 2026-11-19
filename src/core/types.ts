@@ -270,6 +270,9 @@ export const NO_RELATED: Related = {
   alibabaLoadBalancers: null,
   alibabaExposure: null,
   unknown: [],
+  awsWorkloads: null,
+  alibabaWorkloads: null,
+  githubImageBuilds: null,
 };
 
 export interface CollectOptions {

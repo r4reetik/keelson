@@ -23,6 +23,7 @@ import { exportRoutes } from "./routes/exports.ts";
 import { userRoutes } from "./routes/users.ts";
 import { dependencyRoutes, sbomRoutes } from "./routes/dependencies.ts";
 import { complianceRoutes } from "./routes/compliance.ts";
+import { imageBuildRoutes, imageRoutes } from "./routes/images.ts";
 
 export type { AppContext } from "./env.ts";
 
@@ -51,10 +52,12 @@ export function createApp(ctx: AppContext) {
   userRoutes(authed, ctx);
   findingRoutes(configured, ctx);
   dependencyRoutes(configured, ctx);
+  imageBuildRoutes(configured, ctx);
   dashboardRoutes(scoped, ctx);
   exportRoutes(scoped, ctx);
   sbomRoutes(scoped, ctx);
   complianceRoutes(scoped, ctx);
+  imageRoutes(scoped, ctx);
 
   app.all("/api/*", (c) => c.json({ error: "Not found" }, 404));
   app.get("*", (c) => serveWeb(c, ctx.webDir));

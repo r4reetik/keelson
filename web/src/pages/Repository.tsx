@@ -17,12 +17,14 @@ import {
   useLocation,
   type DepPackage,
   type DependenciesResponse,
+  type ImageRow,
   type Part,
   type Severity,
 } from "../lib.ts";
 import { useShell } from "../shell.tsx";
 import { Card, DialogHeader, KeyValue, ListCard, NoRows, Page, PageState, Row, SeverityBadge, Stat } from "../components/ui.tsx";
 import { ExploitedBadges, UsedBy, VulnTable, epssText } from "../components/dependencies.tsx";
+import { ImageName, registryText, UseBadge, VulnCountsView } from "../components/images.tsx";
 
 const RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, unknown: 0 };
 const worst = (p: DepPackage) => p.vulns.reduce((w, v) => Math.max(w, RANK[v.severity] ?? 0), 0);
@@ -229,6 +231,8 @@ export function RepositoryPage({ params }: { params: Record<string, string> }) {
           ]}
         />
       </Card>
+
+      <BuiltImages accountId={data.accountId} repo={data.repo} />
 
       <ListCard title={projects.length > 1 ? "Projects in this monorepo" : "Project"}>
         {!d.parts.length ? (
@@ -524,6 +528,77 @@ function LicenseSummary({ packages, onPick }: { packages: DepPackage[]; onPick: 
                 <Link variant="plain" render={<button type="button" onClick={() => onPick(license)} />}>
                   {plural(r.count, "package", "packages")}
                 </Link>
+              </Table.Cell>
+            </Table.Row>
+          ))}
+        </Table.Body>
+      </Table>
+    </ListCard>
+  );
+}
+
+/** The container images this repository builds, each with what was found in it and where it runs. Nothing when it builds none. */
+function BuiltImages({ accountId, repo }: { accountId: string; repo: string }) {
+  const { dataVersion } = useShell();
+  const { data } = useApi<{ images: ImageRow[] }>(
+    `/api/images/built-by?account=${encodeURIComponent(accountId)}&repo=${encodeURIComponent(repo)}`,
+    dataVersion,
+  );
+  if (!data?.images.length) return null;
+  return (
+    <ListCard
+      title="Container images it builds"
+      footer={
+        <span>
+          From the images' own source labels and from the workflows that push them. A fix in this repository reaches production when these are rebuilt and
+          deployed.
+        </span>
+      }
+    >
+      <Table layout="auto">
+        <Table.Header variant="compact">
+          <Table.Row>
+            <Table.Head sticky="left">Image</Table.Head>
+            <Table.Head className="whitespace-nowrap">In use</Table.Head>
+            <Table.Head className="whitespace-nowrap">Vulnerabilities</Table.Head>
+            <Table.Head className="whitespace-nowrap">Runs in</Table.Head>
+          </Table.Row>
+        </Table.Header>
+        <Table.Body>
+          {data.images.map((i) => (
+            <Table.Row key={i.id}>
+              <Table.Cell sticky="left" className="align-top">
+                <ImageName image={i} />
+                <div className="text-sm text-kumo-subtle">{registryText(i)}</div>
+              </Table.Cell>
+              <Table.Cell className="align-top">
+                <UseBadge use={i.use} />
+              </Table.Cell>
+              <Table.Cell className="align-top">
+                {i.summary ? (
+                  <VulnCountsView vulns={i.summary.vulns} exploited={i.summary.exploited.length} />
+                ) : (
+                  <span className="text-kumo-subtle">Not scanned</span>
+                )}
+              </Table.Cell>
+              <Table.Cell className="align-top text-sm">
+                {i.workloads.length ? (
+                  <ul className="flex flex-col gap-0.5">
+                    {i.workloads.slice(0, 3).map((w) => (
+                      <li key={`${w.kind}${w.name}${w.region}`}>
+                        {w.kind} {w.name}
+                        <span className="text-kumo-subtle">
+                          {" "}
+                          · {w.account}
+                          {w.internet ? " · internet-facing" : ""}
+                        </span>
+                      </li>
+                    ))}
+                    {i.workloads.length > 3 && <li className="text-kumo-subtle">and {num(i.workloads.length - 3)} more</li>}
+                  </ul>
+                ) : (
+                  <span className="text-kumo-subtle">Nothing Keelson reads</span>
+                )}
               </Table.Cell>
             </Table.Row>
           ))}

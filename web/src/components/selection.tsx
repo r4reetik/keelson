@@ -4,7 +4,7 @@
 // same everywhere: tick rows, tick the header for the page, then "Select all N
 // that match" to take every row the filters match, across pages.
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Button, Checkbox, DropdownMenu, Link, useKumoToastManager } from "@cloudflare/kumo";
 import { CopyIcon, DownloadSimpleIcon } from "@phosphor-icons/react";
 import { num, plural } from "../lib.ts";
@@ -29,25 +29,29 @@ export function useSelection(resetOn: unknown): Selection {
     setKeys(new Set());
     setAll(false);
   }, [reset]);
-  return {
-    keys,
-    all,
-    has: (k) => all || keys.has(k),
-    toggle: (ks, on) => {
-      setAll(false);
-      setKeys((prev) => {
-        // Leaving "every row that matches" keeps the rows picked by hand, which include the page's: "Select all" is offered only once it's ticked.
-        const next = new Set(prev);
-        for (const k of ks) on ? next.add(k) : next.delete(k);
-        return next;
-      });
-    },
-    selectAll: () => setAll(true),
-    clear: () => {
-      setKeys(new Set());
-      setAll(false);
-    },
-  };
+  // The same object until the selection itself changes, so a table given it can skip a redraw its page didn't cause.
+  return useMemo(
+    () => ({
+      keys,
+      all,
+      has: (k) => all || keys.has(k),
+      toggle: (ks, on) => {
+        setAll(false);
+        setKeys((prev) => {
+          // Leaving "every row that matches" keeps the rows picked by hand, which include the page's: "Select all" is offered only once it's ticked.
+          const next = new Set(prev);
+          for (const k of ks) on ? next.add(k) : next.delete(k);
+          return next;
+        });
+      },
+      selectAll: () => setAll(true),
+      clear: () => {
+        setKeys(new Set());
+        setAll(false);
+      },
+    }),
+    [keys, all],
+  );
 }
 
 /** The header's box: ticks or unticks every row on this page. */

@@ -16,6 +16,7 @@ import access from "./access.ts";
 import workloads from "./workloads.ts";
 import datastores from "./datastores.ts";
 import containers from "./containers.ts";
+import images from "./images.ts";
 import secrets from "./secrets.ts";
 import messaging from "./messaging.ts";
 import logging from "./logging.ts";
@@ -30,6 +31,7 @@ export const AWS_MODULES = [
   compute,
   workloads,
   containers,
+  images,
   data,
   datastores,
   secrets,

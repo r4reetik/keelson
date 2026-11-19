@@ -82,6 +82,20 @@ const DEFS = {
     label: "Dependency licenses (Anchore Grant)",
     permission: "Grant installed where Keelson runs: on the PATH, or its path in KEELSON_GRANT (not in the Docker image yet)",
   },
+  packages: {
+    label: "Container packages in GitHub Container Registry, and their tags",
+    permission: "None: GitHub lists an organization's packages for any installation of the App",
+    probe: (c) => c.raw(`/orgs/${c.org}/packages?package_type=container&per_page=1`),
+  },
+  trivy: {
+    label: "Packages, vulnerabilities and stored credentials in public container images (Aqua Trivy)",
+    permission:
+      "Trivy installed where Keelson runs: on the PATH, or its path in KEELSON_TRIVY (not in the Docker image yet). Its database, about 1.6 GB, is downloaded into the data folder",
+  },
+  kev: {
+    label: "CISA's catalog of known exploited vulnerabilities",
+    permission: "None: a public file, read from www.cisa.gov without a credential",
+  },
   secretScanning: {
     label: "Secret scanning alerts",
     permission: "Repository permissions → Secret scanning alerts: Read-only",

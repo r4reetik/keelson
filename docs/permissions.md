@@ -153,7 +153,7 @@ for example) is skipped and shown as not readable on the Regions page: nothing t
 | GuardDuty detectors (every enabled region) | `guardduty:ListDetectors`, `guardduty:GetDetector` | AMO-001 |
 | CloudFront distributions | `cloudfront:ListDistributions` | AED-001, AED-002, AED-003, AED-004, AED-007, AED-010, ADN-001 |
 | Route 53 hosted zones and records | `route53:ListHostedZones`, `route53:ListResourceRecordSets` | ADN-001, ADN-002, ADN-003, XP-005, XP-021 |
-| AWS's published address ranges (ip-ranges.amazonaws.com) | `None: a public file`, `read without the access key` | ADN-003 |
+| AWS's published address ranges (ip-ranges.amazonaws.com) | None: a public file, read without the access key | ADN-003 |
 | IAM server certificates | `iam:ListServerCertificates` | AED-012 |
 | S3 bucket policies (reduced to the accounts they allow, never stored) | `s3:GetBucketPolicy` | AS3-004 |
 | Lambda function policies (every enabled region) | `lambda:GetPolicy` | AEC-013 |
@@ -168,7 +168,11 @@ for example) is skipped and shown as not readable on the Regions page: nothing t
 | KMS keys, their rotation and key policies (every enabled region) | `kms:ListKeys`, `kms:DescribeKey`, `kms:GetKeyRotationStatus`, `kms:GetKeyPolicy` | ASC-004, ASC-005, ASC-006 |
 | ACM certificates (every enabled region) | `acm:ListCertificates` | AED-011 |
 | Secrets Manager secrets (names and dates, never values) and their resource policies (every enabled region) | `secretsmanager:ListSecrets`, `secretsmanager:GetResourcePolicy` | ASC-001, ASC-002, ASC-003 |
-| ECR repositories, their policies and image scanning (every enabled region) | `ecr:DescribeRepositories`, `ecr:GetRepositoryPolicy`, `ecr:GetRegistryScanningConfiguration` | ACN-006, ACN-007, ACN-008 |
+| ECR repositories, their policies and image scanning (every enabled region) | `ecr:DescribeRepositories`, `ecr:GetRepositoryPolicy`, `ecr:GetRegistryScanningConfiguration` | ACN-006, ACN-007, ACN-008, AIM-001, AIM-002, AIM-003, AIM-004 |
+| ECR images: tags, digests, and when each was pushed and last pulled (every enabled region) | `ecr:DescribeImages` | AIM-001, AIM-002, AIM-003, AIM-004 |
+| Pulling ECR images, for Trivy to scan | ecr:GetAuthorizationToken, ecr:BatchGetImage, ecr:GetDownloadUrlForLayer. SecurityAudit doesn't grant them: add them to the key's user in an inline policy (all three only read) | AIM-001, AIM-002, AIM-003, AIM-004 |
+| Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) | Trivy installed where Keelson runs: on the PATH, or its path in KEELSON_TRIVY (not in the Docker image yet). Its database, about 1.6 GB, is downloaded into the data folder | AIM-001, AIM-002, AIM-003, AIM-004 |
+| CISA's catalog of known exploited vulnerabilities | None: a public file, read from www.cisa.gov without a credential | AIM-001 |
 | ECS services and their task definitions (environment variables scanned for credentials, never stored) (every enabled region) | `ecs:ListClusters`, `ecs:ListServices`, `ecs:DescribeServices`, `ecs:DescribeTaskDefinition` | ACN-004, ACN-005 |
 | EKS clusters (every enabled region) | `eks:ListClusters`, `eks:DescribeCluster`, `eks:DescribeClusterVersions` | ACN-001, ACN-002, ACN-003 |
 | DynamoDB tables and point-in-time recovery (every enabled region) | `dynamodb:ListTables`, `dynamodb:DescribeContinuousBackups` | ADB-013 |
@@ -184,7 +188,7 @@ for example) is skipped and shown as not readable on the Regions page: nothing t
 | SNS topics, their policies and subscriptions (every enabled region) | `sns:ListTopics`, `sns:GetTopicAttributes`, `sns:ListSubscriptions` | AMQ-001, AMQ-002 |
 | SQS queues and their policies (every enabled region) | `sqs:ListQueues`, `sqs:GetQueueAttributes` | AMQ-003 |
 | Amazon MQ brokers (every enabled region) | `mq:ListBrokers`, `mq:DescribeBroker` | AMQ-004 |
-| MSK (Kafka) clusters (every enabled region) | `kafka:ListClustersV2` | AMQ-005 |
+| MSK (Kafka) clusters (every enabled region) | kafka:ListClustersV2 | AMQ-005 |
 | EFS file systems (every enabled region) | `elasticfilesystem:DescribeFileSystems` | ADB-014 |
 
 ## Alibaba Cloud
@@ -236,6 +240,11 @@ Keelson's policy grows when a check needs a new read. A policy made from an earl
 | Tair (Redis) instances: endpoints, whitelists, password-free access and TLS (every available region) | `kvstore:DescribeInstances`, `kvstore:DescribeInstanceAttribute`, `kvstore:DescribeSecurityIps`, `kvstore:DescribeDBInstanceNetInfo`, `kvstore:DescribeInstanceSSL` | LDB-004 |
 | ApsaraDB for MongoDB instances: endpoints, whitelists, password-free access and TLS (every available region) | `dds:DescribeDBInstances`, `dds:DescribeSecurityIps`, `dds:DescribeShardingNetworkAddress`, `dds:DescribeDBInstanceSSL` | LDB-004 |
 | Function Compute functions and triggers (environment variables scanned for credentials, never stored) (every available region) | `fc:ListFunctions`, `fc:ListTriggers` | LCN-002, LCN-003 |
+| Container Registry Enterprise Edition instances, their repositories and image tags (every available region) | `cr:ListInstance`, `cr:ListInstanceEndpoint`, `cr:ListRepository`, `cr:ListRepositoryTag` | LIM-001, LIM-002, LIM-003, LIM-004 |
+| Pulling images from Container Registry, for Trivy to scan | `cr:GetAuthorizationToken`, `cr:PullRepository` | LIM-001, LIM-002, LIM-003, LIM-004 |
+| Elastic Container Instance groups and their images (environment variables dropped) (every available region) | `eci:DescribeContainerGroups` | Supporting data for other checks |
+| Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) | Trivy installed where Keelson runs: on the PATH, or its path in KEELSON_TRIVY (not in the Docker image yet). Its database, about 1.6 GB, is downloaded into the data folder | LIM-001, LIM-002, LIM-003, LIM-004 |
+| CISA's catalog of known exploited vulnerabilities | None: a public file, read from www.cisa.gov without a credential | LIM-001 |
 | KMS keys and secrets (names and dates, never values) (every available region) | `kms:ListKeys`, `kms:DescribeKey`, `kms:ListSecrets`, `kms:DescribeSecret` | LKM-001, LKM-002, LKM-003 |
 | Container Service (ACK) clusters | `cs:GetClusters` | LCN-001 |
 | ActionTrail trails | `actiontrail:DescribeTrails` | LMO-001 |
@@ -286,6 +295,9 @@ Keelson runs, when installed, and aren't GitHub permissions: without one, its so
 | Software bill of materials (Anchore Syft) | Syft installed where Keelson runs: on the PATH, or its path in KEELSON_SYFT (not in the Docker image yet) | GDP-001, GDP-002, GDP-003, GLI-001 |
 | Known vulnerabilities in dependencies (Anchore Grype) | Grype installed where Keelson runs: on the PATH, or its path in KEELSON_GRYPE (not in the Docker image yet). Its database, about 3 GB, is downloaded from Anchore into the data folder | GDP-001, GDP-002, GDP-003 |
 | Dependency licenses (Anchore Grant) | Grant installed where Keelson runs: on the PATH, or its path in KEELSON_GRANT (not in the Docker image yet) | GLI-001 |
+| Container packages in GitHub Container Registry, and their tags | None: GitHub lists an organization's packages for any installation of the App | GIM-001, GIM-002, GIM-003, GIM-004 |
+| Packages, vulnerabilities and stored credentials in public container images (Aqua Trivy) | Trivy installed where Keelson runs: on the PATH, or its path in KEELSON_TRIVY (not in the Docker image yet). Its database, about 1.6 GB, is downloaded into the data folder | GIM-001, GIM-002, GIM-003, GIM-004 |
+| CISA's catalog of known exploited vulnerabilities | None: a public file, read from www.cisa.gov without a credential | GIM-001 |
 | Secret scanning alerts | Repository permissions → Secret scanning alerts: Read-only | GSC-003 |
 
 ## Internet (Sonar)

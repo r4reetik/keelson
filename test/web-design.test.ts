@@ -66,3 +66,17 @@ test("lists that offer row checkboxes act on the selection with the shared selec
   });
   assert.deepEqual(own, [], "pick rows with SelectRow and SelectPage, and act on them in SelectionBar");
 });
+
+test("the Images page's tables don't redraw when only the scan status changed", () => {
+  // The shell refreshes the scan status every two seconds during a scan, and every page that reads the shell is drawn
+  // again. Fifty rows of images cost about 90 ms each time on a real registry until the tables were memoized.
+  const page = readFileSync(join(WEB, "pages/Images.tsx"), "utf8");
+  for (const table of ["ImagesTable", "WorkloadsTable", "VulnerabilitiesTable", "ComponentsTable"])
+    assert.match(page, new RegExp(`const ${table} = memo\\(`), `${table} is wrapped in memo`);
+  // A memoized table only skips the redraw when its props are the same objects: the selection must be one.
+  assert.match(
+    readFileSync(join(WEB, "components/selection.tsx"), "utf8"),
+    /return useMemo\(/,
+    "useSelection returns the same object until the selection changes",
+  );
+});

@@ -31,7 +31,7 @@ import { pacing } from "../src/providers/internet/client.ts";
 import { ALIBABA_CHECKS } from "../src/providers/alibaba/catalog.ts";
 import { isReadAction, parseCredentials, productOfHost, PRODUCTS, READ_ACTION, retry } from "../src/providers/alibaba/client.ts";
 import { signAcs3, signOss4 } from "../src/providers/alibaba/sign.ts";
-import { ALIBABA_ACTIONS, ALIBABA_POLICY_ACTIONS, alibabaPolicy } from "../src/shared/alibaba.ts";
+import { ALIBABA_ACTIONS, ALIBABA_DATA_ACTIONS, ALIBABA_POLICY_ACTIONS, alibabaPolicy } from "../src/shared/alibaba.ts";
 import { PROVIDER } from "../src/providers/index.ts";
 import { ACCOUNT_ID_PATTERN, providerForId, providerOfUrl } from "../src/shared/providers.ts";
 import type { ScanSnapshot } from "../src/shared/api.ts";
@@ -80,7 +80,11 @@ test("signatures match Alibaba Cloud's published examples", () => {
 });
 
 test("the policy Keelson asks for only reads, and the client refuses anything else before sending it", async () => {
-  for (const a of ALIBABA_POLICY_ACTIONS) assert.match(a.split(":")[1], READ_ACTION, `${a} is a read`);
+  // One action reads data: pulling an image's layers, which Trivy needs to scan it. It is the registry's own permission,
+  // never an API call the client sends, and nothing else in the policy may be anything but a read of configuration.
+  assert.deepEqual(ALIBABA_DATA_ACTIONS, ["cr:PullRepository"]);
+  for (const a of ALIBABA_POLICY_ACTIONS.filter((x) => !ALIBABA_DATA_ACTIONS.includes(x))) assert.match(a.split(":")[1], READ_ACTION, `${a} is a read`);
+  assert.ok(!isReadAction("cr", "PullRepository"), "the client never sends it");
   assert.ok(!ALIBABA_POLICY_ACTIONS.some((a) => /GetObject$|GetSecretValue$|Decrypt$|GetFunctionCode$|Kubeconfig/.test(a)), "never data, secrets or code");
   assert.deepEqual(JSON.parse(alibabaPolicy()).Statement[0].Action, ALIBABA_POLICY_ACTIONS);
   assert.ok(Object.values(ALIBABA_ACTIONS).every((list) => list.length > 0));

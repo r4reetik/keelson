@@ -6,6 +6,7 @@ import type { Triage, TriageStatus, SlaDays } from "./triage.ts";
 import type { ScopeKind } from "./scope.ts";
 import type { ProviderId } from "./providers.ts";
 import type { Role } from "./roles.ts";
+import type { ImageBuildLink, ImagesSnapshot, WorkloadLink } from "./images.ts";
 
 export type Confidence = "confirmed" | "likely";
 export type FindingSource = "custom" | "security_center";
@@ -688,6 +689,8 @@ export interface ScanSnapshot {
   addressHistory?: AddressHistory;
   /** Domains the account owns, when no other part of the snapshot lists them (AWS's public hosted zones, Alibaba Cloud DNS's domains). */
   ownedDomains?: string[];
+  /** AWS, Alibaba Cloud and GitHub: the container images the scan looked at, with what Trivy found in each. */
+  images?: ImagesSnapshot;
   /** What other providers' accounts in the same entity need for checks that span providers. */
   links?: ProviderLinks;
 }
@@ -764,6 +767,12 @@ export interface ProviderLinks {
   alibabaLoadBalancers?: AwsLoadBalancerLink[];
   /** Every public address an Alibaba Cloud account holds, with what owns it and what its security groups let anyone reach. */
   alibabaExposure?: AwsExposureLink[];
+  /** An AWS account's workloads that run container images (ECS services), each with its images and how the internet reaches it. */
+  awsWorkloads?: WorkloadLink[];
+  /** An Alibaba Cloud account's workloads that run container images (ECI container groups, Function Compute functions, SAE applications). */
+  alibabaWorkloads?: WorkloadLink[];
+  /** The images a GitHub organization's workflows build and push, by repository. */
+  githubImageBuilds?: ImageBuildLink[];
 }
 
 /** An AWS load balancer as a hostname that names it reaches it. Alibaba Cloud publishes its ALBs, NLBs and CLBs in the same shape. */
@@ -905,6 +914,9 @@ export const LINK_KEYS = [
   "alidnsDns",
   "alibabaLoadBalancers",
   "alibabaExposure",
+  "awsWorkloads",
+  "alibabaWorkloads",
+  "githubImageBuilds",
 ] as const satisfies readonly (keyof ProviderLinks)[];
 export type LinkKey = (typeof LINK_KEYS)[number];
 
@@ -938,6 +950,9 @@ export const LINK_PROVIDER: Record<LinkKey, ProviderId> = {
   alidnsDns: "alibaba",
   alibabaLoadBalancers: "alibaba",
   alibabaExposure: "alibaba",
+  awsWorkloads: "aws",
+  alibabaWorkloads: "alibaba",
+  githubImageBuilds: "github",
 };
 
 /** One region of an AWS or Alibaba Cloud account as the Regions page shows it, or the account's global resources. */

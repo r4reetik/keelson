@@ -5,7 +5,9 @@
 import { countBySeverity } from "../../shared/severity.ts";
 import type { AwsExposureLink, AwsLoadBalancerLink, AwsOrigin, AwsTargetLink, ProviderLinks, RegionRow } from "../../shared/api.ts";
 import type { Result } from "../../core/types.ts";
-import { opens, opensWeb } from "./checks/define.ts";
+import type { WorkloadLink } from "../../shared/images.ts";
+import type { RegistryImage } from "../../core/images.ts";
+import { opens, opensWeb, ruleText } from "./checks/define.ts";
 import { GLOBAL, type AwsInventory, type AwsRegion, type AwsSecurityGroup } from "./types.ts";
 
 export { addressHistory } from "../../core/addresses.ts";
@@ -225,6 +227,70 @@ export function exposureLinks(inv: AwsInventory): AwsExposureLink[] | null {
 }
 
 /**
+ * The account's workloads that run container images: its ECS services, each with its containers' images and how the
+ * internet reaches it (an internet-facing load balancer in front of it, or a public address with a port its security
+ * groups open to anyone). Null when a region's services couldn't be read.
+ */
+export function workloadLinks(inv: AwsInventory): WorkloadLink[] | null {
+  if (inv.regions.some((r) => r.services === null || r.taskDefinitions === null)) return null;
+  const account = inv.accountName ?? inv.accountId;
+  return inv.regions.flatMap((r) =>
+    (r.services ?? []).map((s): WorkloadLink => {
+      const lbs = r.loadBalancers ?? [];
+      const forwardsTo = (arn: string) => lbs.filter((lb) => lb.listeners?.some((l) => l.rules?.some((rule) => rule.targetGroups.includes(arn))));
+      const front = new Set([...s.targetGroups.flatMap(forwardsTo), ...lbs.filter((lb) => s.classicLoadBalancers.includes(lb.name))]);
+      // A network load balancer can pass requests on to an application load balancer: what reaches it reaches the service.
+      for (const lb of [...front])
+        for (const g of r.targetGroups ?? [])
+          if (g.type === "alb" && lb.arn && g.targets?.some((t) => t.id === lb.arn)) for (const outer of forwardsTo(g.arn)) front.add(outer);
+      const via = [...front].filter((lb) => lb.internetFacing).map((lb) => `load balancer ${lb.name}`);
+      if (s.publicIp) {
+        const open = (r.securityGroups ?? []).filter((g) => s.securityGroups.includes(g.id) && g.open.length);
+        for (const g of open) via.push(`a public address, with ${ruleText(g.open[0])} in ${g.name || g.id}`);
+      }
+      const unknown =
+        // Tasks on their instance's network are as exposed as the instance, which the service doesn't name.
+        s.publicIp === null ||
+        (s.publicIp && (!r.securityGroups || !s.securityGroups.length)) ||
+        (!r.loadBalancers && s.targetGroups.length + s.classicLoadBalancers.length > 0);
+      return {
+        provider: "aws",
+        kind: "ECS service",
+        name: s.name,
+        group: s.cluster,
+        account,
+        region: r.name,
+        link: `https://${r.name}.console.aws.amazon.com/ecs/v2/clusters/${encodeURIComponent(s.cluster)}/services/${encodeURIComponent(s.name)}?region=${r.name}`,
+        containers: r.taskDefinitions?.find((t) => t.name === s.taskDefinition)?.containers ?? [],
+        running: s.running,
+        internet: via.length ? true : unknown ? null : false,
+        via,
+        loadBalancers: [...front].map((lb) => lb.dnsName),
+      };
+    }),
+  );
+}
+
+/** Every image the account's ECR repositories list, in the shape image scanning picks from. */
+export function registryImages(inv: AwsInventory): RegistryImage[] {
+  return inv.regions.flatMap((r) =>
+    (r.repositories ?? []).flatMap((repo) =>
+      (repo.images ?? []).map((i) => ({
+        registry: `${inv.accountId}.dkr.ecr.${r.name}.amazonaws.com`,
+        repository: repo.name,
+        region: r.name,
+        digest: i.digest,
+        tags: i.tags,
+        pushedAt: i.pushedAt,
+        pulledAt: i.pulledAt,
+        public: repo.publicPolicy,
+        ...(i.platforms ? { platforms: i.platforms } : {}),
+      })),
+    ),
+  );
+}
+
+/**
  * What other accounts in the same entity need. A region that refused the scan makes the endpoint and address lists
  * incomplete, so they aren't shared; the account's own ID always is.
  */
@@ -236,6 +302,7 @@ export function awsLinks(inv: AwsInventory): ProviderLinks {
   const dns = route53Dns(inv);
   const loadBalancers = complete ? loadBalancerLinks(inv) : null;
   const exposure = complete ? exposureLinks(inv) : null;
+  const workloads = complete ? workloadLinks(inv) : null;
   return {
     awsAccounts: [inv.accountId],
     awsReleased: inv.released,
@@ -244,6 +311,7 @@ export function awsLinks(inv: AwsInventory): ProviderLinks {
     ...(origins ? { awsOrigins: origins } : {}),
     ...(loadBalancers ? { awsLoadBalancers: loadBalancers } : {}),
     ...(exposure ? { awsExposure: exposure } : {}),
+    ...(workloads ? { awsWorkloads: workloads } : {}),
     ...(dns ? { route53Zones: hostedDomains(inv), route53Dns: dns } : {}),
   };
 }

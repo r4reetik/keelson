@@ -89,5 +89,8 @@ export function githubLinks(inv: GithubInventory): ProviderLinks {
       // An archived repository can't be pushed to; an empty one has no branch yet, so nothing protects it.
       reviewed: r.archived || (r.protection !== undefined && !!r.rules && branchGuard(r).pullRequests),
     }));
+  // Which images each repository's workflows push: complete only when every repository's workflows were read.
+  if (everyRepo && inv.dependencies && !inv.unreadable.includes("manifests"))
+    out.githubImageBuilds = inv.dependencies.repos.flatMap((d) => (d.builds ?? []).map((b) => ({ ...b, repo: `${inv.login}/${d.repo}`.toLowerCase() })));
   return out;
 }

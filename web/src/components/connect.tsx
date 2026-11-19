@@ -157,6 +157,11 @@ function AwsTokenHelp() {
         It reads configuration only: it can't change anything, and it can't read what is stored in your buckets or databases.
       </li>
       <li>
+        To have container images in ECR scanned, also add an inline policy that allows <span className="font-mono text-sm">ecr:GetAuthorizationToken</span>,{" "}
+        <span className="font-mono text-sm">ecr:BatchGetImage</span> and <span className="font-mono text-sm">ecr:GetDownloadUrlForLayer</span> on every
+        resource. They only read, and let Trivy pull an image to look inside it. Without them images are listed, not scanned.
+      </li>
+      <li>
         Open the user, go to <span className="font-medium">Security credentials → Create access key</span>, choose{" "}
         <span className="font-medium">Application running outside AWS</span>, and paste the key ID and the secret into Keelson. An access key belongs to one AWS
         account, so each account needs its own.

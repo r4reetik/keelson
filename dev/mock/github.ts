@@ -11,6 +11,7 @@
 
 import { createHash, createPublicKey, createVerify, generateKeyPairSync } from "node:crypto";
 import { installMockAnchore } from "./anchore.ts";
+import { installMockTrivy, MOCK_DIGEST, type MockTrivyOptions } from "./trivy.ts";
 
 const DAY = 86_400_000;
 const iso = (daysAgo: number) => new Date(Date.now() - daysAgo * DAY).toISOString();
@@ -36,6 +37,8 @@ interface MockOptions {
   deny?: RegExp[];
   /** Options for the mock Syft, Grype and Grant (dev/mock/anchore.ts), installed with the API. */
   anchore?: Parameters<typeof installMockAnchore>[0];
+  /** Options for the mock Trivy (dev/mock/trivy.ts), installed with the API. */
+  trivy?: MockTrivyOptions;
   /** Permissions the installation was granted, instead of the usual ones. */
   granted?: Record<string, string>;
 }
@@ -279,6 +282,8 @@ const SECRET_SCANNING = [
 // with a vulnerable XML parser that attackers exploit, a GPL package and a workflow that uses an action by its tag;
 // "api" is a Go service with a Python worker that installs a malicious package and a package without a pinned
 // version; "infra" has scripts installed without a lock file.
+/** A GitHub Actions expression, as a workflow file writes it. */
+const E = (expr: string) => `\${{ ${expr} }}`;
 const lock = (packages: Record<string, unknown>) => JSON.stringify({ name: "mock-web", lockfileVersion: 3, requires: true, packages }, null, 2);
 export const MOCK_SOURCE_FILE = "apps/site/src/server.ts";
 export const MOCK_SOURCE_CONTENT = "const secret = 'mock-source-code-SECRET';";
@@ -314,6 +319,24 @@ const FILES: Record<string, Record<string, string>> = {
       "      - uses: mock-actions/deploy@v2",
       "",
     ].join("\n"),
+    // Builds the site's image and pushes it to Amazon ECR and to GitHub's registry.
+    ".github/workflows/deploy.yml": [
+      "name: deploy",
+      "on:",
+      "  push:",
+      "    branches: [main]",
+      "env:",
+      "  REGISTRY: ghcr.io",
+      `  IMAGE_NAME: ${E("github.repository")}`,
+      "jobs:",
+      "  image:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      `      - run: docker build -t 111122223333.dkr.ecr.eu-west-1.amazonaws.com/web:${E("github.sha")} apps/site`,
+      `      - run: docker push 111122223333.dkr.ecr.eu-west-1.amazonaws.com/web:${E("github.sha")}`,
+      "      - run: docker tag web $REGISTRY/$IMAGE_NAME:latest && docker push $REGISTRY/$IMAGE_NAME:latest",
+      "",
+    ].join("\n"),
   },
   api: {
     "go.mod": "module example.com/mock/api\n\ngo 1.22\n\nrequire (\n\tmock.example/httpkit v1.2.0\n\tmock.example/log v0.3.0 // indirect\n)\n",
@@ -321,11 +344,55 @@ const FILES: Record<string, Record<string, string>> = {
     "main.go": "package main",
     "worker/requirements.txt": "mock-celery==4.0.0\nmock-colorz==1.0.0\nmock-requests>=2.0\n",
     "worker/Dockerfile": "FROM python:3.12-slim\n",
+    // The registry comes from a login step and the repository from a variable, as in AWS's sample workflow.
+    ".github/workflows/release.yml": [
+      "name: release",
+      "on: workflow_dispatch",
+      "env:",
+      "  ECR_REPOSITORY: api",
+      "jobs:",
+      "  image:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - id: login-ecr",
+      "        uses: aws-actions/amazon-ecr-login@0123456789abcdef0123456789abcdef01234567 # v2",
+      "      - env:",
+      `          ECR_REGISTRY: ${E("steps.login-ecr.outputs.registry")}`,
+      `          IMAGE_TAG: ${E("github.sha")}`,
+      "        run: |",
+      "          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .",
+      "          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG",
+      "",
+    ].join("\n"),
   },
   infra: {
     "scripts/package.json": JSON.stringify({ name: "mock-infra-scripts", dependencies: { "mock-cli": "^1.0.0" } }),
     "scripts/deploy.js": "console.log('deploy')",
   },
+};
+// Container packages: the site's public image, linked to its repository, and a private one GitHub won't let an App pull.
+const PACKAGES = [
+  {
+    id: 501,
+    name: "web",
+    package_type: "container",
+    visibility: "public",
+    version_count: 3,
+    html_url: "https://github.com/orgs/mock-org/packages/container/package/web",
+    repository: { full_name: "mock-org/web", private: false },
+    updated_at: iso(3),
+  },
+  { id: 502, name: "internal-tools", package_type: "container", visibility: "private", version_count: 1, updated_at: iso(40) },
+];
+const PACKAGE_VERSIONS: Record<string, unknown[]> = {
+  web: [
+    { id: 9003, name: MOCK_DIGEST.ghcrWeb, updated_at: iso(3), metadata: { package_type: "container", container: { tags: ["latest", "2.0.0"] } } },
+    // One platform's part of the image above: untagged.
+    { id: 9002, name: `sha256:${"07".repeat(32)}`, updated_at: iso(3), metadata: { package_type: "container", container: { tags: [] } } },
+  ],
+  "internal-tools": [
+    { id: 9101, name: `sha256:${"08".repeat(32)}`, updated_at: iso(40), metadata: { package_type: "container", container: { tags: ["1.0"] } } },
+  ],
 };
 const blobSha = (text: string) =>
   createHash("sha1")
@@ -368,6 +435,7 @@ function paged(url: URL, items: unknown[], wrap?: string): Response {
 export function installMockGithub(o: MockOptions = {}): () => void {
   const real = globalThis.fetch;
   const restoreAnchore = installMockAnchore(o.anchore);
+  const restoreTrivy = installMockTrivy(o.trivy);
   const granted = o.granted ?? GRANTED;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
@@ -425,6 +493,10 @@ export function installMockGithub(o: MockOptions = {}): () => void {
       );
     if (path === "/orgs/mock-org/actions/runners") return paged(url, RUNNERS, "runners");
     if (path === "/orgs/mock-org/hooks") return paged(url, ORG_HOOKS);
+    if (path === "/orgs/mock-org/packages") return paged(url, url.searchParams.get("package_type") === "container" ? PACKAGES : []);
+    const versions = /^\/orgs\/mock-org\/packages\/container\/([^/]+)\/versions$/.exec(path);
+    if (versions)
+      return PACKAGE_VERSIONS[decodeURIComponent(versions[1])] ? paged(url, PACKAGE_VERSIONS[decodeURIComponent(versions[1])]) : fail(404, "Not Found");
     if (path === "/orgs/mock-org/installations") return paged(url, OTHER_APPS, "installations");
     if (path === "/orgs/mock-org/dependabot/alerts") return paged(url, DEPENDABOT);
     if (path === "/orgs/mock-org/code-scanning/alerts") return paged(url, CODE_SCANNING);
@@ -476,5 +548,6 @@ export function installMockGithub(o: MockOptions = {}): () => void {
   return () => {
     globalThis.fetch = real;
     restoreAnchore();
+    restoreTrivy();
   };
 }

@@ -5,6 +5,9 @@
 
 import type { AlibabaSourceKey } from "./sources.ts";
 import type { AddressHistory } from "../../shared/api.ts";
+import type { ImageHighlights } from "../../core/images.ts";
+import type { ImagesSnapshot, WorkloadLink } from "../../shared/images.ts";
+import type { AlibabaContainerGroup, AlibabaRegistry } from "./images.ts";
 
 /** The name findings use for resources that aren't in a region (RAM, OSS settings, CDN, DNS). */
 export const GLOBAL = "Global";
@@ -271,6 +274,8 @@ export interface AlibabaFunction {
   /** HTTP triggers that let anyone call it. null: triggers unreadable. */
   anonymousTriggers: string[] | null;
   envSecret: FoundSecret | null;
+  /** The image a function built from one runs, as its configuration writes it. */
+  image?: string | null;
 }
 
 export interface AlibabaTrail {
@@ -399,4 +404,10 @@ export interface AlibabaInventory {
   domains: AlibabaDomain[] | null;
   /** Addresses Keelson saw leave the account, from the address history. */
   released: AddressHistory["released"];
+  /** Container Registry instances and their images; null when unreadable, undefined before they're read. */
+  registries?: AlibabaRegistry[] | null;
+  /** Elastic Container Instance groups; null when unreadable, undefined before they're read. */
+  containerGroups?: AlibabaContainerGroup[] | null;
+  /** The images this scan looked at and what Trivy found in each, with the workloads known in the entity (set by the provider). */
+  images?: { snapshot: ImagesSnapshot; scans: Map<string, ImageHighlights>; workloads: WorkloadLink[] };
 }
