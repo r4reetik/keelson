@@ -206,6 +206,11 @@ const DEFS = {
     permission:
       "ecr:GetAuthorizationToken, ecr:BatchGetImage, ecr:GetDownloadUrlForLayer. SecurityAudit doesn't grant them: add them to the key's user in an inline policy (all three only read)",
   },
+  registryNetwork: {
+    label: "Connecting to container registries from where Keelson runs, to pull images",
+    permission:
+      "A connection to the account's ECR registry hosts (<account>.dkr.ecr.<region>.amazonaws.com) and the S3 hosts its layers come from. A firewall or proxy that blocks them stops the pull",
+  },
   trivy: {
     label: "Packages, vulnerabilities and stored credentials in container images (Aqua Trivy)",
     permission:

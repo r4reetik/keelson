@@ -133,7 +133,7 @@ export async function scanAwsImages(
     cache: o.cache,
     toolDir: o.toolDir,
     onProgress: o.onProgress,
-    note: (source, ok, err) => client.note(source === "pull" ? "imagePull" : source, ok, err),
+    note: (source, ok, err) => client.note(source === "pull" ? "imagePull" : source === "network" ? "registryNetwork" : source, ok, err),
     now: inv.now,
     previous: o.previous,
   });

@@ -590,10 +590,13 @@ function rpc(product: string, action: string, q: URLSearchParams, region: string
     case "cr:ListInstanceEndpoint":
       return {
         Endpoints: [
+          // Internet access limited to an allowlist (a documentation range), as Container Registry suggests.
           {
             EndpointType: "internet",
             Enable: true,
             Status: "RUNNING",
+            AclEnable: true,
+            AclEntries: [{ Entry: "198.51.100.0/24" }],
             Domains: [{ Domain: `mock-registry-registry.${WORK}.cr.aliyuncs.com`, Type: "SYSTEM" }],
           },
           { EndpointType: "vpc", Enable: true, Status: "RUNNING", Domains: [{ Domain: `mock-registry-registry-vpc.${WORK}.cr.aliyuncs.com`, Type: "SYSTEM" }] },

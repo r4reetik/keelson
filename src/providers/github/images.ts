@@ -117,8 +117,9 @@ export async function scanGithubImages(
     cache: o.cache,
     toolDir: o.toolDir,
     onProgress: o.onProgress,
-    // Nothing here is pulled with a login, so a refused pull is that image's own (a package made private since it was listed).
-    note: (source, ok, err) => source !== "pull" && client.note(source, ok, err),
+    // Nothing here is pulled with a login, so a refused pull is that image's own (a package made private since it was listed),
+    // and so is a host Keelson can't reach: each image says so.
+    note: (source, ok, err) => source !== "pull" && source !== "network" && client.note(source, ok, err),
     now: inv.now,
     previous: o.previous,
   });

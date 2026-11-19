@@ -2454,7 +2454,7 @@ Task definitions are readable by anyone who can describe them, in every revision
 
 #### AIM-004: Credential stored inside an image
 
-**Severity:** High · **Reads:** ECR repositories, their policies and image scanning, ECR images: tags, digests, and when each was pushed and last pulled, Pulling ECR images, for Trivy to scan, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) · [AWS docs](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/specifying-sensitive-data.html)
+**Severity:** High · **Reads:** ECR repositories, their policies and image scanning, ECR images: tags, digests, and when each was pushed and last pulled, Pulling ECR images, for Trivy to scan, Connecting to container registries from where Keelson runs, to pull images, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) · [AWS docs](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/specifying-sensitive-data.html)
 
 Anyone who can pull the image can read the credential, from every copy of the image in every registry and cache, for as long as those exist. Deleting the file in a later layer doesn't remove it from the earlier one.
 
@@ -2907,7 +2907,7 @@ Encryption can't be turned on in place: create an encrypted file system, copy th
 
 #### AIM-001: Image in use has a vulnerability attackers are exploiting
 
-**Severity:** Critical · **Attack path** · **Reads:** ECR repositories, their policies and image scanning, ECR images: tags, digests, and when each was pushed and last pulled, Pulling ECR images, for Trivy to scan, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy), CISA's catalog of known exploited vulnerabilities · [AWS docs](https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-scanning.html)
+**Severity:** Critical · **Attack path** · **Reads:** ECR repositories, their policies and image scanning, ECR images: tags, digests, and when each was pushed and last pulled, Pulling ECR images, for Trivy to scan, Connecting to container registries from where Keelson runs, to pull images, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy), CISA's catalog of known exploited vulnerabilities · [AWS docs](https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-scanning.html)
 
 A package in the image has a vulnerability on CISA's list of known exploited vulnerabilities (cisa.gov/known-exploited-vulnerabilities-catalog), and something runs the image. Attackers already have working exploits for it, and a service the internet reaches is where they try them first.
 
@@ -2919,7 +2919,7 @@ A package in the image has a vulnerability on CISA's list of known exploited vul
 
 #### AIM-002: Image in use has critical or high vulnerabilities with a fix
 
-**Severity:** High · **Reads:** ECR repositories, their policies and image scanning, ECR images: tags, digests, and when each was pushed and last pulled, Pulling ECR images, for Trivy to scan, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) · [AWS docs](https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-scanning.html)
+**Severity:** High · **Reads:** ECR repositories, their policies and image scanning, ECR images: tags, digests, and when each was pushed and last pulled, Pulling ECR images, for Trivy to scan, Connecting to container registries from where Keelson runs, to pull images, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) · [AWS docs](https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-scanning.html)
 
 The image runs with packages that have known critical or high vulnerabilities, and fixed versions exist. Each rebuild that doesn't pick them up leaves a known way in for longer.
 
@@ -2931,7 +2931,7 @@ The image runs with packages that have known critical or high vulnerabilities, a
 
 #### AIM-003: Image in use is built on an operating system or runtime past its end of life
 
-**Severity:** Medium · **Reads:** ECR repositories, their policies and image scanning, ECR images: tags, digests, and when each was pushed and last pulled, Pulling ECR images, for Trivy to scan, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) · [AWS docs](https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-scanning.html)
+**Severity:** Medium · **Reads:** ECR repositories, their policies and image scanning, ECR images: tags, digests, and when each was pushed and last pulled, Pulling ECR images, for Trivy to scan, Connecting to container registries from where Keelson runs, to pull images, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) · [AWS docs](https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-scanning.html)
 
 The operating system release in the image, or the release line of the runtime it is built around (Node.js, Python, nginx…), no longer gets security fixes. Vulnerabilities found in it from now on stay open, and scanners stop reporting them for it.
 
@@ -3439,7 +3439,7 @@ Environment variables are readable by anyone who can view the function's configu
 
 #### LIM-004: Credential stored inside an image
 
-**Severity:** High · **Reads:** Container Registry Enterprise Edition instances, their repositories and image tags, Pulling images from Container Registry, for Trivy to scan, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/acr/user-guide/scan-container-images)
+**Severity:** High · **Reads:** Container Registry Enterprise Edition instances, their repositories and image tags, Pulling images from Container Registry, for Trivy to scan, Connecting to Container Registry from where Keelson runs, to pull images, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/acr/user-guide/scan-container-images)
 
 Anyone who can pull the image can read the credential, from every copy of the image in every registry and cache, for as long as those exist. Deleting the file in a later layer doesn't remove it from the earlier one.
 
@@ -3635,7 +3635,7 @@ In the RDS console → the instance → Data Security → TDE, turn on TDE with 
 
 #### LIM-001: Image in use has a vulnerability attackers are exploiting
 
-**Severity:** Critical · **Attack path** · **Reads:** Container Registry Enterprise Edition instances, their repositories and image tags, Pulling images from Container Registry, for Trivy to scan, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy), CISA's catalog of known exploited vulnerabilities · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/acr/user-guide/scan-container-images)
+**Severity:** Critical · **Attack path** · **Reads:** Container Registry Enterprise Edition instances, their repositories and image tags, Pulling images from Container Registry, for Trivy to scan, Connecting to Container Registry from where Keelson runs, to pull images, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy), CISA's catalog of known exploited vulnerabilities · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/acr/user-guide/scan-container-images)
 
 A package in the image has a vulnerability on CISA's list of known exploited vulnerabilities (cisa.gov/known-exploited-vulnerabilities-catalog), and something runs the image. Attackers already have working exploits for it, and a service the internet reaches is where they try them first.
 
@@ -3647,7 +3647,7 @@ A package in the image has a vulnerability on CISA's list of known exploited vul
 
 #### LIM-002: Image in use has critical or high vulnerabilities with a fix
 
-**Severity:** High · **Reads:** Container Registry Enterprise Edition instances, their repositories and image tags, Pulling images from Container Registry, for Trivy to scan, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/acr/user-guide/scan-container-images)
+**Severity:** High · **Reads:** Container Registry Enterprise Edition instances, their repositories and image tags, Pulling images from Container Registry, for Trivy to scan, Connecting to Container Registry from where Keelson runs, to pull images, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/acr/user-guide/scan-container-images)
 
 The image runs with packages that have known critical or high vulnerabilities, and fixed versions exist. Each rebuild that doesn't pick them up leaves a known way in for longer.
 
@@ -3659,7 +3659,7 @@ The image runs with packages that have known critical or high vulnerabilities, a
 
 #### LIM-003: Image in use is built on an operating system or runtime past its end of life
 
-**Severity:** Medium · **Reads:** Container Registry Enterprise Edition instances, their repositories and image tags, Pulling images from Container Registry, for Trivy to scan, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/acr/user-guide/scan-container-images)
+**Severity:** Medium · **Reads:** Container Registry Enterprise Edition instances, their repositories and image tags, Pulling images from Container Registry, for Trivy to scan, Connecting to Container Registry from where Keelson runs, to pull images, Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/acr/user-guide/scan-container-images)
 
 The operating system release in the image, or the release line of the runtime it is built around (Node.js, Python, nginx…), no longer gets security fixes. Vulnerabilities found in it from now on stay open, and scanners stop reporting them for it.
 

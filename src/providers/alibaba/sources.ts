@@ -19,7 +19,7 @@ export interface AlibabaSource {
 /** Where global APIs and probes are asked: every account can call Hangzhou's endpoints, wherever its resources are. */
 export const HOME_REGION = "cn-hangzhou";
 
-type Key = keyof typeof ALIBABA_ACTIONS | "trivy" | "kev";
+type Key = keyof typeof ALIBABA_ACTIONS | "registryNetwork" | "trivy" | "kev";
 const LABELS: Record<Key, { label: string; probe?: AlibabaSource["probe"]; regional?: boolean; permission?: string }> = {
   identity: { label: "Account identity and alias", probe: (c) => c.rpc("sts", null, "GetCallerIdentity") },
   accountSecurity: {
@@ -96,6 +96,11 @@ const LABELS: Record<Key, { label: string; probe?: AlibabaSource["probe"]; regio
   imagePull: {
     label: "Pulling images from Container Registry, for Trivy to scan",
     permission: "cr:GetAuthorizationToken, cr:PullRepository",
+  },
+  registryNetwork: {
+    label: "Connecting to Container Registry from where Keelson runs, to pull images",
+    permission:
+      "A connection to each instance's registry host. An instance whose internet access is off, or admits only an allowlist, refuses others: add the address Keelson connects from to the allowlist (Container Registry console, the instance's Access Control, Internet), or run Keelson in a VPC linked to the instance",
   },
   containerGroups: {
     label: "Elastic Container Instance groups and their images (environment variables dropped)",

@@ -29,7 +29,7 @@ import {
 import { seedAccount, seedAlibaba, seedAws, seedGithub, seedInternet, seedVercel, testRepo } from "../dev/mock/accounts.ts";
 import { pacing } from "../src/providers/internet/client.ts";
 import { ALIBABA_CHECKS } from "../src/providers/alibaba/catalog.ts";
-import { isReadAction, parseCredentials, productOfHost, PRODUCTS, READ_ACTION, retry } from "../src/providers/alibaba/client.ts";
+import { AlibabaError, isReadAction, parseCredentials, productOfHost, PRODUCTS, READ_ACTION, retry } from "../src/providers/alibaba/client.ts";
 import { signAcs3, signOss4 } from "../src/providers/alibaba/sign.ts";
 import { ALIBABA_ACTIONS, ALIBABA_DATA_ACTIONS, ALIBABA_POLICY_ACTIONS, alibabaPolicy } from "../src/shared/alibaba.ts";
 import { PROVIDER } from "../src/providers/index.ts";
@@ -250,6 +250,12 @@ describe("Alibaba Cloud scan against the mocked API", () => {
     // The new reads are on Keelson's policy, so the scan sends them and nothing it reads goes missing.
     const coverage = snapshotOf(repo).coverage;
     for (const key of ["securityPreference", "lbAccess", "redis", "mongodb"]) assert.ok(coverage.find((c) => c.key === key)?.ok, key);
+  });
+
+  test("a product's answer that the region isn't valid for it means it isn't offered there, not a gap", () => {
+    // Elastic Container Instance in cn-fuzhou, on a real account.
+    assert.ok(new AlibabaError(400, "InvalidParameter", "The specified parameter RegionId:cn-fuzhou is not valid").noEndpoint);
+    assert.ok(!new AlibabaError(400, "InvalidParameter", "The specified parameter PageSize:500 is not valid").noEndpoint);
   });
 
   test("a region where Function Compute isn't offered (its endpoint answers 503) is empty, not a gap", async () => {

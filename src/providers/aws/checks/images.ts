@@ -12,7 +12,7 @@ import { GLOBAL } from "../types.ts";
 
 const META = imageCheckMeta<"AIM", AwsSourceKey>(
   "AIM",
-  { images: ["ecr", "ecrImages", "imagePull", "trivy"], kev: ["kev"] },
+  { images: ["ecr", "ecrImages", "imagePull", "registryNetwork", "trivy"], kev: ["kev"] },
   {
     scanning: "https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-scanning.html",
     secrets: "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/specifying-sensitive-data.html",

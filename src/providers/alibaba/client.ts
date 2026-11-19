@@ -98,9 +98,11 @@ const NOT_OPENED =
 /**
  * The same, said only in the message. In local regions (cn-fuzhou, cn-nanjing, cn-wuhan-lr) the ALB and NLB endpoints
  * resolve to a shared gateway that answers 403 "The specified region of  is not authorized." for a product that isn't
- * offered there; a missing permission names the action or resource instead.
+ * offered there; a missing permission names the action or resource instead. Elastic Container Instance answers 400 "The
+ * specified parameter RegionId:cn-fuzhou is not valid" in a region it isn't offered in (seen on a real account, 2026-11-19).
  */
-const NOT_OFFERED = /specified region (of .*)?is not (authorized|supported)|not (supported|available) in (this|the specified) region/i;
+const NOT_OFFERED =
+  /specified region (of .*)?is not (authorized|supported)|not (supported|available) in (this|the specified) region|specified parameter RegionId:\s*[a-z0-9-]+ is not valid/i;
 
 export class AlibabaError extends Error {
   status: number;

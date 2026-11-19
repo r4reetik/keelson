@@ -12,7 +12,7 @@ import { GLOBAL } from "../types.ts";
 
 const META = imageCheckMeta<"LIM", AlibabaSourceKey>(
   "LIM",
-  { images: ["registries", "imagePull", "trivy"], kev: ["kev"] },
+  { images: ["registries", "imagePull", "registryNetwork", "trivy"], kev: ["kev"] },
   {
     scanning: "https://www.alibabacloud.com/help/en/acr/user-guide/scan-container-images",
     secrets: "https://www.alibabacloud.com/help/en/acr/user-guide/scan-container-images",

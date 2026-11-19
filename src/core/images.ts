@@ -112,6 +112,8 @@ export interface ImageTarget extends Omit<ImageEntry, "summary" | "error" | "key
   login: (() => Promise<RegistryLogin | null>) | null;
   /** Set instead of scanning: why Keelson can't pull it (a private registry no connected account holds). */
   unreadable?: string;
+  /** What the registry's own settings say about reaching it, added to the error when its host can't be reached. */
+  reach?: string | null;
 }
 
 /** Where an image a workload names is kept, from the scanning account's side. */
@@ -155,6 +157,8 @@ export function pickImages(o: {
   workloads: WorkloadLink[];
   ownWorkloads: WorkloadLink[];
   login: (image: RegistryImage) => (() => Promise<RegistryLogin | null>) | null;
+  /** What the registry's settings say about who can reach it (an allowlist, no internet access); null when nothing. */
+  reach?: (image: RegistryImage) => string | null;
   foreign: (ref: ImageRef) => Foreign;
   now: number;
 }): ImageTarget[] {
@@ -185,7 +189,7 @@ export function pickImages(o: {
     ].filter((x): x is string => !!x);
     if (!why.length) continue;
     const priority = use === "internet" ? 120 : use === "running" ? 100 : use === "pulled" ? 60 : 40;
-    const t: ImageTarget = { ...img, own: true, why, priority, latest: newest.get(imageName(img)) === img, login: o.login(img) };
+    const t: ImageTarget = { ...img, own: true, why, priority, latest: newest.get(imageName(img)) === img, login: o.login(img), reach: o.reach?.(img) ?? null };
     out.set(imageCacheKey(t), t);
   }
   for (const w of o.ownWorkloads)
@@ -227,7 +231,8 @@ export function pickImages(o: {
  */
 export const readInScan = (t: Pick<ImageTarget, "priority" | "latest">): boolean => t.priority >= 100 || t.latest;
 
-export type ImageSource = "trivy" | "kev" | "pull";
+/** `network`: a registry's host couldn't be reached from where Keelson runs, which no permission fixes. */
+export type ImageSource = "trivy" | "kev" | "pull" | "network";
 
 /**
  * What the checks read of a scanned image: where it says it was built, the credentials in it, and the vulnerabilities a
@@ -327,9 +332,15 @@ export async function scanImages(
     return asked;
   };
 
+  // A registry host that couldn't be reached isn't tried again for its other images: each try is minutes of Trivy's
+  // retries, and a registry behind an allowlist would otherwise take a scan's whole time and leave nothing read.
+  const unreachable = new Map<string, string>();
+
   /** Pulls one image and reads it, and keeps Trivy's bill of materials for it. `skip`: what the reference names isn't an image. */
   const read = async (t: ImageTarget, key: string, at: number): Promise<{ scan?: ImageScan; skip?: boolean; error?: string }> => {
     const sbomKey = sbomCacheKey(key);
+    const away = unreachable.get(t.registry);
+    if (away) return { error: away };
     try {
       const auth = await loginFor(t.login);
       const ref = `${imageName(t)}${t.digest ? `@${t.digest}` : `:${t.tags[0] ?? "latest"}`}`;
@@ -347,6 +358,7 @@ export async function scanImages(
       const doc = parseReport(text);
       const scan = reduceReport(doc, t, tool.version, at, platform, tool.dbUpdated);
       note("pull", true);
+      note("network", true);
       // Trivy's own list of what it read, kept so later scans match it against a newer database without pulling.
       // Without one the image is read again next time, as before.
       try {
@@ -360,6 +372,12 @@ export async function scanImages(
       if (te.notImage) {
         o.cache.put(key, { format: IMAGE_FORMAT, skip: "not an image" });
         return { skip: true };
+      }
+      if (te.unreachable) {
+        const message = `${te.message}${t.reach ? ` ${t.reach}` : ""}`.slice(0, 480);
+        unreachable.set(t.registry, message);
+        note("network", false, new Error(message));
+        return { error: message };
       }
       // A registry that refuses a login the account handed out is a missing permission. An image that's gone, or
       // one Trivy can't read, is that image's own: only a failure of the tool itself is a gap.
@@ -397,7 +415,7 @@ export async function scanImages(
   let done = 0;
   let ran = false;
   for (const t of targets) {
-    const { priority: _p, latest: _l, login: _login, unreadable, ...entry } = t;
+    const { priority: _p, latest: _l, login: _login, reach: _reach, unreadable, ...entry } = t;
     const key = imageCacheKey(t);
     const cached = o.cache.get<ImageScan & { skip?: string }>(key);
     // What a reference named last time wasn't an image (a build attestation): it isn't asked for again, or listed.

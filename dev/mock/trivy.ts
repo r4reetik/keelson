@@ -26,6 +26,8 @@ export interface MockTrivyOptions {
   armOnly?: RegExp[];
   /** Images (regex on the reference) the registry refuses to hand over. */
   deny?: RegExp[];
+  /** Images (regex on the reference) whose registry host Keelson can't connect to, as behind an allowlist. */
+  unreachable?: RegExp[];
   /** Print something that isn't a report. */
   garbled?: boolean;
   /** CISA's list can't be read. */
@@ -435,6 +437,9 @@ export function installMockTrivy(o: MockTrivyOptions = {}): () => void {
       const denied = () =>
         Object.assign(new TrivyError("The registry answered DENIED: requested access to the resource is denied"), { denied: true, image: true });
       if (current.deny?.some((re) => re.test(ref))) throw denied();
+      // Go's own words when a connection times out, after Trivy's retries.
+      if (current.unreachable?.some((re) => re.test(ref)))
+        throw trivyFailure(`Trivy failed: * remote error: Get "https://${ref.split("/")[0]}/v2/": dial tcp 192.0.2.10:443: connect: operation timed out`);
       // As the real one fails on them (src/core/trivy.ts tells them apart by Trivy's own words).
       if (current.notImage?.some((re) => re.test(ref)) || ref.includes(MOCK_DIGEST.webAttestation))
         throw trivyFailure('Trivy failed: * remote error: unsupported artifact type "application/vnd.docker.attestation.manifest.v1+json" for image');

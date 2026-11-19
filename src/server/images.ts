@@ -109,7 +109,7 @@ interface View {
 }
 
 /** The sources image scanning depends on, on any platform: their gaps are shown on the page. */
-const SOURCES = new Set(["ecr", "ecrImages", "ecs", "imagePull", "trivy", "kev", "packages", "registries", "containerGroups", "manifests"]);
+const SOURCES = new Set(["ecr", "ecrImages", "ecs", "imagePull", "registryNetwork", "trivy", "kev", "packages", "registries", "containerGroups", "manifests"]);
 
 const views = new Map<string, View>();
 const host = (s: string) => s.toLowerCase().replace(/\.$/, "");

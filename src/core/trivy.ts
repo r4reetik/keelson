@@ -46,6 +46,11 @@ export class TrivyError extends Error {
   notImage = false;
   /** The failure is about this image or its registry, not about Trivy: other images can still be scanned. */
   image = false;
+  /**
+   * The registry's host couldn't be reached from where Keelson runs (no connection, or its name doesn't resolve): none
+   * of its images can be pulled, and each try costs minutes of Trivy's retries.
+   */
+  unreachable: string | null = null;
 }
 
 /** A registry login for one scan. It reaches Trivy through its environment and is never stored or logged. */
@@ -109,7 +114,26 @@ export function trivyFailure(message: string): TrivyError {
   e.noPlatform = /no child with platform/i.test(flat);
   if (e.notImage) e.message = "This isn't an image: it is a build attestation kept beside one.";
   else if (e.noPlatform) e.message = "The image has no build for the platform Keelson asked for.";
-  e.image = !!registry || e.denied || e.missing || e.notImage || e.noPlatform || /remote error|unable to find the specified image/i.test(flat);
+  // Learned on a real Container Registry instance whose internet access had an allowlist: Go's
+  // 'Get "https://<host>/v2/": dial tcp <address>:443: connect: operation timed out', after minutes of retries.
+  const net =
+    !registry &&
+    /dial tcp \S+ (?:connect: )?(?:operation timed out|i\/o timeout|connection refused|no route to host|network is unreachable)|dial tcp: lookup ([^\s:]+?)(?: on \S+)?: no such host|TLS handshake timeout/i.exec(
+      flat,
+    );
+  if (net) {
+    const host = /(?:Get|Head) "https?:\/\/([^/"]+)/.exec(flat)?.[1] ?? net[1] ?? "the registry";
+    const why = net[1]
+      ? "its name doesn't resolve here"
+      : /refused/i.test(net[0])
+        ? "the connection was refused"
+        : /unreachable|no route/i.test(net[0])
+          ? "there is no route to it"
+          : "the connection timed out";
+    e.unreachable = host;
+    e.message = `Keelson couldn't connect to ${host} from where it runs: ${why}.`;
+  }
+  e.image = !!registry || e.denied || e.missing || e.notImage || e.noPlatform || !!net || /remote error|unable to find the specified image/i.test(flat);
   return e;
 }
 

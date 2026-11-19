@@ -178,6 +178,17 @@ test("Trivy's failures are told apart by the registry's own answer", () => {
   assert.equal(denied.message, "The registry answered DENIED: requested access to the resource is denied");
   assert.ok(trivyFailure("GET https://index.docker.io/v2/library/alpine/manifests/x: MANIFEST_UNKNOWN: manifest unknown").missing);
   assert.ok(!trivyFailure("Trivy didn't finish within 15 minutes.").denied);
+  // As a real pull failed from behind a Container Registry allowlist, and as a VPC host fails outside its VPC.
+  const away = trivyFailure(
+    'Trivy failed: * remote error: Get "https://mock-registry.cn-hangzhou.cr.aliyuncs.com/v2/": dial tcp 192.0.2.10:443: connect: operation timed out',
+  );
+  assert.equal(away.unreachable, "mock-registry.cn-hangzhou.cr.aliyuncs.com");
+  assert.equal(away.message, "Keelson couldn't connect to mock-registry.cn-hangzhou.cr.aliyuncs.com from where it runs: the connection timed out.");
+  assert.ok(away.image && !away.denied, "it is the registry's, not a missing permission or Trivy's failure");
+  const lookup = trivyFailure("Trivy failed: * remote error: dial tcp: lookup mock-registry-vpc.cn-hangzhou.cr.aliyuncs.com on 192.0.2.53:53: no such host");
+  assert.equal(lookup.unreachable, "mock-registry-vpc.cn-hangzhou.cr.aliyuncs.com");
+  assert.match(lookup.message, /its name doesn't resolve here/);
+  assert.equal(denied.unreachable, null);
   assert.throws(() => parseReport("1 image scanned\n"), /wasn't the image report/, "anything but a report is the tool's failure, never an empty result");
 });
 
@@ -597,6 +608,63 @@ test("a scan asks for an arm64-only image by its own platform, and forgets what 
   }
 });
 
+test("a registry host Keelson can't connect to is tried once a scan, and each of its images says why", async () => {
+  const { installMockTrivy } = await import("../dev/mock/trivy.ts");
+  const asked: string[] = [];
+  const restore = installMockTrivy({ unreachable: [/^mock-registry\./], onImage: (ref) => asked.push(ref) });
+  try {
+    const store = new Map<string, unknown>();
+    const cache = {
+      get: <T>(k: string) => (store.get(k) as T) ?? null,
+      put: (k: string, v: unknown) => void store.set(k, v),
+      keys: (prefix: string) => [...store.keys()].filter((k) => k.startsWith(prefix)),
+      delete: (k: string) => void store.delete(k),
+    };
+    const target = (registry: string, repository: string): ImageTarget => ({
+      registry,
+      repository,
+      region: null,
+      digest: null,
+      tags: ["1"],
+      pushedAt: null,
+      pulledAt: null,
+      public: true,
+      own: true,
+      why: ["newest in its repository"],
+      priority: 40,
+      latest: true,
+      login: null,
+      reach: "Its internet access admits only the addresses on its allowlist.",
+    });
+    const notes: string[] = [];
+    const out = await scanImages(
+      [
+        target("mock-registry.cn-hangzhou.cr.aliyuncs.com", "shop/a"),
+        target("mock-registry.cn-hangzhou.cr.aliyuncs.com", "shop/b"),
+        target("docker.io", "mock/web"),
+      ],
+      {
+        repositories: 2,
+        cache,
+        toolDir: null,
+        onProgress: () => {},
+        note: (source, ok, err) => notes.push(`${source}:${ok}${err ? ` ${(err as Error).message}` : ""}`),
+      },
+    );
+    assert.deepEqual(asked, ["mock-registry.cn-hangzhou.cr.aliyuncs.com/shop/a:1", "docker.io/mock/web:1"], "the second image of that host isn't tried");
+    const [a, b] = out.snapshot.images;
+    assert.equal(a.error, b.error);
+    assert.equal(
+      a.error,
+      "Keelson couldn't connect to mock-registry.cn-hangzhou.cr.aliyuncs.com from where it runs: the connection timed out. Its internet access admits only the addresses on its allowlist.",
+    );
+    assert.ok(notes.includes(`network:false ${a.error}`), "a gap of its own, not a missing permission");
+    assert.ok(!notes.includes("pull:false") && !notes.includes("trivy:false"));
+  } finally {
+    restore();
+  }
+});
+
 test("an image is pulled once: later scans match its stored packages against the database, and only a tag is asked for again", async () => {
   const { installMockTrivy } = await import("../dev/mock/trivy.ts");
   const pulled: string[] = [];
@@ -989,6 +1057,25 @@ describe("image scans against the mocked platforms", () => {
       const web = snap.images!.images.find((i) => i.repository === "web")!;
       assert.match(web.error ?? "", /DENIED/);
       assert.ok(snap.images!.images.find((i) => i.registry === "docker.io")!.summary, "the public sidecar was still scanned");
+    } finally {
+      t.cleanup();
+      restore();
+      install();
+    }
+  });
+
+  test("a Container Registry instance Keelson can't connect to is a gap that says the instance has an allowlist", async () => {
+    restore();
+    install({ unreachable: [/\.cr\.aliyuncs\.com/] });
+    const t = await entity();
+    try {
+      const snap = t.repo.scans.latest(MOCK_ALIBABA_ACCOUNT)!.snap;
+      const gap = snap.coverage!.find((c) => c.key === "registryNetwork")!;
+      assert.equal(gap.ok, false);
+      assert.match(gap.message ?? "", /couldn't connect to mock-registry-registry\.cn-hangzhou\.cr\.aliyuncs\.com.*admits only the addresses on its allowlist/);
+      assert.match(gap.permission ?? "", /Access Control/, "it says what to change, not which permission is missing");
+      assert.ok(gap.skippedChecks!.includes("LIM-002"), "the image checks are skipped, never passed");
+      assert.ok(snap.coverage!.find((c) => c.key === "imagePull")?.ok !== false, "the login and pull permissions aren't blamed");
     } finally {
       t.cleanup();
       restore();

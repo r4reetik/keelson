@@ -35,6 +35,11 @@ export interface AlibabaRegistry {
   region: string;
   /** The host Keelson pulls from: the public one when the instance has it on, else the VPC one. */
   host: string;
+  /**
+   * Who the instance lets in from the internet: anyone, only the addresses on its allowlist, or nobody (its VPCs only).
+   * The allowlist's entries aren't kept.
+   */
+  internet: "open" | "allowlist" | "off";
   /** Every host that serves the instance, lowercase. */
   hosts: string[];
   repositories: number;
@@ -96,9 +101,14 @@ export async function readRegistries(client: AlibabaClient, regions: string[]): 
           list(e?.Domains)
             .map((d) => String(d?.Domain ?? "").toLowerCase())
             .filter(Boolean);
-        const open = endpoints.filter((e) => e?.Enable === true && /internet/i.test(String(e?.EndpointType)));
+        const on = endpoints.filter((e) => e?.Enable === true);
+        const open = on.filter((e) => /internet/i.test(String(e?.EndpointType)));
         const hosts = [...new Set(endpoints.flatMap(hostsOf))];
-        const host = open.flatMap(hostsOf)[0] ?? hosts[0];
+        // Without internet access, the VPC host: it answers where Keelson runs in a VPC linked to the instance.
+        const host = open.flatMap(hostsOf)[0] ?? on.flatMap(hostsOf)[0] ?? hosts[0];
+        // An allowlist with 0.0.0.0/0 on it admits anyone.
+        const entries = open.flatMap((e) => list(e?.AclEntries).map((a) => String(a?.Entry ?? "").trim()));
+        const internet = !open.length ? "off" : open.some((e) => e?.AclEnable !== true) || entries.includes("0.0.0.0/0") ? "open" : "allowlist";
         if (!host) continue;
         const repos = await pages(
           (n) => cr("ListRepository", { InstanceId: id, RepoStatus: "NORMAL", PageNo: String(n), PageSize: "100" }),
@@ -131,7 +141,7 @@ export async function readRegistries(client: AlibabaClient, regions: string[]): 
           }
           images.push(...byDigest.values());
         }
-        found.push({ id, name: String(inst.InstanceName ?? id), region, host, hosts, repositories: repos.length, images });
+        found.push({ id, name: String(inst.InstanceName ?? id), region, host, hosts, internet, repositories: repos.length, images });
       }
       return found;
     });
@@ -235,6 +245,13 @@ export function workloadLinks(inv: AlibabaInventory): WorkloadLink[] | null {
   return [...out.values()];
 }
 
+/** Why an instance may refuse Keelson's connection, said when its host couldn't be reached (the remedy is the source's). */
+const REACH: Record<AlibabaRegistry["internet"], string | null> = {
+  open: null,
+  allowlist: "The instance's internet access admits only the addresses on its allowlist.",
+  off: "The instance has no internet access, only access from its VPCs.",
+};
+
 /** Whose registry an image is in, as this account sees it. */
 function foreignFor(registries: AlibabaRegistry[], related: Partial<Related>): (ref: ImageRef) => Foreign {
   const own = new Set(registries.flatMap((r) => r.hosts.map(canonicalRegistry)));
@@ -282,6 +299,7 @@ export async function scanAlibabaImages(
       const r = all.find((x) => canonicalRegistry(x.host) === img.registry && x.region === img.region);
       return r ? loginFor(r) : null;
     },
+    reach: (img) => REACH[all.find((x) => canonicalRegistry(x.host) === img.registry && x.region === img.region)?.internet ?? "open"],
     foreign: foreignFor(all, o.related),
     now: inv.now,
   });
@@ -290,7 +308,7 @@ export async function scanAlibabaImages(
     cache: o.cache,
     toolDir: o.toolDir,
     onProgress: o.onProgress,
-    note: (source, ok, err) => client.note(source === "pull" ? "imagePull" : source, ok, err),
+    note: (source, ok, err) => client.note(source === "pull" ? "imagePull" : source === "network" ? "registryNetwork" : source, ok, err),
     now: inv.now,
     previous: o.previous,
   });
