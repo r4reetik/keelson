@@ -51,7 +51,7 @@ works from all of it. See the [roadmap](#roadmap).
 ```bash
 docker run -d --name keelson -p 127.0.0.1:4317:4317 \
   -v keelson-data:/data \
-  ghcr.io/r4reetik/keelson:0.16
+  ghcr.io/r4reetik/keelson:0.17
 docker logs keelson
 ```
 
@@ -402,7 +402,7 @@ Copy the key from your [Shodan account](https://account.shodan.io/) when you tur
 ```bash
 docker run -d --name keelson -p 4317:4317 \
   -v keelson-data:/data \
-  ghcr.io/r4reetik/keelson:0.16
+  ghcr.io/r4reetik/keelson:0.17
 ```
 
 Open it and create the admin account with the setup code from `docker logs keelson`. Until the admin exists,
@@ -442,7 +442,7 @@ reset anyone's password from the Users page; if nobody can sign in as an admin, 
 Keelson tells you when a new version is out (in the sidebar and under **Settings → Updates**), with the
 exact upgrade command and a warning when it has breaking changes. Releases follow semantic versioning in
 **release lines** (`0.4`, `0.5`…; `1`, `2`… from 1.0): updates within a line never break anything, so it's
-safe to take them automatically. The Docker tag `:0.16` above does exactly that. The database is backed up
+safe to take them automatically. The Docker tag `:0.17` above does exactly that. The database is backed up
 before every upgrade that changes it.
 [docs/upgrading.md](docs/upgrading.md) has automatic updates, release candidates and rolling back.
 
