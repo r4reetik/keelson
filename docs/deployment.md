@@ -11,7 +11,7 @@ Settings: your own hostnames that point at cloud providers (the takeover check, 
 ```bash
 docker run -d --name keelson -p 127.0.0.1:4317:4317 \
   -v keelson-data:/data \
-  ghcr.io/r4reetik/keelson:0.17
+  ghcr.io/r4reetik/keelson:0.18
 docker logs keelson
 ```
 
@@ -29,7 +29,7 @@ stay yours: `--user "$(id -u):$(id -g)" -v ~/.keelson:/data`.
 services:
   keelson:
     # The release line: compatible updates only. See upgrading.md.
-    image: ghcr.io/r4reetik/keelson:0.17
+    image: ghcr.io/r4reetik/keelson:0.18
     restart: unless-stopped
     ports:
       - "4317:4317"
