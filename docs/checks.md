@@ -20,7 +20,7 @@ of those accounts, and are skipped when the entity has no scanned account on the
 | Cloudflare | [Zero Trust](#cloudflare-zero-trust) | 22 |
 | Cloudflare | [TLS & HTTPS](#cloudflare-tls--https) | 15 |
 | Cloudflare | [WAF & bots](#cloudflare-waf--bots) | 23 |
-| Cloudflare | [DNS](#cloudflare-dns) | 16 |
+| Cloudflare | [DNS](#cloudflare-dns) | 17 |
 | Cloudflare | [Email](#cloudflare-email) | 11 |
 | Cloudflare | [Platform](#cloudflare-platform) | 6 |
 | Cloudflare | [Monitoring](#cloudflare-monitoring) | 4 |
@@ -36,21 +36,21 @@ of those accounts, and are skipped when the entity has no scanned account on the
 | Vercel | [Monitoring](#vercel-monitoring) | 4 |
 | Vercel | [Change risk](#vercel-change-risk) | 1 |
 | AWS | [Attack surface](#aws-attack-surface) | 28 |
-| AWS | [Identity & access](#aws-identity--access) | 19 |
+| AWS | [Identity & access](#aws-identity--access) | 22 |
 | AWS | [Secrets](#aws-secrets) | 11 |
 | AWS | [TLS & HTTPS](#aws-tls--https) | 11 |
 | AWS | [WAF & bots](#aws-waf--bots) | 4 |
-| AWS | [DNS](#aws-dns) | 5 |
+| AWS | [DNS](#aws-dns) | 6 |
 | AWS | [Platform](#aws-platform) | 15 |
 | AWS | [Supply chain](#aws-supply-chain) | 3 |
 | AWS | [Monitoring](#aws-monitoring) | 8 |
 | AWS | [Change risk](#aws-change-risk) | 2 |
 | Alibaba Cloud | [Attack surface](#alibaba-cloud-attack-surface) | 13 |
-| Alibaba Cloud | [Identity & access](#alibaba-cloud-identity--access) | 20 |
+| Alibaba Cloud | [Identity & access](#alibaba-cloud-identity--access) | 23 |
 | Alibaba Cloud | [Secrets](#alibaba-cloud-secrets) | 6 |
 | Alibaba Cloud | [TLS & HTTPS](#alibaba-cloud-tls--https) | 4 |
 | Alibaba Cloud | [WAF & bots](#alibaba-cloud-waf--bots) | 1 |
-| Alibaba Cloud | [DNS](#alibaba-cloud-dns) | 5 |
+| Alibaba Cloud | [DNS](#alibaba-cloud-dns) | 6 |
 | Alibaba Cloud | [Platform](#alibaba-cloud-platform) | 4 |
 | Alibaba Cloud | [Supply chain](#alibaba-cloud-supply-chain) | 3 |
 | Alibaba Cloud | [Monitoring](#alibaba-cloud-monitoring) | 3 |
@@ -62,6 +62,16 @@ of those accounts, and are skipped when the entity has no scanned account on the
 | GitHub | [Platform](#github-platform) | 4 |
 | GitHub | [Supply chain](#github-supply-chain) | 10 |
 | GitHub | [Change risk](#github-change-risk) | 5 |
+| GitLab | [Identity & access](#gitlab-identity--access) | 4 |
+| GitLab | [Secrets](#gitlab-secrets) | 3 |
+| GitLab | [TLS & HTTPS](#gitlab-tls--https) | 1 |
+| GitLab | [Supply chain](#gitlab-supply-chain) | 9 |
+| GitLab | [Change risk](#gitlab-change-risk) | 4 |
+| Gitea | [Attack surface](#gitea-attack-surface) | 2 |
+| Gitea | [Identity & access](#gitea-identity--access) | 5 |
+| Gitea | [Secrets](#gitea-secrets) | 1 |
+| Gitea | [Supply chain](#gitea-supply-chain) | 6 |
+| Gitea | [Change risk](#gitea-change-risk) | 4 |
 | Internet | [Attack surface](#internet-attack-surface) | 8 |
 | Internet | [TLS & HTTPS](#internet-tls--https) | 1 |
 | Internet | [DNS](#internet-dns) | 3 |
@@ -1145,6 +1155,17 @@ The record sends visitors to GitHub Pages, yet none of the entity's GitHub organ
 2. If it should be live, set the hostname as the custom domain in the repository's Settings → Pages.
 3. Verify the domain under the organization's Settings → Pages, so nobody else can use it.
 4. If the site is in a GitHub organization that isn't in Keelson, add it to this entity.
+
+#### XP-028: DNS record points at GitLab Pages, but no Pages site in the entity uses it
+
+**Severity:** High · **Attack path** · **Spans providers** · **Reads:** DNS records · [GitLab docs](https://docs.gitlab.com/user/project/pages/custom_domains_ssl_tls_certification/)
+
+The record sends visitors to GitLab Pages, yet none of the entity's GitLab groups has a Pages site with this hostname. GitLab asks for a verification record before it serves a custom domain, so a stranger needs that record too; but a record left from a site that was deleted, with its verification record still in DNS, lets whoever recreates the site's address serve content under your name.
+
+**How to fix**
+
+1. If the site moved or was retired, delete the DNS record in Cloudflare, and the _gitlab-pages-verification-code TXT record beside it.
+2. If it should be live, add the hostname under the project's Deploy → Pages → Domains and verify it.
 
 ### Cloudflare: Email
 
@@ -2402,6 +2423,40 @@ The role trusts GitHub Actions from a repository in the entity, either from any 
 1. Limit the trust policy's subject to the protected default branch (repo:org/repo:ref:refs/heads/main) or, better, to a GitHub environment with required reviewers (repo:org/repo:environment:production).
 2. Require a reviewed pull request on that branch in GitHub.
 
+#### AID-016: GitLab CI in any project can assume this IAM role
+
+**Severity:** Critical · **Attack path** · **Reads:** IAM roles, groups and policies · [AWS docs](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-idp_oidc.html)
+
+The role trusts GitLab's OIDC provider without limiting the token's subject to your projects. A pipeline in anyone's project on that GitLab can get a token GitLab signs and assume the role. On gitlab.com, that is anyone with an account.
+
+**How to fix**
+
+Open the role in IAM → Trust relationships and add a condition on the provider's sub claim (gitlab.com:sub) naming your group, project and branch, for example project_path:your-group/your-project:ref_type:branch:ref:main.
+
+#### XP-029: IAM role trusts GitLab projects outside the entity
+
+**Severity:** High · **Spans providers** · **Reads:** IAM roles, groups and policies · [GitLab docs](https://docs.gitlab.com/ci/cloud_services/aws/)
+
+GitLab CI in a group that isn't one of the entity's can assume this role. That group's members, and anyone who gets write access to its projects, get the role's AWS access.
+
+**How to fix**
+
+1. If the group is yours, add it to this entity in Keelson.
+2. If it belongs to a vendor, confirm they still need the role and limit it to the project and branch they use.
+3. Otherwise remove it from the role's trust policy.
+
+#### XP-030: Anyone who can push to the GitLab project can assume this IAM role
+
+**Severity:** High · **Attack path** · **Spans providers** · **Reads:** IAM roles, groups and policies · [GitLab docs](https://docs.gitlab.com/ci/cloud_services/aws/)
+
+The role trusts GitLab CI from a project in the entity, either from any branch, or from a default branch developers can push to without a merge request. Anyone with that access, or a stolen token or deploy key that has it, can push a pipeline that assumes the role.
+
+**How to fix**
+
+1. Limit the trust policy's subject to the protected default branch (project_path:group/project:ref_type:branch:ref:main).
+2. Protect that branch so nobody pushes to it without a merge request, with a required approval.
+3. For production, use a protected environment and a role only its jobs can assume.
+
 ### AWS: Secrets
 
 #### AEC-008: Credential in an instance's start-up script
@@ -2745,6 +2800,17 @@ The record names an OSS bucket, load balancer or CDN domain that none of the ent
 1. If the site moved or was retired, delete the record in Route
 2. If it should be live, recreate the resource or point the record at the current one.
 3. If the resource belongs to an Alibaba Cloud account that isn't in Keelson, add that account to this entity.
+
+#### XP-034: Route 53 record points at GitLab Pages, but no Pages site in the entity uses it
+
+**Severity:** High · **Attack path** · **Spans providers** · **Reads:** Route 53 hosted zones and records · [GitLab docs](https://docs.gitlab.com/user/project/pages/custom_domains_ssl_tls_certification/)
+
+The record sends visitors to GitLab Pages, yet none of the entity's GitLab groups has a Pages site with this hostname. GitLab asks for a verification record before it serves a custom domain; a record left from a deleted site, with its verification record still in DNS, lets whoever recreates the site's address serve content under your name.
+
+**How to fix**
+
+1. If the site moved or was retired, delete the record in Route 53, and the _gitlab-pages-verification-code TXT record beside it.
+2. If it should be live, add the hostname under the project's Deploy → Pages → Domains and verify it.
 
 ### AWS: Platform
 
@@ -3399,6 +3465,40 @@ Password-free access is on: any client in the VPC whose address the whitelist ad
 
 In the instance's console → Instance Information (Tair) or Database Connections (MongoDB), turn password-free access off and give each application its own account with only the permissions it needs. Narrow the whitelist to the applications' addresses.
 
+#### LID-016: GitLab CI in any project can assume this RAM role
+
+**Severity:** Critical · **Attack path** · **Reads:** RAM roles and their trust policies · [Alibaba Cloud docs](https://www.alibabacloud.com/help/en/ram/user-guide/overview-of-oidc-based-sso)
+
+The role trusts GitLab's OIDC provider without limiting the token's subject to your projects. A pipeline in anyone's project on that GitLab can get a token GitLab signs and assume the role. On gitlab.com, that is anyone with an account.
+
+**How to fix**
+
+Open the role in the RAM console → Trust Policy and add a condition on oidc:sub naming your group, project and branch, for example project_path:your-group/your-project:ref_type:branch:ref:main.
+
+#### XP-031: RAM role trusts GitLab projects outside the entity
+
+**Severity:** High · **Spans providers** · **Reads:** RAM roles and their trust policies · [GitLab docs](https://docs.gitlab.com/ci/secrets/id_token_authentication/)
+
+GitLab CI in a group that isn't one of the entity's can assume this role. That group's members, and anyone who gets write access to its projects, get the role's Alibaba Cloud access.
+
+**How to fix**
+
+1. If the group is yours, add it to this entity in Keelson.
+2. If it belongs to a vendor, confirm they still need the role and limit it to the project and branch they use.
+3. Otherwise remove it from the role's trust policy.
+
+#### XP-032: Anyone who can push to the GitLab project can assume this RAM role
+
+**Severity:** High · **Attack path** · **Spans providers** · **Reads:** RAM roles and their trust policies · [GitLab docs](https://docs.gitlab.com/ci/secrets/id_token_authentication/)
+
+The role trusts GitLab CI from a project in the entity, either from any branch, or from a default branch developers can push to without a merge request. Anyone with that access, or a stolen token or deploy key that has it, can push a pipeline that assumes the role.
+
+**How to fix**
+
+1. Limit the trust policy's oidc:sub to the protected default branch (project_path:group/project:ref_type:branch:ref:main).
+2. Protect that branch so nobody pushes to it without a merge request, with a required approval.
+3. For production, use a protected environment and a role only its jobs can assume.
+
 ### Alibaba Cloud: Secrets
 
 #### LEC-004: Credential in an instance's start-up script
@@ -3587,6 +3687,17 @@ The record sends visitors to GitHub Pages, yet none of the entity's GitHub organ
 2. If it should be live, set the custom domain on the right repository's Pages settings.
 3. Verify the domain in your GitHub organization's settings so no one else can use it.
 4. If the site belongs to an organization that isn't in Keelson, add it to this entity.
+
+#### XP-033: Alibaba Cloud DNS record points at GitLab Pages, but no Pages site in the entity uses it
+
+**Severity:** High · **Attack path** · **Spans providers** · **Reads:** Alibaba Cloud DNS domains and records · [GitLab docs](https://docs.gitlab.com/user/project/pages/custom_domains_ssl_tls_certification/)
+
+The record sends visitors to GitLab Pages, yet none of the entity's GitLab groups has a Pages site with this hostname. GitLab asks for a verification record before it serves a custom domain; a record left from a deleted site, with its verification record still in DNS, lets whoever recreates the site's address serve content under your name.
+
+**How to fix**
+
+1. If the site moved or was retired, delete the record in Alibaba Cloud DNS, and the _gitlab-pages-verification-code TXT record beside it.
+2. If it should be live, add the hostname under the project's Deploy → Pages → Domains and verify it.
 
 ### Alibaba Cloud: Platform
 
@@ -4144,6 +4255,466 @@ Anyone with write access, or a stolen token that has it, can replace a published
 **How to fix**
 
 In the repository's Settings, under Releases, select Enable release immutability. To enforce it everywhere, under the organization's Settings → Repository → General → Releases, choose All repositories. Only releases published afterwards are immutable, so publish a new one.
+
+## GitLab
+
+### GitLab: Identity & access
+
+#### GLG-001: Group doesn't require two-factor authentication
+
+**Severity:** High · **Reads:** Group settings · [GitLab docs](https://docs.gitlab.com/security/two_factor_authentication/)
+
+Anyone in the group can sign in with a password alone. A reused or phished password is then enough to read and change every project that person can reach, and for an owner that is all of them.
+
+**How to fix**
+
+1. Open the group's Settings → General → Permissions and group features.
+2. Turn on All users in this group must set up two-factor authentication, with a short grace period.
+3. On your own instance, an administrator can require it for everyone under Admin → Settings → General → Sign-in restrictions.
+
+#### GLG-002: Many people own the group
+
+**Severity:** Low · **Reads:** Group members and their roles · [GitLab docs](https://docs.gitlab.com/user/permissions/)
+
+An owner can change every project, every member's role and every setting, and delete the group. Each owner's password, token and laptop is a way in to all of it.
+
+**How to fix**
+
+1. Open the group's Manage → Members and filter by the Owner role.
+2. Keep the people who run the group, and lower the others to Maintainer or Developer.
+
+#### GLG-003: Projects can be shared with groups outside this one
+
+**Severity:** Low · **Reads:** Group settings · [GitLab docs](https://docs.gitlab.com/user/project/members/sharing_projects_groups/)
+
+A project's maintainer can invite another group to it, and every member of that group then has the access it was given. Nobody who reviews this group's members sees them, and they stay when a contract ends.
+
+**How to fix**
+
+1. Open the group's Settings → General → Permissions and group features.
+2. Turn on Projects in this group cannot be shared with other groups.
+3. Add outside people as members of this group instead, so their access is reviewed with everyone else's.
+
+#### GLH-003: Deploy key can push to the project
+
+**Severity:** Low · **Reads:** Deploy keys · [GitLab docs](https://docs.gitlab.com/user/project/deploy_keys/)
+
+A deploy key belongs to no person and isn't covered by two-factor authentication. One with write access lets whoever holds the private key (a build server, a backup, an old laptop) push code.
+
+**How to fix**
+
+1. Open the project's Settings → Repository → Deploy keys.
+2. If the key only fetches code, edit it and turn off Grant write permissions to this key.
+3. Remove keys nobody can name an owner for.
+
+### GitLab: Secrets
+
+#### GLH-001: Webhook delivers over plain HTTP
+
+**Severity:** Medium · **Reads:** Group webhooks (GitLab Premium and Ultimate), Project webhooks · [GitLab docs](https://docs.gitlab.com/user/project/integrations/webhooks/)
+
+Each delivery carries commit messages, branch names, people's names and email addresses, and the secret token that proves it came from GitLab. Over HTTP, anyone on the path reads all of it and can forge deliveries to whatever the webhook triggers.
+
+**How to fix**
+
+1. Open the webhook under the group's or the project's Settings → Webhooks.
+2. Change its URL to https://.
+3. Set a Secret token, and have the receiver check it.
+
+#### GLH-004: Deploy token can write and never expires
+
+**Severity:** Low · **Reads:** Deploy tokens (never their values) · [GitLab docs](https://docs.gitlab.com/user/project/deploy_tokens/)
+
+A deploy token is a username and password for the project's repository, registry or packages, held by whatever was given it. One that can write and has no expiry keeps working for as long as nobody remembers it, wherever it has been copied.
+
+**How to fix**
+
+1. Open the project's Settings → Repository → Deploy tokens.
+2. Revoke the token and create one with an expiry date and only the read scopes it needs.
+3. Where something must write, give it a date and renew it.
+
+#### GLM-004: Credential stored inside an image
+
+**Severity:** High · **Reads:** Container registry repositories and their tags, Packages, vulnerabilities and stored credentials in public container images (Aqua Trivy) · [GitLab docs](https://docs.gitlab.com/user/packages/container_registry/)
+
+Anyone who can pull the image can read the credential, from every copy of the image in every registry and cache, for as long as those exist. Deleting the file in a later layer doesn't remove it from the earlier one.
+
+**How to fix**
+
+1. Rotate the credential: treat it as leaked.
+2. Remove it from the build: pass secrets at run time (the platform's secret store) or with a build secret mount, and add the file to .dockerignore.
+3. Rebuild, deploy, and delete the old image tags.
+
+### GitLab: TLS & HTTPS
+
+#### GLH-002: Webhook doesn't verify the receiver's certificate
+
+**Severity:** Low · **Reads:** Group webhooks (GitLab Premium and Ultimate), Project webhooks · [GitLab docs](https://docs.gitlab.com/user/project/integrations/webhooks/)
+
+With SSL verification off, GitLab sends each delivery, with its secret token, to whoever answers at that address. Someone who can redirect the connection receives them all.
+
+**How to fix**
+
+In the webhook's settings (Settings → Webhooks), turn on Enable SSL verification. If the receiver uses a certificate from your own authority, an administrator can add that authority to the instance.
+
+### GitLab: Supply chain
+
+#### GLD-001: Dependency has a vulnerability attackers are exploiting
+
+**Severity:** Critical · **Attack path** · **Reads:** Manifest and lock files and CI configuration, for each project's SBOM (never the code), Software bill of materials (Anchore Syft), Known vulnerabilities in dependencies (Anchore Grype) · [GitLab docs](https://docs.gitlab.com/user/application_security/dependency_scanning/)
+
+A package this repository uses has a vulnerability in CISA's catalog of known exploited vulnerabilities: attackers are using it now, with tools that are already public. Anything built from this code that runs the package is exposed.
+
+**How to fix**
+
+1. Upgrade the package to the version the evidence names, in every part that uses it, and deploy.
+2. If it comes in through another package, upgrade that one, or override the version (npm overrides, Yarn resolutions, a Go replace or a constraint).
+3. Check what ran it before the upgrade for signs of compromise.
+
+#### GLD-002: Dependency has a critical or high vulnerability
+
+**Severity:** High · **Reads:** Manifest and lock files and CI configuration, for each project's SBOM (never the code), Software bill of materials (Anchore Syft), Known vulnerabilities in dependencies (Anchore Grype) · [GitLab docs](https://docs.gitlab.com/user/application_security/dependency_scanning/)
+
+A package this repository uses has a published vulnerability rated critical or high, or one that FIRST's EPSS rates likely to be exploited soon. How to exploit it is public, so whatever is built from this code inherits it until the package is upgraded.
+
+**How to fix**
+
+1. Upgrade the package to the version the evidence names; it fixes every listed vulnerability that has a fix.
+2. If it comes in through another package, upgrade that one, or override the version (npm overrides, Yarn resolutions, a Go replace or a constraint).
+3. If the vulnerable code can't be reached from how you use it, mark the finding as accepted with the reason.
+
+#### GLD-003: Dependency is a known malicious package
+
+**Severity:** Critical · **Attack path** · **Reads:** Manifest and lock files and CI configuration, for each project's SBOM (never the code), Software bill of materials (Anchore Syft), Known vulnerabilities in dependencies (Anchore Grype)
+
+The package is listed as malware: published to steal credentials, open a backdoor or run code when it's installed. Installing it is enough, so every developer machine and CI runner that installed this version may be compromised.
+
+**How to fix**
+
+1. Remove the package, or move to a version that isn't listed, and regenerate the lock file.
+2. Treat every machine and CI runner that installed it as compromised: rotate the credentials they held.
+3. Check how it got in: a typo in the name, or a dependency that pulled it.
+
+#### GLD-004: Pipeline includes configuration from outside the group by a ref that can be moved
+
+**Severity:** Low · **Reads:** Manifest and lock files and CI configuration, for each project's SBOM (never the code) · [GitLab docs](https://docs.gitlab.com/ci/yaml/includes/)
+
+An include is code the pipeline runs with the project's CI/CD variables and tokens. One taken from another group's project by a branch or a tag, from a component at a moving version, or from a web address, becomes whatever its owner (or whoever takes over their account) makes it next. A commit SHA can't be moved.
+
+**How to fix**
+
+1. Pin each include from outside the group to a full commit SHA (ref: <sha> for a project, @<sha> for a component).
+2. Better, copy what you need into a project of your own group and include it from there.
+3. Replace remote: includes with project: includes at a commit. GitLab's own templates and your own group's projects aren't counted.
+
+#### GLD-005: Project installs dependencies without a lock file
+
+**Severity:** Low · **Reads:** Manifest and lock files and CI configuration, for each project's SBOM (never the code)
+
+Without a lock file, or with version ranges in a requirements file, every install takes whatever version is newest at that moment. A malicious or broken release reaches your builds without anyone changing the code, and Keelson can't check those versions for vulnerabilities.
+
+**How to fix**
+
+Commit the lock file your package manager writes (package-lock.json, yarn.lock, pnpm-lock.yaml, go.sum, Gemfile.lock, composer.lock, poetry.lock, Pipfile.lock), and install from it in CI (npm ci, pip install with pinned == versions or a lock).
+
+#### GLD-006: Dependency under a strong copyleft license
+
+**Severity:** Low · **Reads:** Manifest and lock files and CI configuration, for each project's SBOM (never the code), Software bill of materials (Anchore Syft), Dependency licenses (Anchore Grant) · [GitLab docs](https://docs.gitlab.com/user/compliance/license_scanning_of_cyclonedx_files/)
+
+The package's license (such as GPL or AGPL) requires software that includes it to be released under the same terms when it's distributed, or for AGPL and SSPL when it's offered over a network. A repository that isn't under a compatible license may have to release its own code, or remove the package.
+
+**How to fix**
+
+Check with whoever looks after licensing whether this use is allowed: it depends on how the software is distributed or offered. Otherwise replace the package with one under a permissive license. Mark the finding as accepted when the use is cleared.
+
+#### GLM-001: Image in use has a vulnerability attackers are exploiting
+
+**Severity:** Critical · **Attack path** · **Reads:** Container registry repositories and their tags, Packages, vulnerabilities and stored credentials in public container images (Aqua Trivy), CISA's catalog of known exploited vulnerabilities · [GitLab docs](https://docs.gitlab.com/user/packages/container_registry/)
+
+A package in the image has a vulnerability on CISA's list of known exploited vulnerabilities (cisa.gov/known-exploited-vulnerabilities-catalog), and something runs the image. Attackers already have working exploits for it, and a service the internet reaches is where they try them first.
+
+**How to fix**
+
+1. Rebuild the image with the fixed versions: update the base image for operating system packages, and the lock file for the application's own dependencies (the Images page says which is which).
+2. Push it and deploy the workloads that run it.
+3. Where there is no fix yet, limit who can reach the workload until there is.
+
+#### GLM-002: Image in use has critical or high vulnerabilities with a fix
+
+**Severity:** High · **Reads:** Container registry repositories and their tags, Packages, vulnerabilities and stored credentials in public container images (Aqua Trivy) · [GitLab docs](https://docs.gitlab.com/user/packages/container_registry/)
+
+The image runs with packages that have known critical or high vulnerabilities, and fixed versions exist. Each rebuild that doesn't pick them up leaves a known way in for longer.
+
+**How to fix**
+
+1. Rebuild the image with the fixed versions: update the base image for operating system packages, and the lock file for the application's own dependencies (the Images page says which is which).
+2. Push it and deploy the workloads that run it.
+3. Where there is no fix yet, limit who can reach the workload until there is.
+
+#### GLM-003: Image in use is built on an operating system or runtime past its end of life
+
+**Severity:** Medium · **Reads:** Container registry repositories and their tags, Packages, vulnerabilities and stored credentials in public container images (Aqua Trivy) · [GitLab docs](https://docs.gitlab.com/user/packages/container_registry/)
+
+The operating system release in the image, or the release line of the runtime it is built around (Node.js, Python, nginx…), no longer gets security fixes. Vulnerabilities found in it from now on stay open, and scanners stop reporting them for it.
+
+**How to fix**
+
+Change the Dockerfile's FROM line to a release that is still supported (or to the newest tag of the same base image), rebuild, test and deploy.
+
+### GitLab: Change risk
+
+#### GLB-001: Default branch accepts changes without a merge request
+
+**Severity:** Medium · **Reads:** Protected branches · [GitLab docs](https://docs.gitlab.com/user/project/repository/branches/protected/)
+
+Every developer, and every token or deploy key with their access, can push straight to the branch your releases come from, with no review and nothing to stop it.
+
+**How to fix**
+
+1. Open the project's Settings → Repository → Protected branches.
+2. Protect the default branch with Allowed to push and merge set to No one, so changes arrive as merge requests.
+3. Set Allowed to merge to Maintainers, or to Developers and Maintainers with a required approval.
+
+#### GLB-002: Default branch history can be rewritten
+
+**Severity:** Medium · **Reads:** Protected branches · [GitLab docs](https://docs.gitlab.com/user/project/repository/branches/protected/)
+
+The branch is protected, but force pushes are allowed. That replaces reviewed history, and removes the evidence of what was there.
+
+**How to fix**
+
+In the project's Settings → Repository → Protected branches, turn off Allowed to force push for the default branch.
+
+#### GLB-003: An approved merge request can change before it merges
+
+**Severity:** Medium · **Reads:** Merge request approval rules and settings (GitLab Premium and Ultimate) · [GitLab docs](https://docs.gitlab.com/user/project/merge_requests/approvals/settings/)
+
+Merge requests need an approval, but the approval stays after new commits are pushed, or the author can give it themselves. Someone can get a harmless change approved, then push something else and merge it unreviewed.
+
+**How to fix**
+
+In the project's Settings → Merge requests → Approval settings, turn on Remove all approvals when commits are added to the source branch, and Prevent approval by merge request creator.
+
+#### GLB-004: Maintainers can push to the default branch without a merge request
+
+**Severity:** Low · **Reads:** Protected branches · [GitLab docs](https://docs.gitlab.com/user/project/repository/branches/protected/)
+
+Developers go through merge requests, but maintainers and owners can push directly, as can the people and groups the rule names. Their sign-ins and tokens are the ones most worth stealing, and what they push is reviewed by nobody.
+
+**How to fix**
+
+In the project's Settings → Repository → Protected branches, set Allowed to push and merge to No one for the default branch.
+
+## Gitea
+
+### Gitea: Attack surface
+
+#### TER-001: Repository can be read without signing in
+
+**Severity:** Medium · **Reads:** Repositories, Whether the instance shows public repositories without signing in · [Gitea docs](https://docs.gitea.com/administration/config-cheat-sheet)
+
+The repository is public and the instance answers requests that carry no sign-in, so anyone who can reach the instance reads the code, its history and whatever was ever committed to it. On an instance the internet reaches, that is everyone.
+
+**How to fix**
+
+1. If the code isn't meant for everyone, make the repository private under its Settings → Danger Zone, or set the organization's visibility to Limited or Private.
+2. To require sign-in for the whole instance, its administrator sets REQUIRE_SIGNIN_VIEW = true under [service] in app.ini.
+
+#### TER-002: Private repository is pushed to another server
+
+**Severity:** Low · **Reads:** Repositories, Push mirrors · [Gitea docs](https://docs.gitea.com/usage/repo-mirror)
+
+A push mirror sends every change to another server with a credential stored in the repository's settings. The code is then only as private as the copy, and nobody who reviews access here sees who can read it there.
+
+**How to fix**
+
+1. Open the repository's Settings → Repository → Mirror Settings.
+2. Check that the copy is one your organization controls and is private there.
+3. Remove the mirror if nobody uses it.
+
+### Gitea: Identity & access
+
+#### TEI-001: Member signs in without two-factor authentication
+
+**Severity:** Medium · **Reads:** Organization members, Which users sign in without two-factor authentication · [Gitea docs](https://docs.gitea.com/administration/config-cheat-sheet)
+
+A reused or phished password is then all it takes to read and change every repository that person can reach. For an owner, that is all of them, with the organization's settings and webhooks.
+
+**How to fix**
+
+1. Ask the person to turn it on under their Settings → Security → Two-Factor Authentication.
+2. To require it for everyone, the instance's administrator can set TWO_FACTOR_AUTH = enforced under [security] in app.ini (Gitea 1.24 and later).
+
+#### TEI-002: Many people own the organization
+
+**Severity:** Low · **Reads:** Teams, their access and their members · [Gitea docs](https://docs.gitea.com/usage/access-control/permissions)
+
+An owner can change every repository, every team and every webhook, and delete the organization. Each owner's password, token and laptop is a way in to all of it.
+
+**How to fix**
+
+1. Open the organization's Teams page and the Owners team.
+2. Keep the people who run the organization, and move the others to a team with the access they use.
+
+#### TEI-003: A team other than the owners administers every repository
+
+**Severity:** Medium · **Reads:** Teams, their access and their members · [Gitea docs](https://docs.gitea.com/usage/access-control/permissions)
+
+Administering a repository means changing its branch rules, webhooks, deploy keys and collaborators. A team with that on every repository, including ones created later, is a second set of owners that nobody reviews as one.
+
+**How to fix**
+
+1. Open the team under the organization's Teams page.
+2. Give it the repositories it works on instead of All repositories, or lower its access to Write.
+
+#### TEI-004: Someone outside the organization can change a repository
+
+**Severity:** Medium · **Reads:** Organization members, Collaborators outside the organization · [Gitea docs](https://docs.gitea.com/usage/access-control/permissions)
+
+A collaborator added to one repository isn't in any team, so they aren't removed when teams are reviewed or when a contract ends. With write access they push code; as an administrator they also change its branch rules, webhooks and deploy keys.
+
+**How to fix**
+
+1. Open the repository's Settings → Collaborators.
+2. Remove the person, lower them to Read, or add them to the organization and a team so their access is reviewed with everyone else's.
+
+#### TEH-002: Deploy key can push to the repository
+
+**Severity:** Low · **Reads:** Deploy keys · [Gitea docs](https://docs.gitea.com/usage/access-control/permissions)
+
+A deploy key belongs to no person, never expires and isn't covered by two-factor authentication. One with write access lets whoever holds the private key (a build server, a backup, an old laptop) push code.
+
+**How to fix**
+
+1. Open the repository's Settings → Deploy Keys.
+2. If the key only fetches code, delete it and add it again without Enable Write Access.
+3. Remove keys nobody can name an owner for.
+
+### Gitea: Secrets
+
+#### TEH-001: Webhook delivers over plain HTTP
+
+**Severity:** Medium · **Reads:** Organization webhooks, Repository webhooks · [Gitea docs](https://docs.gitea.com/usage/webhooks)
+
+Each delivery carries commit messages, branch names, people's names and email addresses, and the header that proves it came from Gitea. Over HTTP, anyone on the path reads all of it and can replay or forge deliveries to whatever the webhook triggers.
+
+**How to fix**
+
+1. Open the webhook under the organization's or the repository's Settings → Webhooks.
+2. Change its Target URL to https://.
+3. Set a Secret, and have the receiver check the signature.
+
+### Gitea: Supply chain
+
+#### TED-001: Dependency has a vulnerability attackers are exploiting
+
+**Severity:** Critical · **Attack path** · **Reads:** Manifest and lock files, for each repository's SBOM (never the code), Software bill of materials (Anchore Syft), Known vulnerabilities in dependencies (Anchore Grype)
+
+A package this repository uses has a vulnerability in CISA's catalog of known exploited vulnerabilities: attackers are using it now, with tools that are already public. Anything built from this code that runs the package is exposed.
+
+**How to fix**
+
+1. Upgrade the package to the version the evidence names, in every part that uses it, and deploy.
+2. If it comes in through another package, upgrade that one, or override the version (npm overrides, Yarn resolutions, a Go replace or a constraint).
+3. Check what ran it before the upgrade for signs of compromise.
+
+#### TED-002: Dependency has a critical or high vulnerability
+
+**Severity:** High · **Reads:** Manifest and lock files, for each repository's SBOM (never the code), Software bill of materials (Anchore Syft), Known vulnerabilities in dependencies (Anchore Grype)
+
+A package this repository uses has a published vulnerability rated critical or high, or one that FIRST's EPSS rates likely to be exploited soon. How to exploit it is public, so whatever is built from this code inherits it until the package is upgraded.
+
+**How to fix**
+
+1. Upgrade the package to the version the evidence names; it fixes every listed vulnerability that has a fix.
+2. If it comes in through another package, upgrade that one, or override the version (npm overrides, Yarn resolutions, a Go replace or a constraint).
+3. If the vulnerable code can't be reached from how you use it, mark the finding as accepted with the reason.
+
+#### TED-003: Dependency is a known malicious package
+
+**Severity:** Critical · **Attack path** · **Reads:** Manifest and lock files, for each repository's SBOM (never the code), Software bill of materials (Anchore Syft), Known vulnerabilities in dependencies (Anchore Grype)
+
+The package is listed as malware: published to steal credentials, open a backdoor or run code when it's installed. Installing it is enough, so every developer machine and CI runner that installed this version may be compromised.
+
+**How to fix**
+
+1. Remove the package, or move to a version that isn't listed, and regenerate the lock file.
+2. Treat every machine and CI runner that installed it as compromised: rotate the credentials they held.
+3. Check how it got in: a typo in the name, or a dependency that pulled it.
+
+#### TED-004: Workflows run third-party actions by a tag that can be moved
+
+**Severity:** Low · **Reads:** Manifest and lock files, for each repository's SBOM (never the code) · [Gitea docs](https://docs.gitea.com/usage/actions/overview)
+
+A tag such as v4 can be pointed at different code at any time, by the action's owner or by whoever takes over their account. Workflows run that code with the repository's token and secrets, as happened with tj-actions/changed-files in 2025. A commit SHA can't be moved.
+
+**How to fix**
+
+Pin each third-party action to the full commit SHA of the release you use, with the tag in a comment (uses: owner/action@<sha> # v4). Renovate keeps pinned actions up to date. Actions owned by GitHub (actions/*, github/*) and your own organization aren't counted.
+
+#### TED-005: Project installs dependencies without a lock file
+
+**Severity:** Low · **Reads:** Manifest and lock files, for each repository's SBOM (never the code)
+
+Without a lock file, or with version ranges in a requirements file, every install takes whatever version is newest at that moment. A malicious or broken release reaches your builds without anyone changing the code, and Keelson can't check those versions for vulnerabilities.
+
+**How to fix**
+
+Commit the lock file your package manager writes (package-lock.json, yarn.lock, pnpm-lock.yaml, go.sum, Gemfile.lock, composer.lock, poetry.lock, Pipfile.lock), and install from it in CI (npm ci, pip install with pinned == versions or a lock).
+
+#### TED-006: Dependency under a strong copyleft license
+
+**Severity:** Low · **Reads:** Manifest and lock files, for each repository's SBOM (never the code), Software bill of materials (Anchore Syft), Dependency licenses (Anchore Grant)
+
+The package's license (such as GPL or AGPL) requires software that includes it to be released under the same terms when it's distributed, or for AGPL and SSPL when it's offered over a network. A repository that isn't under a compatible license may have to release its own code, or remove the package.
+
+**How to fix**
+
+Check with whoever looks after licensing whether this use is allowed: it depends on how the software is distributed or offered. Otherwise replace the package with one under a permissive license. Mark the finding as accepted when the use is cleared.
+
+### Gitea: Change risk
+
+#### TEB-001: Default branch accepts changes without a pull request
+
+**Severity:** Medium · **Reads:** Branch protection · [Gitea docs](https://docs.gitea.com/usage/access-control/protected-branches)
+
+Anyone with write access, or a token or deploy key that has it, can push straight to the branch your releases come from, with no review and nothing to stop it.
+
+**How to fix**
+
+1. Open the repository's Settings → Branches and add a rule for the default branch.
+2. Under Push, choose Disable push, so changes arrive as pull requests.
+3. Set Required approvals to at least 1.
+
+#### TEB-002: Default branch history can be rewritten
+
+**Severity:** Medium · **Reads:** Branch protection · [Gitea docs](https://docs.gitea.com/usage/access-control/protected-branches)
+
+The branch has a rule, but it lets anyone with write access force push. That replaces reviewed history, and removes the evidence of what was there.
+
+**How to fix**
+
+In the rule for the default branch (Settings → Branches), set Force push to Disable, or to an allowlist of the few who need it.
+
+#### TEB-003: An approved pull request can change before it merges
+
+**Severity:** Medium · **Reads:** Branch protection · [Gitea docs](https://docs.gitea.com/usage/access-control/protected-branches)
+
+The default branch needs an approval, but the approval stays after new commits are pushed. Someone can get a harmless change approved, then push something else to the same pull request and merge it unreviewed.
+
+**How to fix**
+
+In the rule for the default branch (Settings → Branches), turn on Dismiss stale approvals, or Ignore stale approvals so they stop counting.
+
+#### TEB-004: Administrators can merge past the default branch's rule
+
+**Severity:** Low · **Reads:** Branch protection · [Gitea docs](https://docs.gitea.com/usage/access-control/protected-branches)
+
+The rule requires a pull request, but repository administrators and owners can merge without meeting it. Their sign-ins and tokens are the ones most worth stealing.
+
+**How to fix**
+
+In the rule for the default branch (Settings → Branches), turn on Block merge on administrators' override (Gitea 1.23 and later).
 
 ## Internet
 

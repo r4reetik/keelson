@@ -185,7 +185,8 @@ function indexOf(scans: EntityScan[]) {
     for (const [key, service] of Object.entries(DNS) as [LinkKey, string][])
       for (const r of list<DnsHostRecord>(links, key) ?? []) add(records, host(r.host), { provider: s.provider, service, accountId: s.accountId, record: r });
     for (const d of links.vercelDomains ?? []) add(served, host(d.host), { ...base, what: `project ${d.project}`, region: null, link: null, open: null });
-    for (const p of links.githubPages ?? []) add(served, host(p.host), { ...base, what: `Pages site of ${p.repo}`, region: null, link: null, open: null });
+    for (const p of [...(links.githubPages ?? []), ...(links.gitlabPages ?? [])])
+      add(served, host(p.host), { ...base, what: `Pages site of ${p.repo}`, region: null, link: null, open: null });
     for (const h of s.snap.surface?.hosts ?? []) sonar.set(host(h.name), h.points);
   }
   return { holders, released, records, balancers, served, endpoints, sonar, regionNames, complete };

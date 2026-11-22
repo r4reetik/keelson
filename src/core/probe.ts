@@ -7,6 +7,7 @@ import { pool } from "./cloudflare.ts";
 import { isHostRecord } from "./dns-util.ts";
 import type { TakeoverProbe, ZoneInventory } from "./types.ts";
 import { HOMEPAGE } from "../meta.ts";
+import { ownRequest } from "./net.ts";
 
 const MAX_HOSTS = 100;
 const MAX_BYTES = 64 * 1024;
@@ -81,7 +82,7 @@ export async function probeTakeovers(targets: { host: string; target: string }[]
 
 async function fetchSnippet(url: string, hops = 0): Promise<{ status: number; body: string } | null> {
   try {
-    const res = await fetch(url, {
+    const res = await ownRequest(url, {
       redirect: "manual",
       headers: { "user-agent": USER_AGENT, accept: "text/html,*/*" },
       signal: AbortSignal.timeout(TIMEOUT_MS),

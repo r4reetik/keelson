@@ -6,9 +6,11 @@ import { vercel } from "./vercel/index.ts";
 import { aws } from "./aws/index.ts";
 import { alibaba } from "./alibaba/index.ts";
 import { github } from "./github/index.ts";
+import { gitlab } from "./gitlab/index.ts";
+import { gitea } from "./gitea/index.ts";
 import { internet } from "./internet/index.ts";
 import type { ProviderId } from "../shared/providers.ts";
 import type { Provider } from "./types.ts";
 
-export const PROVIDER: Record<ProviderId, Provider> = { cloudflare, vercel, aws, alibaba, github, internet };
+export const PROVIDER: Record<ProviderId, Provider> = { cloudflare, vercel, aws, alibaba, github, gitlab, gitea, internet };
 export type { Provider };

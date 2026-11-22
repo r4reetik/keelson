@@ -8,6 +8,7 @@
 import { createHash } from "node:crypto";
 import { VERCEL_SOURCES, type VercelScope, type VercelSourceKey } from "./sources.ts";
 import type { Coverage } from "../../shared/api.ts";
+import { request } from "../../core/net.ts";
 
 export const VERCEL_API = "https://api.vercel.com";
 const MAX_IN_FLIGHT = 8;
@@ -57,7 +58,7 @@ export class VercelClient {
         this.calls++;
         let res: Response;
         try {
-          res = await fetch(VERCEL_API + path, {
+          res = await request(VERCEL_API + path, {
             method: "GET",
             signal: AbortSignal.timeout(TIMEOUT_MS),
             headers: { Authorization: `Bearer ${this.#token}`, Accept: "application/json" },

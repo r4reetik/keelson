@@ -17,6 +17,7 @@ import {
   GitBranchIcon,
   PackageIcon,
   SealCheckIcon,
+  ShareNetworkIcon,
   GlobeIcon,
   ListChecksIcon,
   StackIcon,
@@ -115,7 +116,7 @@ export const ROUTES: RouteDef[] = [
     label: "Repositories",
     group: "Inventory",
     icon: GitBranchIcon,
-    providers: ["github"],
+    providers: ["github", "gitlab", "gitea"],
     page: page(() => import("./pages/Repositories.tsx"), "RepositoriesPage"),
   },
   {
@@ -123,7 +124,7 @@ export const ROUTES: RouteDef[] = [
     label: "Dependencies",
     group: "Inventory",
     icon: PackageIcon,
-    providers: ["github"],
+    providers: ["github", "gitlab", "gitea"],
     page: page(() => import("./pages/Dependencies.tsx"), "DependenciesPage"),
   },
   {
@@ -131,7 +132,7 @@ export const ROUTES: RouteDef[] = [
     label: "Images",
     group: "Inventory",
     icon: CubeFocusIcon,
-    providers: ["aws", "alibaba", "github"],
+    providers: ["aws", "alibaba", "github", "gitlab"],
     page: page(() => import("./pages/Images.tsx"), "ImagesPage"),
   },
   {
@@ -141,7 +142,7 @@ export const ROUTES: RouteDef[] = [
     icon: CubeFocusIcon,
     hidden: true,
     parent: "/images",
-    providers: ["aws", "alibaba", "github"],
+    providers: ["aws", "alibaba", "github", "gitlab"],
     page: page(() => import("./pages/Image.tsx"), "ImagePage"),
   },
   {
@@ -151,7 +152,7 @@ export const ROUTES: RouteDef[] = [
     icon: GitBranchIcon,
     hidden: true,
     parent: "/repositories",
-    providers: ["github"],
+    providers: ["github", "gitlab", "gitea"],
     page: page(() => import("./pages/Repository.tsx"), "RepositoryPage"),
   },
   {
@@ -217,6 +218,15 @@ export const ROUTES: RouteDef[] = [
     page: page(() => import("./pages/Checks.tsx"), "ChecksPage"),
   },
   { path: "/scans", label: "Scans", group: "Manage", icon: ArrowsClockwiseIcon, page: page(() => import("./pages/Scans.tsx"), "ScansPage") },
+  {
+    path: "/networks",
+    label: "Networks",
+    group: "Manage",
+    icon: ShareNetworkIcon,
+    global: true,
+    permission: "networks",
+    page: page(() => import("./pages/Networks.tsx"), "NetworksPage"),
+  },
   {
     path: "/users",
     label: "Users",

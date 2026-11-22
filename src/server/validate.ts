@@ -10,6 +10,9 @@ import type { Entity, EntityUpdate, TriagePatch } from "../store/repo.ts";
 import type { Settings } from "../shared/api.ts";
 import { ACCOUNT_ID_PATTERN, PROVIDER_INFO, isProvider, type ProviderId } from "../shared/providers.ts";
 import { isRole, type Role } from "../shared/roles.ts";
+import { isIP } from "node:net";
+import { isNetworkKind, isProxyProtocol, type NetworkKind, type NetworkTarget, type ProxyProtocol } from "../shared/networks.ts";
+import { certificatesIn } from "../networks.ts";
 import { MAX_PASSWORD, MIN_PASSWORD } from "./passwords.ts";
 
 export const FINGERPRINT = /^[0-9a-f]{20}$/;
@@ -229,5 +232,85 @@ export const personName = (v: unknown): string | null => cleanName(v) || null;
 export function param(c: Context, name: string): string {
   const v = c.req.param(name);
   if (v == null) throw badRequest(`Missing ${name}`);
+  return v;
+}
+
+/** A network as a request describes it, checked. `password` and `ca` are undefined when the request leaves them as they are. */
+export interface CleanNetwork {
+  name: string;
+  kind: NetworkKind;
+  proxy: { protocol: ProxyProtocol; host: string; port: number; username: string | null } | null;
+  /** The proxy's password: undefined keeps the stored one, null removes it. */
+  password: string | null | undefined;
+  /** PEM certificates: undefined keeps the stored ones, null removes them. */
+  ca: string | null | undefined;
+}
+
+const HOSTNAME = /^(?=.{1,253}$)[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9])?(\.[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9])?)*$/i;
+/** SOCKS5 carries a username and a password in at most 255 bytes each. */
+const MAX_PROXY_LOGIN = 255;
+const MAX_CA = 200_000;
+const MAX_CERTIFICATES = 20;
+
+/** A proxy's host as people paste it: a name or an address, without a scheme, a port or brackets. */
+function proxyHost(v: unknown): string {
+  const h = String(v ?? "")
+    .trim()
+    .replace(/^\[|\]$/g, "");
+  if (!h) throw badRequest("Enter the proxy's host: a name or an address.");
+  if (/[/@\s]|:\/\//.test(h)) throw badRequest("Enter only the proxy's host, such as proxy.example.com: its type and port have their own fields.");
+  if (!isIP(h) && !HOSTNAME.test(h)) throw badRequest("That isn't a host name or an address.");
+  return h.toLowerCase();
+}
+
+export function networkInput(b: Body): CleanNetwork {
+  const name = requiredName(b.name, "network");
+  if (!isNetworkKind(b.kind)) throw badRequest("Choose what kind of network this is.");
+  let proxy: CleanNetwork["proxy"] = null;
+  let password: CleanNetwork["password"];
+  if (b.proxy != null) {
+    if (typeof b.proxy !== "object") throw badRequest("Invalid proxy");
+    if (!isProxyProtocol(b.proxy.protocol)) throw badRequest("Choose the proxy's type: HTTP, HTTP over TLS or SOCKS5.");
+    const port = Number(b.proxy.port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw badRequest("The proxy's port is a number from 1 to 65535.");
+    const username = b.proxy.username == null ? null : String(b.proxy.username).trim() || null;
+    if (username && (Buffer.byteLength(username) > MAX_PROXY_LOGIN || /[\u0000-\u001f\u007f]/.test(username)))
+      throw badRequest("That proxy username is too long.");
+    // HTTP's Basic scheme splits the two at the first colon.
+    if (username?.includes(":")) throw badRequest("A proxy username can't contain a colon.");
+    proxy = { protocol: b.proxy.protocol, host: proxyHost(b.proxy.host), port, username };
+    if (!username) password = null;
+    else if (b.proxy.password !== undefined) {
+      const p = typeof b.proxy.password === "string" ? b.proxy.password : "";
+      if (Buffer.byteLength(p) > MAX_PROXY_LOGIN) throw badRequest("That proxy password is too long.");
+      password = p || null;
+    }
+  } else password = null;
+  let ca: CleanNetwork["ca"];
+  if (b.ca !== undefined) {
+    const text = String(b.ca ?? "").trim();
+    if (text.length > MAX_CA) throw badRequest("That is too much text for certificates.");
+    if (/PRIVATE KEY/.test(text)) throw badRequest("That contains a private key. Paste only the certificate: Keelson needs nothing secret to trust it.");
+    if (!text) ca = null;
+    else {
+      let found: ReturnType<typeof certificatesIn>;
+      try {
+        found = certificatesIn(text);
+      } catch {
+        throw badRequest("One of those certificates can't be read. Paste them as PEM, each from -----BEGIN CERTIFICATE----- to -----END CERTIFICATE-----.");
+      }
+      if (!found.length) throw badRequest("No certificate found. Paste it as PEM, from -----BEGIN CERTIFICATE----- to -----END CERTIFICATE-----.");
+      if (found.length > MAX_CERTIFICATES) throw badRequest(`Add at most ${MAX_CERTIFICATES} certificates to a network.`);
+      // Only the certificates are kept, not what was pasted around them.
+      ca = found.map((c) => c.toString().trim()).join("\n");
+    }
+  }
+  return { name, kind: b.kind, proxy, password, ca };
+}
+
+/** What a network choice is for: everything without a choice of its own, or one platform. */
+export function networkTarget(v: unknown): NetworkTarget {
+  if (v === "default") return "default";
+  if (!isProvider(v)) throw badRequest("Unknown platform");
   return v;
 }

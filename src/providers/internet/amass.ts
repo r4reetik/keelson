@@ -134,6 +134,7 @@ export function parseSubs(text: string): Map<string, string[]> {
 
 async function engineUp(): Promise<boolean> {
   try {
+    // The engine listens on this machine: never through a network's proxy.
     const res = await fetch(ENGINE, { signal: AbortSignal.timeout(1000) });
     return res.ok;
   } catch {

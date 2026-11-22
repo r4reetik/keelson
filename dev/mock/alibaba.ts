@@ -64,6 +64,9 @@ const WORKER = "i-mockworker0001";
 const LEGACY = "i-mocklegacy0001";
 const VPC = "vpc-mock0001";
 const OIDC = `acs:ram::${MOCK_ALIBABA_ACCOUNT}:oidc-provider/github-actions`;
+const GITLAB_OIDC = `acs:ram::${MOCK_ALIBABA_ACCOUNT}:oidc-provider/gitlab`;
+/** The entity's own GitLab instance (dev/mock/gitlab.ts), as an OIDC provider. */
+const OWN_GITLAB_OIDC = `acs:ram::${MOCK_ALIBABA_ACCOUNT}:oidc-provider/gitlab-internal`;
 const b64 = (s: string) => Buffer.from(s).toString("base64");
 
 const perm = (protocol: string, range: string, cidr: string, policy = "Accept", priority = 1) => ({
@@ -100,6 +103,20 @@ const ROLES: Record<string, string> = {
     Action: "sts:AssumeRoleWithOIDC",
     Principal: { Federated: [OIDC] },
     Condition: { StringLike: { "oidc:sub": "repo:mock-org/*" } },
+  }),
+  // GitLab CI in any project on gitlab.com can assume it: no subject condition at all.
+  "gitlab-legacy": trust({
+    Effect: "Allow",
+    Action: "sts:AssumeRoleWithOIDC",
+    Principal: { Federated: [GITLAB_OIDC] },
+    Condition: { StringEquals: { "oidc:aud": "sts.aliyuncs.com" } },
+  }),
+  // For the entity's own GitLab: any branch of one project (dev/mock/gitlab.ts), and a project of another group.
+  "gitlab-deploy": trust({
+    Effect: "Allow",
+    Action: "sts:AssumeRoleWithOIDC",
+    Principal: { Federated: [OWN_GITLAB_OIDC] },
+    Condition: { StringLike: { "oidc:sub": ["project_path:mock-labs/web:*", "project_path:other-group/tools:ref_type:branch:ref:main"] } },
   }),
   AliyunServiceRoleForECS: trust({ Effect: "Allow", Action: "sts:AssumeRole", Principal: { Service: ["ecs.aliyuncs.com"] } }),
 };
@@ -225,7 +242,13 @@ function rpc(product: string, action: string, q: URLSearchParams, region: string
     case "ims:ListOIDCProviders":
       return {
         IsTruncated: false,
-        OIDCProviders: { OIDCProvider: [{ OIDCProviderName: "github-actions", Arn: OIDC, IssuerUrl: "https://token.actions.githubusercontent.com" }] },
+        OIDCProviders: {
+          OIDCProvider: [
+            { OIDCProviderName: "github-actions", Arn: OIDC, IssuerUrl: "https://token.actions.githubusercontent.com" },
+            { OIDCProviderName: "gitlab", Arn: GITLAB_OIDC, IssuerUrl: "https://gitlab.com" },
+            { OIDCProviderName: "gitlab-internal", Arn: OWN_GITLAB_OIDC, IssuerUrl: "https://gitlab.mock-group.example" },
+          ],
+        },
       };
     case "ram:ListPolicies":
       return {

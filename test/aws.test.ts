@@ -523,7 +523,9 @@ test("every provider says what the app needs to know about it", () => {
     assert.equal(PROVIDER[p].info, info);
     assert.ok(info.label && info.account && info.accounts && info.resource && info.blurb && info.covers && info.credential && info.apiHost, p);
     assert.ok(info.fields.length >= 1 && info.fields.some((f) => f.secret), `${p} has a secret field`);
-    assert.ok(info.sites.length && info.noAccounts && info.needsToRead && info.idHint, p);
+    // A platform people host themselves has no address of its own to tell its links by, or to test a network against.
+    assert.ok((info.sites.length || info.selfHosted) && info.noAccounts && info.needsToRead && info.idHint, p);
+    assert.ok(info.selfHosted ? info.checkHost === null && PROVIDER[p].instanceOf : info.checkHost, `${p} says where a network is tested against it`);
     assert.ok(PROVIDER[p].checks.length > 0 && PROVIDER[p].checks.every((c) => c.provider === p), p);
     assert.ok(ACCOUNT_ID_PATTERN[p] instanceof RegExp);
   }
@@ -532,7 +534,7 @@ test("every provider says what the app needs to know about it", () => {
   assert.equal(providerForId("team_MockWeb0000000000000001"), "vercel");
   assert.equal(providerForId("gh_1000001"), "github", "a GitHub ID isn't mistaken for an AWS or Vercel one");
   assert.equal(providerForId("ext_3"), "internet", "Sonar's account is named after its entity");
-  assert.equal(providerList(), "Cloudflare, Vercel, AWS, Alibaba Cloud and GitHub");
+  assert.equal(providerList(), "Cloudflare, Vercel, AWS, Alibaba Cloud, GitHub, GitLab and Gitea");
   assert.equal(providerList(["cloudflare", "vercel"], "or"), "Cloudflare or Vercel");
   assert.equal(providerList(["aws"]), "AWS");
   assert.equal(zoneWord(["cloudflare"]), "Zone");

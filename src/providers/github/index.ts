@@ -12,8 +12,7 @@ import { githubLinks, repoRows } from "./views.ts";
 import { githubAppTemplate } from "../../shared/github.ts";
 import { PROVIDER_INFO } from "../../shared/providers.ts";
 import type { Provider } from "../types.ts";
-import type { AccountCache } from "../../store/repo.ts";
-import type { GithubInventory } from "./types.ts";
+import { saveDependencyViews } from "../../core/sbom/index.ts";
 
 export const github: Provider = {
   info: PROVIDER_INFO.github,
@@ -32,7 +31,7 @@ export const github: Provider = {
       onProgress({ phase: "Evaluating checks" });
       const evaluation = evaluateGithub(inv, engine);
       const failures = evaluation.findings.filter((f) => !f.pass);
-      saveDependencyViews(inv, cache);
+      saveDependencyViews(inv.dependencies, inv.unreadable, cache);
       return {
         accountName: inv.accountName,
         evaluation,
@@ -49,19 +48,3 @@ export const github: Provider = {
   },
   ownedDomains: () => [],
 };
-
-/**
- * Each repository's dependencies as the Repositories page shows them (`deps:<repo>`), replaced on every scan; a
- * repository whose dependencies weren't read this time keeps its last view only while its SBOM is cached.
- */
-function saveDependencyViews(inv: GithubInventory, cache: AccountCache): void {
-  const deps = inv.dependencies;
-  if (!deps) return;
-  const seen = new Set<string>();
-  for (const d of deps.repos) {
-    seen.add(d.repo);
-    cache.put(`deps:${d.repo}`, { dependencies: d, tools: deps.tools, dbBuilt: deps.dbBuilt, unreadable: inv.unreadable });
-  }
-  const kept = new Set(cache.keys("sbom:").map((k) => k.slice(5)));
-  for (const key of cache.keys("deps:")) if (!seen.has(key.slice(5)) && !kept.has(key.slice(5))) cache.delete(key);
-}

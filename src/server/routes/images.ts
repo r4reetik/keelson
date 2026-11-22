@@ -177,7 +177,8 @@ export function imageBuildRoutes(r: Routes, { repo }: AppContext) {
     const name = c.req.query("repo");
     if (!accountId || !name) throw badRequest("Name the account and the repository.");
     const account = ownAccount(repo, c, accountId);
-    const org = repo.scans.latest(account.id)?.snap.links?.githubOrgs?.[0];
+    const links = repo.scans.latest(account.id)?.snap.links;
+    const org = links?.githubOrgs?.[0] ?? links?.gitlabGroups?.[0]?.group;
     if (!org) return c.json({ images: [] });
     // Every account of the repository's entity: the images it builds are kept and run in the entity's other accounts.
     const entity = repo.resolveScope(`e:${account.entityId}`, c.get("user").entities);

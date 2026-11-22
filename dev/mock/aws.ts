@@ -187,6 +187,52 @@ const iam: Record<string, (q: URLSearchParams) => string | null> = {
           x("AttachedManagedPolicies", x("member", policy("ReadOnlyAccess"))),
           x("RoleLastUsed", x("LastUsedDate", ago(300))),
         ),
+        // A role for GitLab CI on gitlab.com that names no project at all.
+        x(
+          "member",
+          x("RoleName", "gitlab-legacy"),
+          x("Path", "/"),
+          x(
+            "AssumeRolePolicyDocument",
+            doc({
+              Statement: [
+                {
+                  Effect: "Allow",
+                  Principal: { Federated: `arn:aws:iam::${MOCK_AWS_ACCOUNT}:oidc-provider/gitlab.com` },
+                  Action: "sts:AssumeRoleWithWebIdentity",
+                  Condition: { StringEquals: { "gitlab.com:aud": "https://gitlab.com" } },
+                },
+              ],
+            }),
+          ),
+          x("AttachedManagedPolicies", x("member", policy("ReadOnlyAccess"))),
+          x("RoleLastUsed", x("LastUsedDate", ago(40))),
+        ),
+        // A deploy role for the entity's own GitLab: any branch of one project, and a project of another group.
+        x(
+          "member",
+          x("RoleName", "gitlab-deploy"),
+          x("Path", "/"),
+          x(
+            "AssumeRolePolicyDocument",
+            doc({
+              Statement: [
+                {
+                  Effect: "Allow",
+                  Principal: { Federated: `arn:aws:iam::${MOCK_AWS_ACCOUNT}:oidc-provider/gitlab.mock-group.example` },
+                  Action: "sts:AssumeRoleWithWebIdentity",
+                  Condition: {
+                    StringLike: {
+                      "gitlab.mock-group.example:sub": ["project_path:mock-labs/web:*", "project_path:other-group/tools:ref_type:branch:ref:main"],
+                    },
+                  },
+                },
+              ],
+            }),
+          ),
+          x("AttachedManagedPolicies", x("member", policy("ReadOnlyAccess"))),
+          x("RoleLastUsed", x("LastUsedDate", ago(2))),
+        ),
         // A CI role that can start an instance with any role, including an administrator's.
         x(
           "member",

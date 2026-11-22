@@ -18,6 +18,8 @@ import { displayName, type Account, type Repo } from "./store/repo.ts";
 import type { TokenVault } from "./config.ts";
 import { NO_RELATED, type Related } from "./core/types.ts";
 import { LINK_KEYS, LINK_PROVIDER, type LinkKey, type ScanSnapshot } from "./shared/api.ts";
+import { through, type Route } from "./core/net.ts";
+import { checkRoute, originFor, routeFor } from "./networks.ts";
 
 export interface ScanState {
   running: boolean;
@@ -186,14 +188,17 @@ export class Scanner {
       }
       let out = { finished: true, read: 0 };
       try {
-        out = await entry.backlog.run({
-          // A scan that was asked for goes first; a removed account has nowhere to keep results.
-          stop: () => this.#busy() || !this.#repo.accounts.get(accountId),
-          onProgress: (done) => {
-            entry.done = done;
-            this.#show();
-          },
-        });
+        // Images are pulled through the network chosen for the account's platform, as its scan's were.
+        out = await through(routeFor(this.#repo, this.#vault, account.provider), () =>
+          entry.backlog.run({
+            // A scan that was asked for goes first; a removed account has nowhere to keep results.
+            stop: () => this.#busy() || !this.#repo.accounts.get(accountId),
+            onProgress: (done) => {
+              entry.done = done;
+              this.#show();
+            },
+          }),
+        );
       } catch (e) {
         this.#log(`Reading ${displayName(account)}'s remaining images stopped: ${(e as Error)?.message || e}`);
       }
@@ -239,29 +244,35 @@ export class Scanner {
     }
     const provider = PROVIDER[account.provider];
     let calls = 0;
+    let route: Route | null = null;
     try {
       const settings = this.#repo.settings.get();
       const entity = this.#repo.entities.get(account.entityId);
       const siblings = this.#siblings(account);
       const overrides = this.#repo.settings.overrides();
       const prev = this.#repo.scans.latest(account.id);
-      const out = await provider.scan({
-        token: token.token,
-        account,
-        probeTakeovers: settings.probes.takeover,
-        previous: prev?.snapshot ? (JSON.parse(prev.snapshot as string) as ScanSnapshot) : null,
-        cache: this.#repo.cache.for(account.id),
-        toolDir: this.#toolDir,
-        engine: {
-          orgDomains: [...(entity?.orgDomains || []), ...siblings.domains],
-          disabledChecks: overrides.disabled,
-          severityOverrides: overrides.severity,
-          related: siblings.related,
-        },
-        onProgress: (p) => {
-          this.state = { ...this.state, phase: p.phase, done: p.done ?? null, total: p.total ?? null };
-        },
-      });
+      // Every request of the scan leaves through the network chosen for the platform (Networks page).
+      route = routeFor(this.#repo, this.#vault, account.provider);
+      await checkRoute(route, originFor(account.provider, token.token));
+      const out = await through(route, () =>
+        provider.scan({
+          token: token.token,
+          account,
+          probeTakeovers: settings.probes.takeover,
+          previous: prev?.snapshot ? (JSON.parse(prev.snapshot as string) as ScanSnapshot) : null,
+          cache: this.#repo.cache.for(account.id),
+          toolDir: this.#toolDir,
+          engine: {
+            orgDomains: [...(entity?.orgDomains || []), ...siblings.domains],
+            disabledChecks: overrides.disabled,
+            severityOverrides: overrides.severity,
+            related: siblings.related,
+          },
+          onProgress: (p) => {
+            this.state = { ...this.state, phase: p.phase, done: p.done ?? null, total: p.total ?? null };
+          },
+        }),
+      );
       calls = out.calls;
       const result = out.evaluation;
       const settled = this.#repo.findings.settled();
@@ -316,11 +327,13 @@ export class Scanner {
           this.#log,
         );
       }
-      this.#log(`Scan ${id} (${displayName(account)}) finished: score ${score.overall ?? "n/a"}, ${result.findings.length} findings, ${calls} API calls`);
+      this.#log(
+        `Scan ${id} (${displayName(account)}) finished: score ${score.overall ?? "n/a"}, ${result.findings.length} findings, ${calls} API calls${route ? `, through ${route.name}` : ""}`,
+      );
       return { accountId: account.id, scanId: id, score: score.overall, findings: result.findings.length, newFindings: fresh.length };
     } catch (e) {
       this.#repo.scans.fail(id, String((e as Error)?.message || e), calls || Number((e as { calls?: number })?.calls) || 0);
-      this.#log(`Scan ${id} (${displayName(account)}) failed: ${(e as Error)?.message || e}`);
+      this.#log(`Scan ${id} (${displayName(account)}) failed${route ? ` through ${route.name}` : ""}: ${(e as Error)?.message || e}`);
       throw e;
     }
   }

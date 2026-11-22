@@ -19,7 +19,7 @@ npm run dev -- --mock   # mocked Cloudflare, Vercel, AWS and GitHub data, nothin
 npm run dev             # your real accounts, data kept in ./.keelson
 ```
 
-Both start the API on port 4317 and the web app with hot reload on http://localhost:5173. To run a second copy beside the first (the mock next to your real accounts, say), give it its own ports: `KEELSON_PORT=4417 KEELSON_WEB_PORT=5273 npm run dev -- --mock`. The mock (`dev/mock/cloudflare.ts`, `dev/mock/vercel.ts`, `dev/mock/aws.ts` and `dev/mock/github.ts`, seeded by `dev/mock/server.ts`) serves Cloudflare accounts, Vercel teams, an AWS account and a GitHub organization in three entities, one of them with every platform, with fictional data that trips every family of checks. You don't need an account on any of them to work on Keelson. If you do scan your own, use a read-only Cloudflare token, and remember that a Vercel token can do whatever your role allows.
+Both start the API on port 4317 and the web app with hot reload on http://localhost:5173. To open it from a phone or a colleague's machine on the same network, add `--host` (`npm run dev -- --mock --host`): both servers then listen on every interface and Vite prints the address to share. It is plain HTTP, so only do it on a network you trust, and with your real accounts everyone who opens it still has to sign in. To run a second copy beside the first (the mock next to your real accounts, say), give it its own ports: `KEELSON_PORT=4417 KEELSON_WEB_PORT=5273 npm run dev -- --mock`. The mock (`dev/mock/cloudflare.ts`, `dev/mock/vercel.ts`, `dev/mock/aws.ts` and `dev/mock/github.ts`, seeded by `dev/mock/server.ts`) serves Cloudflare accounts, Vercel teams, an AWS account and a GitHub organization in three entities, one of them with every platform, with fictional data that trips every family of checks. You don't need an account on any of them to work on Keelson. If you do scan your own, use a read-only Cloudflare token, and remember that a Vercel token can do whatever your role allows.
 
 Before opening a pull request:
 
@@ -52,7 +52,7 @@ src/
   server/               Hono app: routes/, guards in middleware.ts, validation, presentation
   shared/               code shared with the web app: API types, severities, triage, scope, filters; providers.ts says everything the app knows about each provider
 web/src/                React app: routes.tsx lists every page, shell.tsx holds shared state
-dev/mock/               mocked provider APIs (Cloudflare, Vercel, AWS, Alibaba Cloud, GitHub) and seeding, for tests and the mock dev server
+dev/mock/               mocked provider APIs (Cloudflare, Vercel, AWS, Alibaba Cloud, GitHub, GitLab, Gitea) and seeding, for tests and the mock dev server
 test/                   node:test suites; fixtures/ and checks/cases.ts for Cloudflare checks, <provider>-cases.ts for the others
 ```
 
@@ -91,10 +91,10 @@ only judged where something runs. A GitHub finding's `zone` is its repository, o
 
 ## Adding a provider
 
-Google Cloud, Google Workspace and others fit the same shape as Vercel, AWS, Alibaba Cloud and GitHub:
+Google Cloud, Google Workspace and others fit the same shape as Vercel, AWS, Alibaba Cloud, GitHub, GitLab and Gitea:
 
-1. Add it to `src/shared/providers.ts`: its ID, and a `PROVIDER_INFO` entry with its label, its words for an account, a resource and a credential, the credential's fields, its API host and the shape of its account IDs. The UI and the server word everything from that entry, so nothing else should compare a provider's name. Add its mark to `PROVIDER_GLYPH` (`web/src/components/ui.tsx`): the provider's monochrome logo as one 24×24 SVG path, such as the one Simple Icons publishes.
-2. Create `src/providers/<id>/` with a read-only client (GET or the provider's read-only equivalent, recording coverage), a sources registry, an inventory, check modules written with `checksFor<YourContext, YourSourceKey>()`, a catalog and an engine that ends in `summarize` from `src/core/engine.ts`.
+1. Add it to `src/shared/providers.ts`: its ID, and a `PROVIDER_INFO` entry with its label, its words for an account, a resource and a credential, the credential's fields, its API host (and one host of it that always exists, `checkHost`, which the Networks page asks to test a network) and the shape of its account IDs. The UI and the server word everything from that entry, so nothing else should compare a provider's name. Add its mark to `PROVIDER_GLYPH` (`web/src/components/ui.tsx`): the provider's monochrome logo as one 24×24 SVG path, such as the one Simple Icons publishes.
+2. Create `src/providers/<id>/` with a read-only client (GET or the provider's read-only equivalent, recording coverage, and sending with `request()` from `src/core/net.ts` rather than `fetch`, so a network chosen for the platform applies), a sources registry, an inventory, check modules written with `checksFor<YourContext, YourSourceKey>()`, a catalog and an engine that ends in `summarize` from `src/core/engine.ts`.
 3. Implement `Provider` (`src/providers/types.ts`) in its `index.ts` and list it in `src/providers/index.ts`. The scanner, account routes, Add accounts flow, provider switch, scores, exports and docs pick it up from there.
 4. Add a fictional mock API in `dev/mock/<id>.ts`, seed it in `dev/mock/server.ts`, and tests like `test/aws.test.ts` (only reads, no secret stored) and `test/aws-checks.test.ts` (every check fails on its case).
 5. Give its inventory page a route limited to the provider (`providers` in `web/src/routes.tsx`), write the steps for creating its credential in `web/src/components/connect.tsx` (`TOKEN_HELP`), and add its sources and a section to `scripts/docs.ts`. TypeScript points at each of these: they are records keyed by provider, so a new one doesn't compile until it has an entry.

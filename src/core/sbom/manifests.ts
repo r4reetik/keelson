@@ -88,11 +88,17 @@ const NAMES = new Set([
   "action.yaml",
 ]);
 
+/** A workflow file: GitHub Actions' folder, and the one Gitea Actions reads first. */
+export const WORKFLOW_FILE = /^\.(github|gitea)\/workflows\/[^/]+\.ya?ml$/;
+export const isWorkflowDir = (dir: string): boolean => dir === ".github/workflows" || dir === ".gitea/workflows";
+/** GitLab CI's configuration: the file at the root, and the folder projects split it into by convention. */
+export const CI_FILE = /^(\.gitlab-ci\.ya?ml|\.gitlab\/ci\/[^/]+\.ya?ml)$/;
+
 /** Whether Keelson fetches a file at this path (relative to the repository's root). */
 export function wanted(path: string): boolean {
   const dir = posix.dirname(path);
   const base = posix.basename(path);
-  if (/^\.github\/workflows\/[^/]+\.ya?ml$/.test(path)) return true;
+  if (WORKFLOW_FILE.test(path) || CI_FILE.test(path)) return true;
   if (SKIP_DIR.test(dir === "." ? "" : dir)) return false;
   if (NAMES.has(base)) return true;
   if (/requirements[^/]*\.(txt|in)$/i.test(base) || /(^|\/)requirements\/[^/]+\.txt$/i.test(path)) return true;
@@ -108,8 +114,8 @@ const PROJECT =
 const LOCKS =
   /^(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|deno\.lock|Pipfile\.lock|poetry\.lock|uv\.lock|pdm\.lock|go\.sum|gradle\.lockfile|packages\.lock\.json|Gemfile\.lock|gems\.locked|Cargo\.lock|composer\.lock|Package\.resolved|Podfile\.lock|pubspec\.lock|mix\.lock|rebar\.lock|conan\.lock|stack\.yaml\.lock|cabal\.project\.freeze)$/i;
 
-export type { Part } from "../../../shared/dependencies.ts";
-import type { Part } from "../../../shared/dependencies.ts";
+export type { Part } from "../../shared/dependencies.ts";
+import type { Part } from "../../shared/dependencies.ts";
 
 /** Keelson's word for each manifest's ecosystem. */
 function ecosystemOf(base: string): string | null {
@@ -185,10 +191,10 @@ export function findParts(files: Map<string, string>): Part[] {
 
   for (const [dir, paths] of byDir) {
     const bases = paths.map((p) => posix.basename(p));
-    if (dir === ".github/workflows") {
+    if (isWorkflowDir(dir)) {
       const p = part(dir);
       p.workflows = true;
-      p.name = "GitHub Actions workflows";
+      p.name = dir.startsWith(".gitea") ? "Gitea Actions workflows" : "GitHub Actions workflows";
       p.ecosystems = ["GitHub Actions"];
       p.files = paths.sort();
       continue;

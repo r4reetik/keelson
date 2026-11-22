@@ -30,7 +30,7 @@
   <img src="docs/images/overview.png" alt="The Keelson overview: attack paths, posture score, overdue and unowned findings, and the findings to fix first">
 </picture>
 
-Point Keelson at your Cloudflare accounts, your Vercel teams, your AWS and Alibaba Cloud accounts, your GitHub organizations, or any mix of them, and it
+Point Keelson at your Cloudflare accounts, your Vercel teams, your AWS and Alibaba Cloud accounts, your GitHub organizations, your GitLab groups, the Gitea you host yourself, or any mix of them, and it
 scans them (one, or dozens across several companies), scores them, and tracks every finding until it's fixed:
 who owns it, when it's due, and which risks were accepted and until when. It runs on your machine or your
 server, and only ever reads. Use it for one platform or several: a company's accounts on every platform sit
@@ -43,7 +43,7 @@ organizations' settings and security alerts; next come the code itself, where th
 reach it, cloud activity such as CloudTrail and VPC flow logs, runtime security, and an AI penetration tester that
 works from all of it. See the [roadmap](#roadmap).
 
-> Keelson is an independent open-source project, not affiliated with or endorsed by Cloudflare, Vercel, AWS, Alibaba Cloud or GitHub.
+> Keelson is an independent open-source project, not affiliated with or endorsed by Cloudflare, Vercel, AWS, Alibaba Cloud, GitHub, GitLab or Gitea.
 > Its interface is built with [Kumo](https://github.com/cloudflare/kumo), Cloudflare's open-source design system.
 
 ## Quick start
@@ -57,7 +57,7 @@ docker logs keelson
 
 That's the whole install: Keelson ships as this one image, for Intel and Arm, and needs nothing but Docker. Open
 http://localhost:4317 and create the admin account with the setup code that `docker logs keelson` shows. Then
-choose a platform (Cloudflare, Vercel, AWS, Alibaba Cloud or GitHub), add its token, access key, AccessKey or GitHub App, pick the accounts,
+choose a platform (Cloudflare, Vercel, AWS, Alibaba Cloud, GitHub, GitLab or Gitea), add its token, access key, AccessKey or GitHub App, pick the accounts,
 teams or organizations it should scan, and the first scans run. `127.0.0.1:` keeps it reachable from this machine only; to run it for a team, see
 [below](#run-it-for-a-team-docker).
 
@@ -158,6 +158,41 @@ can be followed back to the repository that builds it.
 | Deployments | Public repositories that can run jobs on your self-hosted runners (critical when a runner keeps state between jobs and outside contributors' pull requests run without approval), pull requests from forks of private repositories that get secrets or a write token, workflows whose GITHUB_TOKEN can write by default, workflows that can approve pull requests, any third-party action allowed to run |
 | TLS & HTTPS | Webhooks that skip certificate checks or send over plain HTTP, Pages sites that don't enforce HTTPS |
 | Supply chain | Open critical and high Dependabot alerts, dependencies with a vulnerability attackers are exploiting (CISA's catalog), with a critical or high vulnerability or one likely to be exploited soon (FIRST's EPSS), or known to be malicious; third-party actions used by a tag that can be moved; projects that install dependencies without a lock file; dependencies under a strong copyleft license. A monorepo's findings name the project in it that uses each package, directly or through another package, and the smallest upgrade that fixes it |
+
+### GitLab
+
+Every top-level group an access token reaches, on gitlab.com or on an instance you host, with the projects in it
+and its subgroups. An instance that only answers inside your VPN is reached through the network you choose for
+GitLab (see [docs/networks.md](docs/networks.md)).
+
+| Category | Examples |
+|---|---|
+| Identity & access | A group that doesn't require two-factor authentication, many owners, projects that can be shared with outside groups, deploy keys that can push |
+| Change risk | Default branches developers can push to without a merge request (rated lower when the project has been idle for a year), force pushes allowed, approvals that survive new commits or that the author can give, maintainers pushing past merge requests |
+| Secrets | Webhooks that deliver over plain HTTP, deploy tokens that can write and never expire |
+| TLS & HTTPS | Webhooks that don't verify the receiver's certificate |
+| Supply chain | The same dependency findings as GitHub's, from each project's SBOM, and pipelines that include configuration from outside the group by a ref that can be moved; vulnerabilities, end-of-life systems and stored credentials in public container images that are in use |
+
+Across platforms: a DNS record on Cloudflare, Route 53 or Alibaba Cloud DNS that points at GitLab Pages when no
+Pages site in the entity uses it, and AWS and Alibaba Cloud roles that GitLab CI can assume from any project, from
+groups outside the entity, or from a branch anyone with access can push to. CI/CD variables are never read (GitLab's API returns their values), and images in private
+projects are listed but not scanned.
+
+### Gitea
+
+Every organization the token's user belongs to on a Gitea instance you host, and every repository in it. Gitea
+runs on your own servers, so Keelson asks for the instance's address with the token, and reaches it through the
+network you choose for Gitea when it only answers inside your VPN or presents your own authority's certificate
+(see [docs/networks.md](docs/networks.md)). Forgejo serves the same API.
+
+| Category | Examples |
+|---|---|
+| Identity & access | Members who sign in without two-factor authentication (rated higher for owners; Gitea tells only a site administrator), many owners, a team other than the owners that administers every repository, people outside the organization who can push to or administer a repository, deploy keys that can push |
+| Change risk | Default branches that take pushes without a pull request (rated lower when nobody has changed the repository for a year), rules that allow force pushes, approvals that survive new commits, administrators who can merge past the rule |
+| Attack surface | Public repositories the instance hands to a request with no sign-in (confirmed with one request without the token), private repositories pushed to another server by a push mirror |
+| Secrets | Organization and repository webhooks that deliver over plain HTTP |
+
+With Syft, Grype and Grant installed, each repository's dependencies are read as GitHub's are (an SBOM from its manifest and lock files, never the code), with the same findings: exploited, vulnerable and malicious packages, actions used by a tag, missing lock files and strong copyleft licenses. Container packages and Gitea Actions' own settings aren't read yet.
 
 ### Container images
 
@@ -280,9 +315,9 @@ finding has its own page with a history of each scan and triage change, to share
 - **Projects** (Vercel). Every project: who can open its previews and *.vercel.app URLs, fork protection, the firewall and its managed rules, how many secrets are Sensitive.
 - **Regions** (AWS). Every enabled region: what runs there, whether GuardDuty is on, and its open findings, plus each account's global resources.
 - **Resources** (Alibaba Cloud). Every instance, load balancer, bucket, database, function, cluster, security group, RAM user and role, in Alibaba Cloud's words: where it is, how the internet reaches it, and its open findings. Regions are a filter, named, and only the ones in use.
-- **Repositories** (GitHub). Every repository, filtered by language or visibility, with picked ones copied as `owner/repo` or downloaded: how its default branch is protected, secret scanning and push protection, open security alerts, what it depends on, its Pages site and its open findings. Each repository's page lists its projects (every part of a monorepo, with its ecosystems, lock file and base images), every package with where it's used, its known vulnerabilities and license, and downloads the SBOM as CycloneDX, SPDX or Syft JSON.
-- **Dependencies** (GitHub). Every package across your repositories' SBOMs, filtered by vulnerability status (exploited, has a fix, no fix yet, malicious), severity, package manager, repository, license risk, direct or not, runtime or development, and the triage of its findings, with each package's repositories and findings a click away. A Vulnerabilities tab lists each CVE with the packages it affects, and a Licenses tab is Grant's report: every license with its risk class. Filter by language as well as package manager. Tick packages, vulnerabilities or licenses (or every one that matches) to copy the repositories they affect as `owner/repo` or links, the IDs or the upgrades to make, or download them as CSV. Packages export as CSV.
-- **Images** (AWS, Alibaba Cloud, GitHub). Every container image Keelson scanned, most exposed first: its registry, whether a workload runs it and whether the internet reaches that workload, its vulnerabilities, the operating system and runtime it is built on, the repository that builds it and its findings. A **Running** tab lists each workload with its images and how it is reached; **Vulnerabilities** works across every image (which images have this CVE, which of them face the internet, which a newer base image would fix); **Components** is the inventory: every package, runtime and operating system at each version, with where it is and whether it is vulnerable or unsupported. An image's own page shows the chain from repository to registry to workloads, what it is built on, the credentials stored in it, each vulnerability with where to fix it, and downloads its SBOM. Every list loads a page at a time. Tick rows to copy images, digests, repositories, workloads, hostnames, components or upgrades, or download them as CSV; a repository's page lists the images it builds.
+- **Repositories** (GitHub, GitLab, Gitea). Every repository, filtered by language or visibility, with picked ones copied as `owner/repo` or downloaded: how its default branch is protected, secret scanning and push protection, open security alerts, what it depends on, its Pages site and its open findings. Each repository's page lists its projects (every part of a monorepo, with its ecosystems, lock file and base images), every package with where it's used, its known vulnerabilities and license, and downloads the SBOM as CycloneDX, SPDX or Syft JSON.
+- **Dependencies** (GitHub, GitLab, Gitea). Every package across your repositories' SBOMs, filtered by vulnerability status (exploited, has a fix, no fix yet, malicious), severity, package manager, repository, license risk, direct or not, runtime or development, and the triage of its findings, with each package's repositories and findings a click away. A Vulnerabilities tab lists each CVE with the packages it affects, and a Licenses tab is Grant's report: every license with its risk class. Filter by language as well as package manager. Tick packages, vulnerabilities or licenses (or every one that matches) to copy the repositories they affect as `owner/repo` or links, the IDs or the upgrades to make, or download them as CSV. Packages export as CSV.
+- **Images** (AWS, Alibaba Cloud, GitHub, GitLab). Every container image Keelson scanned, most exposed first: its registry, whether a workload runs it and whether the internet reaches that workload, its vulnerabilities, the operating system and runtime it is built on, the repository that builds it and its findings. A **Running** tab lists each workload with its images and how it is reached; **Vulnerabilities** works across every image (which images have this CVE, which of them face the internet, which a newer base image would fix); **Components** is the inventory: every package, runtime and operating system at each version, with where it is and whether it is vulnerable or unsupported. An image's own page shows the chain from repository to registry to workloads, what it is built on, the credentials stored in it, each vulnerability with where to fix it, and downloads its SBOM. Every list loads a page at a time. Tick rows to copy images, digests, repositories, workloads, hostnames, components or upgrades, or download them as CSV; a repository's page lists the images it builds.
 - **Activity** (Cloudflare). Seven days of audit log, filtered down to changes, with destructive actions highlighted.
 - **Value** (Cloudflare). What you pay for, the traffic and threats it handled, and features your plans include but that are switched off.
 - **Audit report.** A print-ready report for auditors and management (use the browser's Save as PDF). Findings also export as CSV and JSON.
@@ -291,7 +326,7 @@ finding has its own page with a history of each scan and triage change, to share
 
 ## Several accounts and companies
 
-Keelson watches as many Cloudflare accounts, Vercel teams, AWS and Alibaba Cloud accounts and GitHub organizations as you add, from one credential or
+Keelson watches as many Cloudflare accounts, Vercel teams, AWS and Alibaba Cloud accounts, GitHub organizations, GitLab groups and Gitea organizations as you add, from one credential or
 many. Accounts are grouped into **entities**: a company, legal entity or team that owns them. An entity can hold
 accounts on every platform. You decide how they're shown, and can
 change it at any time on the **Accounts** page:
@@ -390,6 +425,28 @@ vulnerability database, about 3 GB, in the data folder and downloads it from Anc
 Container packages in GitHub Container Registry need no extra permission to list. Public ones are scanned with
 Trivy; GitHub's registry refuses a GitHub App for private ones, so those are listed and not scanned.
 
+### GitLab
+
+In the top-level group you want to scan, open **Settings → Access tokens** and add a token with the role **Owner**,
+an expiry date, and only the **read_api** scope: it reads through the API and can change nothing. A group access
+token belongs to the group, not to a person; on a plan without them, a personal access token of one of the group's
+Owners works the same. With a lower role, the group's security settings, webhooks, deploy keys and deploy tokens
+aren't shown, and their checks are skipped. In Keelson, enter the address you open GitLab at (`https://gitlab.com`,
+or your own instance's) and the token. Keelson only sends GET requests to that address's `/api/v4`, never follows a
+redirect, and never asks for CI/CD variables. The Accounts page shows when the token expires.
+
+### Gitea
+
+Sign in to your Gitea as an owner of the organizations to scan (a service account in each organization's Owners
+team works well: Gitea shows branch rules, webhooks, deploy keys and collaborators only to someone who administers
+the repository). Under **Settings → Applications**, generate a token with access to all repositories and **Read**
+for **organization**, **repository** and **user**, and nothing else: a token with read scopes can change nothing.
+To learn which members sign in without two-factor authentication the account must be a site administrator and the
+token also needs **admin: Read**; without it that one check is skipped. In Keelson, enter the address you open
+Gitea at (`https://git.example.com`) and the token. Keelson only sends GET requests to that address's `/api/v1`
+and never follows a redirect. If the instance only answers inside your VPN, or its certificate is from your own
+authority, an admin first adds that network on the **Networks** page and chooses it for Gitea.
+
 ### Sonar (Shodan, optional)
 
 Sonar needs no credential. A Shodan API key adds the product and version on each open port and the subdomains
@@ -425,12 +482,12 @@ chooses their own password when they first sign in. Every role sees every page:
 | Viewer | Read everything, and export findings and reports. Changes nothing |
 | Analyst | Also triage findings (status, owner, due date, notes) and run scans |
 | Manager | Also connect and remove accounts, replace credentials, edit entities and their alerts, and turn checks off or change their severity |
-| Admin | Also add and remove users, change their roles, and change Keelson's settings |
+| Admin | Also add and remove users, change their roles, and change Keelson's settings and the networks its requests go through |
 
 A role applies to every entity, unless the admin limits the person to some entities: an agency can give a client's
 people their own entity and nothing else. Someone limited to some entities sees only those entities' accounts,
 findings, scans, exports and reports ("All accounts" is their entities), and their role applies there. They can't
-create, remove or reorder entities, or change what applies to every entity (turning checks off, settings, users).
+create, remove or reorder entities, or change what applies to every entity (turning checks off, settings, networks, users).
 Admins always see every entity.
 
 Each finding's timeline records who triaged it. Locked out? An admin can
@@ -467,6 +524,12 @@ someone locked out) and the defaults when running from a clone.
 Schedule, retention, SLAs and the takeover probe are set in **Settings**. Accounts, entities, company
 email domains and alert destinations are set on the **Accounts** page, and who can sign in on the **Users** page.
 
+When a platform only answers from inside your VPN or zero trust network (an IP allow list on a GitHub
+organization, an AWS policy tied to a source address), or that network inspects TLS, add it on the **Networks**
+page: a proxy into Netskope, Cloudflare WARP, Zscaler, an OpenVPN or WireGuard tunnel or Tailscale, and the
+certificate to trust. Each platform is then scanned through the network you choose for it, and everything else
+leaves as before. [docs/networks.md](docs/networks.md) has the steps for each.
+
 Upgrading from 0.2? The single account it scanned is imported into an entity on first start, with its
 history, email domains and alert destinations.
 
@@ -478,9 +541,10 @@ history, email domains and alert destinations.
 - **Contained.**
   - Tokens are never sent to the browser or written to logs. Each account is only ever scanned with its own token.
   - Webhook URLs are write-only in the UI.
-  - Outbound traffic goes to `api.cloudflare.com`, `api.vercel.com`, `*.amazonaws.com`, `*.aliyuncs.com` and `api.github.com` (for the platforms you connect; with AWS connected that includes AWS's public address-range file at `ip-ranges.amazonaws.com`, read without your access key), to `cloudflare-dns.com` (public DNS lookups), to `crt.sh` and Shodan for entities you add Sonar to (below), to any webhook you configure, and to `api.github.com` shortly after start and then daily, to see if there's a newer release (no identifying data; turn it off in Settings or with `KEELSON_UPDATE_CHECK=off`).
+  - Outbound traffic goes to `api.cloudflare.com`, `api.vercel.com`, `*.amazonaws.com`, `*.aliyuncs.com`, `api.github.com`, and the GitLab and Gitea instances whose addresses you enter (for the platforms you connect; with AWS connected that includes AWS's public address-range file at `ip-ranges.amazonaws.com`, read without your access key), to `cloudflare-dns.com` (public DNS lookups), to `crt.sh` and Shodan for entities you add Sonar to (below), to any webhook you configure, and to `api.github.com` shortly after start and then daily, to see if there's a newer release (no identifying data; turn it off in Settings or with `KEELSON_UPDATE_CHECK=off`).
   - **Sonar (when you add it to an entity):** the entity's domain names go to `crt.sh` (certificate transparency logs) and Shodan (`api.shodan.io` with a key, `internetdb.shodan.io` without), and its public addresses to Shodan, all with GET requests. Nothing is sent to your hosts. Shodan only accepts a key in the request's address; Keelson never logs it or puts it in an error. Of what Shodan returns, only ports, products, versions, vulnerability IDs and the entity's own hostnames are kept: banners, page content and other companies' hostnames on a shared address are dropped.
   - **Takeover check (on by default):** a `GET /` to each of your own hostnames that points at a cloud provider known for takeovers (S3, GitHub Pages, Heroku, Vercel, Azure…), over HTTPS and then HTTP if that fails, following at most two redirects on the same host. At most 100 hosts per scan, no cookies, the first 64 KB of the answer, and a User-Agent of `Keelson takeover check (+https://github.com/r4reetik/keelson)`. Turn it off under **Settings → Scans → Confirm subdomain takeovers** to keep every request inside Cloudflare's API.
+  - **Networks (when you add one):** a platform's requests go through the proxy of the network you chose for it, which sees which hosts Keelson connects to but not what is said, since each request is still TLS to the platform. When you add a network's certificate, that network can read what goes through it, as it does for any machine it inspects; the certificate is trusted only for requests through that network. A proxy's password is stored with the tokens and never shown. **Test** on the Networks page sends one request to each platform without a credential, and one to `www.cloudflare.com/cdn-cgi/trace` to read the address requests come out at.
   - There is no telemetry.
 - **Hardened web app.**
   - Every user has their own password, stored as an scrypt hash. Sign-in is rate-limited, and sessions are HttpOnly SameSite=Strict cookies.
@@ -565,7 +629,7 @@ and the test suite tells you what's missing.
 
 ```bash
 npm install
-npm run dev -- --mock   # mocked Cloudflare, Vercel, AWS, Alibaba Cloud and GitHub data, in three entities
+npm run dev -- --mock   # mocked Cloudflare, Vercel, AWS, Alibaba Cloud, GitHub, GitLab and Gitea data, in three entities
 npm run dev             # your real accounts, kept in ./.keelson
 npm run check           # typecheck, lint, tests
 ```

@@ -271,6 +271,8 @@ const PATH_SOURCES: Record<ProviderId, string> = {
   aws: "IAM, security groups, buckets, databases and DNS",
   alibaba: "RAM, security groups, OSS buckets, databases and DNS",
   github: "organization settings, branch protection and code security alerts",
+  gitlab: "group settings, protected branches, webhooks, deploy keys and tokens, and dependencies",
+  gitea: "organization access, branch rules, webhooks and deploy keys",
   internet: "certificate logs, public DNS and Shodan",
 };
 

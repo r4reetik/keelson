@@ -49,6 +49,11 @@ export interface AlibabaTrust {
   conditional: boolean;
   /** For GitHub Actions' OIDC provider: the subjects (oidc:sub) the condition allows, lowercase. Empty: any repository. */
   github?: string[];
+  /**
+   * For any other OIDC provider (GitLab's, most often): the host of the provider's issuer ("gitlab.com", or an
+   * instance's own) and the subjects (oidc:sub) the condition allows, lowercase. Empty: no subject condition.
+   */
+  oidc?: { host: string; subjects: string[] };
 }
 
 export interface AlibabaRole {

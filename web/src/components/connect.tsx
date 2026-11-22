@@ -15,6 +15,7 @@ import {
   capitalize,
   CREDENTIAL_SEPARATOR,
   githubAppTemplate,
+  link,
   plural,
   PROVIDER_INFO,
   sameName,
@@ -38,6 +39,8 @@ const TOKEN_HELP: Record<ProviderId, () => React.ReactNode> = {
   aws: AwsTokenHelp,
   alibaba: AlibabaTokenHelp,
   github: GithubTokenHelp,
+  gitlab: GitlabTokenHelp,
+  gitea: GiteaTokenHelp,
   internet: InternetTokenHelp,
 };
 
@@ -243,6 +246,61 @@ function GithubTokenHelp() {
         Choose <span className="font-medium">Install App</span> and install it on the organization, on all repositories or the ones to scan. To scan more
         organizations with one App, make it public under <span className="font-medium">Advanced</span> and install it on each. Keelson only reads, and asks
         GitHub for a read-only token on every scan.
+      </li>
+    </ol>
+  );
+}
+
+function GitlabTokenHelp() {
+  const strong = (text: string) => <span className="font-medium">{text}</span>;
+  return (
+    <ol className="ml-5 list-decimal space-y-2 text-base text-kumo-default marker:text-kumo-subtle">
+      <li>
+        In GitLab, open the top-level group you want to scan and go to {strong("Settings → Access tokens")}. A group access token belongs to the group, not to a
+        person. (On a plan without them, use a personal access token of one of the group's Owners, from {strong("Edit profile → Access tokens")}.)
+      </li>
+      <li>
+        Choose {strong("Add new token")}, name it (Keelson), set an expiry date, pick the role {strong("Owner")} and tick only the scope {strong("read_api")}.
+        That scope reads through the API and can change nothing. With a lower role, the group's security settings, webhooks, deploy keys and deploy tokens
+        aren't shown, and their checks are skipped.
+      </li>
+      <li>
+        Choose {strong("Create group access token")}, copy it (it is shown once), and paste it here with the address you open GitLab at:{" "}
+        <span className="font-mono text-sm">https://gitlab.com</span>, or your own instance's.
+      </li>
+      <li>
+        GitLab tokens expire. Keelson shows the date on the Accounts page; replace the token there before it passes. If your instance only answers inside your
+        VPN, or its certificate is from your company's own authority, an admin first adds the network on the <Link {...link("/networks")}>Networks page</Link>{" "}
+        and chooses it for GitLab.
+      </li>
+    </ol>
+  );
+}
+
+function GiteaTokenHelp() {
+  const strong = (text: string) => <span className="font-medium">{text}</span>;
+  return (
+    <ol className="ml-5 list-decimal space-y-2 text-base text-kumo-default marker:text-kumo-subtle">
+      <li>
+        Sign in to your Gitea as an {strong("owner")} of the organizations you want to scan. Gitea shows branch rules, webhooks, deploy keys and collaborators
+        only to someone who administers the repository. A service account that is in each organization's Owners team works well.
+      </li>
+      <li>
+        Open {strong("Settings → Applications")} and, under {strong("Generate New Token")}, name it (Keelson) and set{" "}
+        {strong("Repository and Organization Access")} to {strong("All (public, private, and limited)")}.
+      </li>
+      <li>
+        Under {strong("Select permissions")}, choose {strong("Read")} for {strong("organization")}, {strong("repository")} and {strong("user")}, and leave
+        everything else at No Access. A token with read scopes can change nothing. To learn which members sign in without two-factor authentication, the account
+        must be a site administrator and the token also needs {strong("admin: Read")}; without it that one check is skipped.
+      </li>
+      <li>
+        Choose {strong("Generate Token")}, copy it (it is shown once), and paste it here with the address you open Gitea at, such as{" "}
+        <span className="font-mono text-sm">https://git.example.com</span>.
+      </li>
+      <li>
+        If that address only answers inside your VPN, or its certificate is from your company's own authority, an admin first adds the network on the{" "}
+        <Link {...link("/networks")}>Networks page</Link> and chooses it for Gitea. Forgejo works the same way.
       </li>
     </ol>
   );

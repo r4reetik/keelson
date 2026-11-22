@@ -71,6 +71,14 @@ AWS access keys, Alibaba Cloud AccessKeys, GitHub App private keys, a Shodan API
     only holds that ID. Each account is scanned only with the token it was added with, and a token no
     account uses any more is deleted.
   - Tokens are never returned by the API or written to logs.
+  - A GitLab or Gitea instance's address is entered by whoever connects it (a manager or an admin), and Keelson then sends
+    GET requests to that address from where it runs, never following a redirect. Like any connector to a server
+    you name, that lets those roles make Keelson ask a host on its own network for `/api/v1/…`; give the roles
+    to people you would let do that.
+  - The password of a network's proxy (the Networks page) is stored the same way, and never returned or logged
+    either. A certificate added to a network is trusted only for requests sent through that network. Adding it
+    lets that network read those requests, credentials included, as it can for any machine whose TLS it
+    inspects: add only your own organization's.
   - Removing an account deletes its scans, findings and triage. Copies of the database made before
     upgrades (`<data-dir>/backups/`, the newest three) keep older data until they're replaced.
   - Webhook URLs are treated as secrets as well.

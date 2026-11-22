@@ -185,6 +185,33 @@ export const MIGRATIONS: string[] = [
     PRIMARY KEY (account_id, key)
   );
   `,
+  `
+  -- Networks: the ways Keelson's requests can leave the machine it runs on
+  -- (src/shared/networks.ts). Each is a proxy into a VPN or zero trust network,
+  -- the certificates to trust when it inspects TLS, or both. The proxy's
+  -- password is in the vault; only its ID is here.
+  CREATE TABLE networks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    kind TEXT NOT NULL,                  -- netskope | warp | openvpn | … (NETWORK_KINDS)
+    proxy_protocol TEXT,                 -- http | https | socks5; null when the network needs no proxy
+    proxy_host TEXT,
+    proxy_port INTEGER,
+    proxy_username TEXT,
+    secret_id TEXT,                      -- the proxy password's ID in the vault
+    ca TEXT,                             -- PEM certificates trusted for requests through it
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  -- Which network each platform's requests use. A target is a provider's ID, or
+  -- 'default' for everything without a choice of its own. No row follows the
+  -- default (for 'default': the machine's own connection); a row with no
+  -- network is the machine's own connection whatever the default is.
+  CREATE TABLE network_use (
+    target TEXT PRIMARY KEY,
+    network_id INTEGER REFERENCES networks(id) ON DELETE CASCADE
+  );
+  `,
 ];
 
 export class Store {

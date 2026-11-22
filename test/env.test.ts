@@ -7,6 +7,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { defaultDataDir, defaultHost, env } from "../src/env.ts";
+import { networkUrls } from "../src/main.ts";
+import { devHost } from "../scripts/dev-host.ts";
 
 const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -29,6 +31,42 @@ describe("settings from the environment", () => {
     assert.equal(defaultDataDir("/home/me", { KEELSON_DATA_DIR: "/srv/keelson" }), "/srv/keelson");
     assert.equal(defaultDataDir("/home/me", { KEELSON_INSTALL: "docker" }), "/data");
     assert.equal(defaultDataDir("/home/me", { KEELSON_INSTALL: "docker", KEELSON_DATA_DIR: "/srv/keelson" }), "/srv/keelson");
+  });
+});
+
+describe("sharing Keelson with the local network", () => {
+  const interfaces = {
+    lo0: [{ address: "127.0.0.1", family: "IPv4", internal: true }],
+    en0: [
+      { address: "fe80::1", family: "IPv6", internal: false },
+      { address: "192.168.1.20", family: "IPv4", internal: false },
+    ],
+    en7: [{ address: "10.0.0.5", family: "IPv4", internal: false }],
+    bridge0: [{ address: "192.168.1.20", family: "IPv4", internal: false }],
+  } as unknown as NodeJS.Dict<import("node:os").NetworkInterfaceInfo[]>;
+
+  test("a server on every interface lists the addresses other machines open, once each", () => {
+    assert.deepEqual(networkUrls("0.0.0.0", 4317, interfaces), ["http://192.168.1.20:4317", "http://10.0.0.5:4317"]);
+    assert.deepEqual(networkUrls("::", 8080, interfaces), ["http://192.168.1.20:8080", "http://10.0.0.5:8080"]);
+  });
+
+  test("a server on this machine only, or on one address, lists none", () => {
+    assert.deepEqual(networkUrls("127.0.0.1", 4317, interfaces), []);
+    assert.deepEqual(networkUrls("192.168.1.20", 4317, interfaces), []);
+  });
+
+  test("npm run dev -- --host shares on every interface, or on the address it is given", () => {
+    assert.equal(devHost(["--mock"]), null);
+    assert.equal(devHost(["--mock", "--host"]), "0.0.0.0");
+    assert.equal(devHost(["--host", "--mock"]), "0.0.0.0");
+    assert.equal(devHost(["--host", "192.168.1.20"]), "192.168.1.20");
+    assert.equal(devHost(["--host=192.168.1.20", "--mock"]), "192.168.1.20");
+  });
+
+  test("the dev servers and the mock take the address from KEELSON_HOST, so the page and its API are shared together", () => {
+    assert.match(read("scripts/dev.ts"), /KEELSON_HOST: host/);
+    assert.match(read("web/vite.config.ts"), /process\.env\.KEELSON_HOST/);
+    assert.match(read("dev/mock/server.ts"), /env\("HOST"\) \|\| "127\.0\.0\.1"/);
   });
 });
 

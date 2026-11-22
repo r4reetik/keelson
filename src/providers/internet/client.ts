@@ -17,6 +17,7 @@ import { sleep } from "../../core/cloudflare.ts";
 import { INTERNET_SOURCES, type InternetSourceKey } from "./sources.ts";
 import type { Coverage } from "../../shared/api.ts";
 import type { ShodanService, ShodanView, ShodanVuln } from "./types.ts";
+import { request } from "../../core/net.ts";
 
 export const CRTSH = "https://crt.sh";
 export const SHODAN_API = "https://api.shodan.io";
@@ -135,7 +136,7 @@ export class InternetClient {
     this.calls++;
     let res: Response;
     try {
-      res = await fetch(url, { method: "GET", headers: { accept: "application/json", "user-agent": USER_AGENT }, signal: AbortSignal.timeout(timeout) });
+      res = await request(url, { method: "GET", headers: { accept: "application/json", "user-agent": USER_AGENT }, signal: AbortSignal.timeout(timeout) });
     } catch (e) {
       throw new InternetError(0, `${service} couldn't be reached (${(e as Error)?.name === "TimeoutError" ? "timed out" : "network error"})`);
     }

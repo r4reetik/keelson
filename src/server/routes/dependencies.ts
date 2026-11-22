@@ -50,14 +50,16 @@ export function dependencyRoutes(r: Routes, { repo }: AppContext) {
           .filter((f) => f.zone === name && f.category === "Supply chain" && !f.settled)
           .map((f) => ({ fingerprint: f.fingerprint, checkId: f.checkId, resource: f.resource, severity: f.severity, title: f.title }))
       : [];
+    // Where the repository is opened: the address its scan recorded (a platform people host), else GitHub's.
     const login = scan?.snap.links?.githubOrgs?.[0] ?? null;
+    const address = row?.url ?? (login ? `https://github.com/${encodeURIComponent(login)}/${encodeURIComponent(name)}` : "https://github.com");
     return c.json({
       repo: name,
       account: displayName(account),
       accountId: account.id,
       visibility: row?.visibility ?? "private",
       defaultBranch: row?.defaultBranch ?? "main",
-      url: login ? `https://github.com/${encodeURIComponent(login)}/${encodeURIComponent(name)}` : "https://github.com",
+      url: address,
       dependencies: view.dependencies,
       tools: view.tools,
       dbBuilt: view.dbBuilt,

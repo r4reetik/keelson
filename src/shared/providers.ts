@@ -5,7 +5,7 @@
 // Everything the UI and the server say about a provider comes from PROVIDER_INFO,
 // so no screen has to branch on a provider's name.
 
-export const PROVIDERS = ["cloudflare", "vercel", "aws", "alibaba", "github", "internet"] as const;
+export const PROVIDERS = ["cloudflare", "vercel", "aws", "alibaba", "github", "gitlab", "gitea", "internet"] as const;
 export type ProviderId = (typeof PROVIDERS)[number];
 
 /** One input of a provider's credential. Most providers have one; AWS and Alibaba Cloud have a key ID and a secret, a GitHub App its ID and private key. */
@@ -58,6 +58,16 @@ export interface ProviderInfo {
   dashboard: string;
   /** The only place the credential is sent. */
   apiHost: string;
+  /**
+   * One host of that API that always exists, asked (without a credential) to test that a network reaches the platform.
+   * Null for a platform people host themselves: its address is part of each credential (`selfHosted`).
+   */
+  checkHost: string | null;
+  /**
+   * The platform runs on the user's own servers, at an address they enter with the credential (Gitea). There is no one
+   * API host: each account's requests go to its own instance, which the Networks page tests instead of `checkHost`.
+   */
+  selfHosted?: boolean;
   /** Hostname endings of the provider's dashboard and docs, to name where a link goes. */
   sites: string[];
   /** What to do when a valid credential reaches no account. */
@@ -97,6 +107,7 @@ export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
     dashboard: "dashboard",
     readOnlyCredential: true,
     apiHost: "api.cloudflare.com",
+    checkHost: "api.cloudflare.com",
     sites: ["cloudflare.com"],
     noAccounts: "Edit the token in Cloudflare and include at least one account.",
     needsToRead: "gets the permissions",
@@ -118,6 +129,7 @@ export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
     dashboard: "dashboard",
     readOnlyCredential: false,
     apiHost: "api.vercel.com",
+    checkHost: "api.vercel.com",
     sites: ["vercel.com"],
     noAccounts: "Create a token scoped to the team you want to scan, or to Full Account.",
     needsToRead: "belongs to someone whose role can read them",
@@ -144,6 +156,7 @@ export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
     dashboard: "console",
     readOnlyCredential: true,
     apiHost: "*.amazonaws.com",
+    checkHost: "sts.amazonaws.com",
     sites: ["aws.amazon.com", "amazonaws.com"],
     noAccounts: "Check that the access key is active and belongs to an IAM user in the account you want to scan.",
     needsToRead: "gets the permissions",
@@ -170,6 +183,7 @@ export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
     // A RAM user given Keelson's read-only policy can only read configuration.
     readOnlyCredential: true,
     apiHost: "*.aliyuncs.com",
+    checkHost: "sts.aliyuncs.com",
     sites: ["alibabacloud.com", "aliyun.com", "aliyuncs.com"],
     noAccounts: "Check that the AccessKey is enabled and belongs to a RAM user in the account you want to scan.",
     needsToRead: "gets the permissions",
@@ -195,11 +209,69 @@ export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
     // The App is given read permissions only, and Keelson asks GitHub for a token limited to reading on every scan.
     readOnlyCredential: true,
     apiHost: "api.github.com",
+    checkHost: "api.github.com",
     sites: ["github.com"],
     noAccounts: "Install the GitHub App on the organizations you want to scan, from the App's settings under Install App.",
     needsToRead: "gets the read permission",
     idHint: "A GitHub organization ID in Keelson is gh_ followed by its number.",
     lowercaseIds: false,
+  },
+  gitlab: {
+    id: "gitlab",
+    category: "code",
+    keywords: ["git", "gitlab.com", "self-managed", "self-hosted", "merge requests", "ci", "pipelines", "container registry", "pages", "sbom", "dependencies"],
+    label: "GitLab",
+    account: "group",
+    accounts: "groups",
+    resource: "project",
+    blurb: "Group settings, protected branches, webhooks, deploy keys and tokens, dependencies, CI includes and container images",
+    covers: "group settings, protected branches, webhooks, deploy keys and tokens, dependencies, CI includes and container images",
+    credential: "access token",
+    fields: [
+      { label: "Instance address", secret: false, placeholder: "https://gitlab.com" },
+      { label: "Access token", secret: true, placeholder: "glpat-…" },
+    ],
+    dashboard: "settings",
+    // The read_api scope reads everything Keelson asks for and can change nothing.
+    readOnlyCredential: true,
+    apiHost: "gitlab.com or your own GitLab instance",
+    // gitlab.com for most, but a group on a self-managed instance is asked at its own address, which comes with the credential.
+    checkHost: null,
+    selfHosted: true,
+    sites: ["gitlab.com"],
+    noAccounts:
+      "The token reaches no top-level group as at least a Reporter. Use a group access token of the group you want to scan, or a personal access token of one of its Owners.",
+    needsToRead: "gets the read_api scope, and belongs to someone with the role it needs",
+    idHint: "A GitLab group ID in Keelson is gl_, eight characters for the instance, and the group's number.",
+    lowercaseIds: true,
+  },
+  gitea: {
+    id: "gitea",
+    category: "code",
+    keywords: ["git", "self-hosted", "on-prem", "forgejo", "repositories", "branch protection", "webhooks"],
+    label: "Gitea",
+    account: "organization",
+    accounts: "organizations",
+    resource: "repository",
+    blurb: "Self-hosted Git: organization access, branch protection, webhooks, deploy keys and mirrors",
+    covers: "who can reach an organization's repositories, branch protection, webhooks, deploy keys and mirrors",
+    credential: "access token",
+    fields: [
+      { label: "Instance address", secret: false, placeholder: "https://git.example.com" },
+      { label: "Access token", secret: true },
+    ],
+    dashboard: "settings",
+    // A token is given read scopes only, so it can change nothing whoever it belongs to.
+    readOnlyCredential: true,
+    apiHost: "your Gitea instance",
+    checkHost: null,
+    selfHosted: true,
+    // Each instance has its own address, so no link can be told as Gitea's by where it goes.
+    sites: [],
+    noAccounts: "The token's user belongs to no organization. Use a token of someone who is an owner of the organizations you want to scan.",
+    needsToRead: "gets the scope, and belongs to someone who may read it",
+    idHint: "A Gitea organization ID in Keelson is gt_, eight characters for the instance, and the organization's number.",
+    lowercaseIds: true,
   },
   internet: {
     id: "internet",
@@ -217,6 +289,7 @@ export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
     // Shodan keys can't write anything, and Keelson only searches with it.
     readOnlyCredential: true,
     apiHost: "api.shodan.io",
+    checkHost: "api.shodan.io",
     sites: ["shodan.io", "crt.sh"],
     noAccounts: "Create an entity first by adding an account on another platform.",
     needsToRead: "belongs to a Shodan plan that includes it",
@@ -228,7 +301,7 @@ export const PROVIDER_INFO: Record<ProviderId, ProviderInfo> = {
 
 export const isProvider = (v: unknown): v is ProviderId => typeof v === "string" && (PROVIDERS as readonly string[]).includes(v);
 
-/** Account IDs as each provider issues them: Cloudflare's are 32 hex characters, Vercel's are team or user IDs, AWS's are 12 digits, Alibaba Cloud's 16, GitHub's are gh_ and the organization's number, and the internet's are ext_ and the entity's number. */
+/** Account IDs as each provider issues them: Cloudflare's are 32 hex characters, Vercel's are team or user IDs, AWS's are 12 digits, Alibaba Cloud's 16, GitHub's are gh_ and the organization's number, GitLab's are gl_, its instance and the group's number, Gitea's are gt_, its instance and the organization's number, and the internet's are ext_ and the entity's number. */
 export const ACCOUNT_ID_PATTERN: Record<ProviderId, RegExp> = {
   cloudflare: /^[0-9a-f]{32}$/,
   vercel: /^(team_)?[A-Za-z0-9]{8,40}$/,
@@ -237,6 +310,10 @@ export const ACCOUNT_ID_PATTERN: Record<ProviderId, RegExp> = {
   alibaba: /^\d{16}$/,
   // GitHub's organization IDs are plain numbers, which would pass for AWS's; the prefix keeps them apart.
   github: /^gh_\d{1,20}$/,
+  // Group numbers are only unique within an instance, so the ID also says which instance (a hash of its address).
+  gitlab: /^gl_[0-9a-f]{8}_\d{1,12}$/,
+  // Organization numbers start at 1 on every instance, so the ID also says which instance (a hash of its address).
+  gitea: /^gt_[0-9a-f]{8}_\d{1,12}$/,
   // One per entity, named after it (accountIdForEntity).
   internet: /^ext_\d{1,9}$/,
 };
@@ -246,7 +323,7 @@ export const accountIdForEntity = (entityId: number) => `ext_${entityId}`;
 export const entityOfAccountId = (id: string): number | null => (/^ext_(\d{1,9})$/.test(id) ? Number(id.slice(4)) : null);
 
 /** The provider an account ID can belong to, judged by its shape. The strictest shapes are tried first: 12 digits would also pass as a Vercel user ID. */
-const BY_STRICTEST_ID: ProviderId[] = ["cloudflare", "aws", "alibaba", "github", "internet", "vercel"];
+const BY_STRICTEST_ID: ProviderId[] = ["cloudflare", "aws", "alibaba", "github", "gitlab", "gitea", "internet", "vercel"];
 export const providerForId = (id: string): ProviderId | null => BY_STRICTEST_ID.find((p) => ACCOUNT_ID_PATTERN[p].test(id)) ?? null;
 
 /** Providers that are platforms with accounts of their own, not the per-entity view from outside (Sonar). */

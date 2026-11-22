@@ -2,7 +2,7 @@
 // package at each version across the repositories in view, each vulnerability
 // across the packages it affects, and each license as Grant classifies it (the
 // Grant report). Built from the per-repository views a GitHub scan caches
-// (`deps:<repo>`, src/providers/github/index.ts), once per account and scan, and
+// (`deps:<repo>`, saveDependencyViews in src/core/sbom/index.ts), once per account and scan, and
 // filtered per request. Triage is joined on every request, so a finding triaged a
 // moment ago shows its new status.
 
@@ -438,20 +438,26 @@ export function affectedRepos(repo: Repo, scans: AccountScan[], tab: AffectedTab
     names = rows.map((r) => `${r.name}@${r.version}`);
   }
 
+  // "owner/repo" and where each repository is opened: GitHub scans share the organization's login, and a platform
+  // people host records both on each repository's row.
   const logins = new Map(scans.map((s) => [s.account.id, s.scan.snap.links?.githubOrgs?.[0] ?? null]));
+  const rowsOfRepos = new Map<string, { owner?: string | null; url?: string | null }>(
+    scans.flatMap((s) => (s.scan.snap.repos ?? []).map((r) => [`${s.account.id}/${r.name}`, r] as const)),
+  );
   const by = new Map<string, AffectedRepo>();
   for (const r of rows)
     for (const u of r.uses) {
       const key = `${u.accountId}/${u.repo}`;
       let a = by.get(key);
       if (!a) {
-        const login = logins.get(u.accountId);
+        const hosted = rowsOfRepos.get(key);
+        const login = hosted?.owner ?? logins.get(u.accountId);
         a = {
           accountId: u.accountId,
           account: u.account,
           repo: u.repo,
           fullName: login ? `${login}/${u.repo}` : u.repo,
-          url: login ? `https://github.com/${login}/${u.repo}` : null,
+          url: hosted?.url ?? (login ? `https://github.com/${login}/${u.repo}` : null),
           packages: [],
         };
         by.set(key, a);

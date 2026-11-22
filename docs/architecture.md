@@ -103,7 +103,7 @@ installation token request is the one other POST (it creates a token that can on
 
 ## Dependencies: a software bill of materials per repository
 
-A GitHub scan also keeps an SBOM of each repository (`src/providers/github/sbom/`), with Anchore's open-source
+GitHub, GitLab and Gitea scans also keep an SBOM of each repository (`src/core/sbom/`, shared: each platform gives it a `CodeHost` that lists a branch's files and fetches one by its SHA), with Anchore's open-source
 tools when they're installed where Keelson runs (`src/core/anchore.ts`: `KEELSON_SYFT`, `KEELSON_GRYPE` and
 `KEELSON_GRANT`, or each on the PATH):
 
@@ -310,8 +310,25 @@ entity leaves them seeing nothing rather than everything). `Repo.view(limit)` gi
 user may see, and everything they reach goes through it: `/api/session`, `resolveScope` in `withScope` (so another
 entity's scope key is a 404), the accounts list, permalinks, owners, `every: true` scans and triage. Accounts and
 entities a route changes are looked up with `ownAccount` and `ownEntity` (`src/server/access.ts`). Changes that reach
-every entity (`INSTANCE_WIDE` in `src/shared/roles.ts`: checks, settings, users) and creating, removing or arranging
+every entity (`INSTANCE_WIDE` in `src/shared/roles.ts`: checks, settings, networks, users) and creating, removing or arranging
 entities are refused to a limited user whatever their role. Admins are never limited.
+
+## Networks: how a request leaves
+
+Every request goes through `src/core/net.ts`. `request()` is `fetch` until a network is chosen: a scan runs inside
+`through(route, …)` (`AsyncLocalStorage`), so every request below it, however deep, takes the route of the account's
+platform, and so do the scanners Keelson runs (`runChild` gives them the route's proxy and certificates in their
+environment). Outside a scan, and for what Keelson reads for itself (`ownRequest`, `own()`: vulnerability catalogs,
+scanners' databases, update checks, alerts), the default route applies. `test/networks.test.ts` fails when a file in
+`src/` calls `fetch` or opens a connection itself.
+
+A route is a proxy, certificates to trust, or both (`src/shared/networks.ts`). The transport is `node:https` with an
+agent whose connections are tunnels: an HTTP `CONNECT` or a SOCKS5 handshake over `node:net`, then TLS with the
+public authorities plus the route's own. Connections are kept per route and dropped when its network changes. A
+network's certificates are trusted only on its own route. `src/networks.ts` resolves a platform to its route from
+the `networks` and `network_use` tables, with the proxy's password read from the vault, and `checkRoute` asks the
+platform one thing before a scan, so a network that is down fails the scan at once with its own error.
+See [Networks](networks.md) for what people set up.
 
 ## Code layout
 
@@ -319,23 +336,27 @@ entities are refused to a limited user whatever their role. Admins are never lim
 src/
   bin.ts, cli.ts        the keelson command: Node.js version check, then the command line
   main.ts               start(), which wires everything up
+  networks.ts           which network a platform's requests use, and the test of one
   core/                 Cloudflare's client, inventory and checks, and the engine every provider shares
     sources.ts          every Cloudflare data source: label, token permission, setup-screen probe
     cloudflare.ts       read-only API client: retries, rate limits, pagination, coverage
     inventory.ts        one scan's REST reads; analytics.ts holds the GraphQL reads
     checks/             check modules, one file per area, registered in checks/index.ts
     engine.ts           runs the modules, de-duplicates, fingerprints, scores
+    net.ts              every outbound request: through the network chosen for the platform, or plain fetch
   providers/            the Provider interface, the registry, Cloudflare's adapter and the full check catalog
     vercel/             Vercel: read-only client, sources, inventory, checks, views, token checks
     aws/                AWS: signed read-only client, sources, inventory, checks, views, access key checks
     alibaba/            Alibaba Cloud: signed GET-only client, sources, inventory, policy reduction, checks, views, AccessKey checks
     github/             GitHub: App client (JWT, read-only installation token), sources, inventory, checks, views, App checks
+    gitlab/             GitLab: GET-only client for gitlab.com or an instance the user hosts, sources, inventory, checks, images, views, token checks
+    gitea/              Gitea: GET-only client for an instance the user hosts, sources, inventory, checks, views, token checks
     internet/           Sonar: crt.sh and Shodan client, discovery from the entity's accounts, checks, views
   store/                SQLite: migrations (db.ts) and one repository per concern
   server/               Hono app: routes/, guards, validation, presentation
   shared/               API types and logic shared with the web app (no Node, no DOM)
 web/src/                React app: routes.tsx lists every page
-dev/mock/               mocked Cloudflare, Vercel, AWS, Alibaba Cloud and GitHub APIs, and crt.sh and Shodan, for tests and `npm run dev -- --mock`
+dev/mock/               mocked Cloudflare, Vercel, AWS, Alibaba Cloud, GitHub, GitLab and Gitea APIs, and crt.sh and Shodan, for tests and `npm run dev -- --mock`
 scripts/                dev runner, and the generator for docs/checks.md and docs/permissions.md
 test/                   node:test suites
 ```

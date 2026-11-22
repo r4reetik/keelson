@@ -99,8 +99,27 @@ const namesGithub = (condition: Statement["Condition"]) =>
     Object.entries(claims ?? {}).some(([k, v]) => k.toLowerCase() === "oidc:iss" && listOf(v).some((x) => String(x).replace(/\/$/, "") === GITHUB_ISSUER)),
   );
 
-/** Who a role's trust policy lets assume it. `githubProviders` holds the ARNs of the account's OIDC providers whose issuer is GitHub's. */
-export function trustOf(st: Statement[], githubProviders: Set<string>): AlibabaTrust[] {
+/** The host of an issuer's address ("https://gitlab.com" → "gitlab.com"), or null when it isn't one. */
+export function issuerHost(issuer: unknown): string | null {
+  try {
+    return new URL(String(issuer)).host.toLowerCase() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** The issuer a condition names (oidc:iss), as a host, for a provider Keelson couldn't look up. */
+function issuerIn(condition: Statement["Condition"]): string | null {
+  for (const claims of Object.values(condition ?? {}))
+    for (const [k, v] of Object.entries(claims ?? {})) if (k.toLowerCase() === "oidc:iss") return issuerHost(listOf(v)[0]);
+  return null;
+}
+
+/**
+ * Who a role's trust policy lets assume it. `githubProviders` holds the ARNs of the account's OIDC providers whose
+ * issuer is GitHub's; `issuers` the issuer's host of every other one, by ARN.
+ */
+export function trustOf(st: Statement[], githubProviders: Set<string>, issuers: Map<string, string> = new Map()): AlibabaTrust[] {
   const out: AlibabaTrust[] = [];
   for (const s of st) {
     if (!allows(s)) continue;
@@ -115,8 +134,14 @@ export function trustOf(st: Statement[], githubProviders: Set<string>): AlibabaT
     for (const p of listOf(s.Principal.Service)) out.push({ principal: p, kind: "service", conditional });
     for (const p of listOf(s.Principal.Federated)) {
       const github = githubProviders.has(p) || (/:oidc-provider\//.test(p) && namesGithub(s.Condition));
+      // Another OIDC provider is kept with its issuer's host and its subject patterns, as GitHub's is: never the rest of the policy.
+      const host = github || !/:oidc-provider\//.test(p) ? null : (issuers.get(p) ?? issuerIn(s.Condition));
       out.push(
-        github ? { principal: p, kind: "federated", conditional, github: githubSubjects(s.Condition) } : { principal: p, kind: "federated", conditional },
+        github
+          ? { principal: p, kind: "federated", conditional, github: githubSubjects(s.Condition) }
+          : host
+            ? { principal: p, kind: "federated", conditional, oidc: { host, subjects: githubSubjects(s.Condition) } }
+            : { principal: p, kind: "federated", conditional },
       );
     }
   }

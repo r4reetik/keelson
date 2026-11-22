@@ -2,6 +2,7 @@
 // options and calls this; the mock dev server calls it with seeded accounts.
 
 import { existsSync } from "node:fs";
+import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
@@ -17,6 +18,8 @@ import { log } from "./log.ts";
 import { REPOSITORY, VERSION } from "./meta.ts";
 import { UpdateChecker } from "./updates.ts";
 import { env } from "./env.ts";
+import { net } from "./core/net.ts";
+import { routeFor } from "./networks.ts";
 
 export { VERSION } from "./meta.ts";
 
@@ -48,6 +51,22 @@ export interface Running {
 
 export const isLoopback = (host: string) => ["127.0.0.1", "localhost", "::1"].includes(host);
 
+const everyInterface = (host: string) => host === "0.0.0.0" || host === "::";
+
+/**
+ * Where other machines on the network open a server that listens on every interface: one URL per IPv4
+ * address of this machine. IPv6 addresses are left out: the ones a laptop has are mostly link-local,
+ * which a browser can't open. Empty for a server bound to one address, whose own URL already says it.
+ */
+export function networkUrls(host: string, port: number, interfaces: ReturnType<typeof networkInterfaces> = networkInterfaces()): string[] {
+  if (!everyInterface(host)) return [];
+  const addresses = Object.values(interfaces)
+    .flatMap((list) => list || [])
+    .filter((a) => a.family === "IPv4" && !a.internal)
+    .map((a) => a.address);
+  return [...new Set(addresses)].map((a) => `http://${a}:${port}`);
+}
+
 /** The built web UI, next to the compiled server or in dist/ when running from source. */
 function findWebDir(): string | null {
   const here = fileURLToPath(new URL(".", import.meta.url));
@@ -61,6 +80,8 @@ export async function start(o: StartOptions): Promise<Running> {
   repo.scans.recoverInterrupted();
   if (o.dataDir) importLegacy(o.dataDir, repo, vault, log.info);
 
+  // Outside a scan (update checks, alerts, vulnerability catalogs) requests take the Networks page's default route.
+  net.defaultRoute = () => routeFor(repo, vault, null);
   const scanner = new Scanner(repo, vault, log.info, { toolDir: o.dataDir ? join(o.dataDir, "tools") : null });
   const auth = new Auth(
     {
@@ -89,7 +110,7 @@ export async function start(o: StartOptions): Promise<Running> {
 
   return new Promise((resolve, reject) => {
     const server = serve({ fetch: app.fetch, hostname: o.host, port: o.port }, () => {
-      const shown = o.host === "0.0.0.0" || o.host === "::" ? "localhost" : o.host.includes(":") ? `[${o.host}]` : o.host;
+      const shown = everyInterface(o.host) ? "localhost" : o.host.includes(":") ? `[${o.host}]` : o.host;
       const running: Running = {
         url: `http://${shown}:${o.port}`,
         repo,
@@ -101,6 +122,7 @@ export async function start(o: StartOptions): Promise<Running> {
             stopScheduler();
             stopUpdates();
             server.close(() => {
+              net.defaultRoute = () => null;
               store.close();
               done();
             });

@@ -28,6 +28,8 @@ export function foreignFor(accountId: string, related: Partial<Related>): (ref: 
       return owner === accountId || related.awsAccounts?.includes(owner ?? "") ? "entity" : "private";
     }
     if (kind === "ghcr") return related.githubOrgs?.includes(ref.repository.split("/")[0]) ? "entity" : "public";
+    // gitlab.com's registry: an image under one of the entity's groups is the entity's own.
+    if (kind === "gitlab") return related.gitlabGroups?.some((g) => ref.repository.startsWith(`${g.group}/`)) ? "entity" : "public";
     if (kind === "acr") return related.alibabaAccounts?.length ? "entity" : "private";
     return "public";
   };

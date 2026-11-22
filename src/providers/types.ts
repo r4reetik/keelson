@@ -54,6 +54,12 @@ export interface Provider {
   listAccounts(token: string): Promise<{ id: string; name: string }[]>;
   probe(token: string, accountId: string): Promise<PermissionProbe[]>;
   scan(input: ScanInput): Promise<ScanOutput>;
+  /**
+   * For a platform people host themselves (PROVIDER_INFO.selfHosted): the origin a credential's requests go to
+   * ("https://git.example.com"), or null when the credential doesn't hold one. The Networks page tests it, and a scan
+   * through a network asks it before starting.
+   */
+  instanceOf?(token: string): string | null;
   /** Domains an account's latest snapshot shows it owns: they count as internal email domains for the entity's other accounts. */
   ownedDomains(snapshot: ScanSnapshot): string[];
   /**

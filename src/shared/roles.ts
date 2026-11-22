@@ -11,7 +11,7 @@ export const ROLES = ["viewer", "analyst", "manager", "admin"] as const;
 export type Role = (typeof ROLES)[number];
 
 /** What a change needs. Reading needs only a signed-in user: every role sees every page. */
-export type Permission = "triage" | "scan" | "accounts" | "checks" | "settings" | "users";
+export type Permission = "triage" | "scan" | "accounts" | "checks" | "settings" | "networks" | "users";
 
 /** The lowest role that has each permission. */
 export const PERMISSION_ROLE: Record<Permission, Role> = {
@@ -20,6 +20,7 @@ export const PERMISSION_ROLE: Record<Permission, Role> = {
   accounts: "manager",
   checks: "manager",
   settings: "admin",
+  networks: "admin",
   users: "admin",
 };
 
@@ -30,6 +31,7 @@ export const PERMISSION_TEXT: Record<Permission, string> = {
   accounts: "connect or change accounts and entities",
   checks: "turn checks off or change their severity",
   settings: "change Keelson's settings",
+  networks: "see or change the networks Keelson's requests go through",
   users: "manage users",
 };
 
@@ -40,7 +42,10 @@ export const ROLE_INFO: Record<Role, { label: string; summary: string }> = {
     label: "Manager",
     summary: "Also connects and removes accounts, replaces credentials, edits entities and their alerts, and turns checks off or changes their severity.",
   },
-  admin: { label: "Admin", summary: "Also adds and removes users, changes their roles, and changes Keelson's settings." },
+  admin: {
+    label: "Admin",
+    summary: "Also adds and removes users, changes their roles, and changes Keelson's settings and the networks its requests go through.",
+  },
 };
 
 export const isRole = (v: unknown): v is Role => typeof v === "string" && (ROLES as readonly string[]).includes(v);
@@ -49,9 +54,9 @@ export const can = (role: Role, permission: Permission): boolean => ROLES.indexO
 
 /**
  * Changes that reach every entity at once. Someone limited to some entities can't make them, whatever their role:
- * check overrides apply to every account, and settings and users belong to the whole instance.
+ * check overrides apply to every account, and settings, networks and users belong to the whole instance.
  */
-export const INSTANCE_WIDE: readonly Permission[] = ["checks", "settings", "users"];
+export const INSTANCE_WIDE: readonly Permission[] = ["checks", "settings", "networks", "users"];
 
 /** Who is asking: their role, and the entities they are limited to (null for every entity). */
 export interface Access {

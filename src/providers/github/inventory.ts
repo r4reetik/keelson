@@ -29,7 +29,7 @@ import type {
 } from "./types.ts";
 import type { ProgressEvent } from "../../core/types.ts";
 import type { AccountCache } from "../../store/repo.ts";
-import { collectDependencies } from "./sbom/index.ts";
+import { collectDependencies } from "../../core/sbom/index.ts";
 
 const REPO_CONCURRENCY = 6;
 const MAX_ALERTS = 5000;
@@ -87,7 +87,13 @@ export async function collectGithub(
   ]);
 
   onProgress({ phase: "Reading dependency manifests" });
-  const dependencies = deps ? await collectDependencies(client, repos, deps.cache, deps.toolDir, onProgress) : null;
+  // Without Contents, public repositories would still answer: nothing is read, so nothing passes on half an inventory.
+  const refused = client.installation?.permissions?.contents
+    ? null
+    : Object.assign(new Error("The GitHub App doesn't have the Contents permission. Add Contents: Read-only to the App, then accept it in the organization."), {
+        status: 403,
+      });
+  const dependencies = deps ? await collectDependencies(client, repos, deps.cache, deps.toolDir, onProgress, refused) : null;
 
   const inst = client.installation;
   return {

@@ -1,0 +1,15 @@
+// Every Gitea check module, in the order they run. Adding one: write it with
+// defineChecks (./define.ts), list it here, and add a failing case to
+// test/gitea-cases.ts.
+
+import identity from "./identity.ts";
+import branches from "./branches.ts";
+import exposure from "./exposure.ts";
+import integrations from "./integrations.ts";
+import dependencies from "./dependencies.ts";
+import type { CheckModule } from "../../../core/checks/define.ts";
+
+export const GITEA_MODULES = [identity, branches, exposure, integrations, dependencies] as const;
+
+type IdsOf<M> = M extends CheckModule<infer Id, infer _C, infer _S> ? Id : never;
+export type GiteaCheckId = IdsOf<(typeof GITEA_MODULES)[number]>;

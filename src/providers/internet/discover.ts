@@ -50,6 +50,7 @@ export const INPUTS: LinkKey[] = [
   "alibabaReleased",
   "vercelDomains",
   "githubPages",
+  "gitlabPages",
 ];
 
 export interface DiscoverInput {
@@ -97,7 +98,12 @@ export async function discover(client: InternetClient, input: DiscoverInput): Pr
   // Domains: the zones as they are, everything else by its registrable name; a domain under another is dropped.
   const names = new Set<string>([
     ...zones.keys(),
-    ...[...input.orgDomains, ...(related.vercelDomains ?? []).map((d) => d.host), ...(related.githubPages ?? []).map((p) => p.host)]
+    ...[
+      ...input.orgDomains,
+      ...(related.vercelDomains ?? []).map((d) => d.host),
+      ...(related.githubPages ?? []).map((p) => p.host),
+      ...(related.gitlabPages ?? []).map((p) => p.host),
+    ]
       .map(lower)
       .filter((n) => validName(n) && !sharedPlatformName(n))
       .map((n) => (zones.has(n) ? n : registrable(n))),

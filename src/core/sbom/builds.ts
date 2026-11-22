@@ -11,7 +11,8 @@
 // repository's name alone. The result is a reading of text, not of what a run
 // did: links made this way are shown as coming from a workflow.
 
-import { parseImageRef, type ImageBuildLink, type RegistryKind } from "../../../shared/images.ts";
+import { WORKFLOW_FILE } from "./manifests.ts";
+import { parseImageRef, type ImageBuildLink, type RegistryKind } from "../../shared/images.ts";
 
 export type BuildRef = Omit<ImageBuildLink, "repo">;
 
@@ -26,7 +27,7 @@ export function imageBuilds(files: Map<string, string>, repo: string): BuildRef[
   const out = new Map<string, BuildRef>();
   const [owner, name] = repo.toLowerCase().split("/");
   for (const [path, text] of files) {
-    if (!/^\.github\/workflows\/[^/]+\.ya?ml$/.test(path)) continue;
+    if (!WORKFLOW_FILE.test(path)) continue;
     const lines = text.split("\n");
     const hasEcr = /uses:\s*["']?aws-actions\/amazon-ecr-login@/.test(text);
     const hasAcr = /uses:\s*["']?aliyun\/acr-login@/.test(text);

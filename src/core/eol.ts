@@ -13,6 +13,7 @@
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { ownRequest } from "./net.ts";
 
 const DAY = 86_400_000;
 const TIMEOUT_MS = 15_000;
@@ -53,7 +54,7 @@ async function fromDisk(toolDir: string | null): Promise<Stored | null> {
 }
 
 async function download(product: string): Promise<ReleaseLine[]> {
-  const res = await fetch(`https://endoflife.date/api/${encodeURIComponent(product)}.json`, {
+  const res = await ownRequest(`https://endoflife.date/api/${encodeURIComponent(product)}.json`, {
     signal: AbortSignal.timeout(TIMEOUT_MS),
     headers: { accept: "application/json" },
   });

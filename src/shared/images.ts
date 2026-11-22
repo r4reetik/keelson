@@ -57,13 +57,14 @@ export const imageName = (r: Pick<ImageRef, "registry" | "repository">): string 
 export const pullRef = (r: ImageRef): string => `${imageName(r)}${r.digest ? `@${r.digest}` : `:${r.tag ?? "latest"}`}`;
 
 /** The kinds of registry Keelson tells apart by their host. */
-export type RegistryKind = "ecr" | "ecr-public" | "acr" | "ghcr" | "dockerhub" | "other";
+export type RegistryKind = "ecr" | "ecr-public" | "acr" | "ghcr" | "gitlab" | "dockerhub" | "other";
 
 export const REGISTRY_LABEL: Record<RegistryKind, string> = {
   ecr: "Amazon ECR",
   "ecr-public": "Amazon ECR Public",
   acr: "Alibaba Cloud Container Registry",
   ghcr: "GitHub Container Registry",
+  gitlab: "GitLab Container Registry",
   dockerhub: "Docker Hub",
   other: "Other registry",
 };
@@ -74,6 +75,7 @@ export const REGISTRY_PROVIDER: Record<RegistryKind, ProviderId | null> = {
   "ecr-public": null,
   acr: "alibaba",
   ghcr: "github",
+  gitlab: "gitlab",
   dockerhub: null,
   other: null,
 };
@@ -83,6 +85,8 @@ export function registryKind(host: string): RegistryKind {
   if (/^\d{12}\.dkr\.ecr(-fips)?\.[a-z0-9-]+\.amazonaws\.com(\.cn)?$/.test(h)) return "ecr";
   if (h === "public.ecr.aws") return "ecr-public";
   if (h === "ghcr.io") return "ghcr";
+  // gitlab.com's registry. An instance its users host names its registry itself, and is "other" by its host alone.
+  if (h === "registry.gitlab.com") return "gitlab";
   if (h === "docker.io") return "dockerhub";
   if (/(^|[.-])registry(-vpc|-intl|-intl-vpc|-internal)?\.[a-z0-9-]+\.(cr\.)?aliyuncs\.com$/.test(h)) return "acr";
   return "other";

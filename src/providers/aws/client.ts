@@ -16,6 +16,7 @@ import { awsEncode, canonicalQuery, EMPTY_SHA256, signGet, signPost, type AwsCre
 import { find, parseXml, text, type XmlNode } from "../../core/xml.ts";
 import { CREDENTIAL_SEPARATOR } from "../../shared/providers.ts";
 import type { Coverage } from "../../shared/api.ts";
+import { request } from "../../core/net.ts";
 
 const MAX_IN_FLIGHT = 8;
 const TIMEOUT_MS = 30_000;
@@ -279,7 +280,7 @@ export class AwsClient {
         const path = req.path.split("/").map(awsEncode).join("/");
         let res: Response;
         try {
-          res = await fetch(`https://${req.host}${path}${qs ? `?${qs}` : ""}`, {
+          res = await request(`https://${req.host}${path}${qs ? `?${qs}` : ""}`, {
             method: req.body != null ? "POST" : "GET",
             signal: AbortSignal.timeout(TIMEOUT_MS),
             headers:

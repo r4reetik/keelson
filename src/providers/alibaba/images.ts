@@ -262,6 +262,8 @@ function foreignFor(registries: AlibabaRegistry[], related: Partial<Related>): (
     if (kind === "acr") return own.has(canonicalRegistry(ref.registry)) || (related.alibabaAccounts?.length ?? 0) > 0 ? "entity" : "private";
     if (kind === "ecr") return related.awsAccounts?.includes(ecrHost(ref.registry)?.account ?? "") ? "entity" : "private";
     if (kind === "ghcr") return related.githubOrgs?.includes(ref.repository.split("/")[0]) ? "entity" : "public";
+    // gitlab.com's registry: an image under one of the entity's groups is the entity's own.
+    if (kind === "gitlab") return related.gitlabGroups?.some((g) => ref.repository.startsWith(`${g.group}/`)) ? "entity" : "public";
     return "public";
   };
 }

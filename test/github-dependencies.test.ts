@@ -12,8 +12,8 @@ import { installMockGithub, MOCK_GITHUB_ACCOUNT, MOCK_SOURCE_CONTENT, MOCK_SOURC
 import { seedAccount, seedGithub, testRepo } from "../dev/mock/accounts.ts";
 import { installMockCloudflare } from "../dev/mock/cloudflare.ts";
 import { makeApp } from "./helpers/app.ts";
-import { baseImages, findParts, goRequires, requirementLines, wanted } from "../src/providers/github/sbom/manifests.ts";
-import { actionUses, compareVersions, mergeAliases } from "../src/providers/github/sbom/index.ts";
+import { baseImages, findParts, goRequires, requirementLines, wanted } from "../src/core/sbom/manifests.ts";
+import { actionUses, compareVersions, mergeAliases } from "../src/core/sbom/index.ts";
 import type { DepVuln } from "../src/providers/github/types.ts";
 import type { DependenciesResponse } from "../src/shared/dependencies.ts";
 import { evaluateGithub } from "../src/providers/github/engine.ts";
@@ -354,7 +354,7 @@ test("packages under one npm scope with a strong copyleft license are one findin
 });
 
 test("a license is judged by its own expression with Grant's classes: a choice takes the least restrictive", async () => {
-  const { licenseRiskOf } = await import("../src/providers/github/sbom/index.ts");
+  const { licenseRiskOf } = await import("../src/core/sbom/index.ts");
   const classes = new Map<string, "permissive" | "weak" | "strong" | "other">([
     ["mit", "permissive"],
     ["gpl-3.0-only", "strong"],

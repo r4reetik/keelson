@@ -7,7 +7,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 
-const { start, isLoopback, webMissing, VERSION } = await import("./main.ts");
+const { start, isLoopback, networkUrls, webMissing, VERSION } = await import("./main.ts");
 const { defaultDataDir, defaultHost, env } = await import("./env.ts");
 const { providerList } = await import("./shared/providers.ts");
 
@@ -17,7 +17,8 @@ Usage: keelson [options]
 
 Options:
   --port <n>            Port to listen on (default 4317, env KEELSON_PORT)
-  --host <addr>         Address to bind (default 127.0.0.1, 0.0.0.0 in the image, env KEELSON_HOST)
+  --host <addr>         Address to bind (default 127.0.0.1, 0.0.0.0 in the image, env KEELSON_HOST);
+                        0.0.0.0 lets everyone on your network open it
   --data-dir <path>     Where the database and credentials live (default ~/.keelson, /data in the image, env KEELSON_DATA_DIR)
   --reset-password <u>  Give user <u> a one-time password and exit, for someone locked out
   --trust-proxy         Trust X-Forwarded-* headers from a reverse proxy (env KEELSON_TRUST_PROXY=1)
@@ -98,8 +99,11 @@ const running = await start({
 const accounts = running.repo.accounts.list(),
   entities = running.repo.entities.list();
 const users = running.repo.users.count();
+// In the image these would be the container's own addresses, which nobody outside it can open.
+const shared = env("INSTALL") === "docker" ? [] : networkUrls(host, port);
+const label = (name: string) => `  ${`${name}:`.padEnd(shared.length ? 10 : 7)}`;
 console.log(
-  `\n  Keelson ${VERSION}\n\n  Open:  ${running.url}\n  Data:  ${dataDir}\n  Auth:  ${insecureNoAuth ? "none (sign-in is off: your proxy decides who gets in)" : users ? `sign-in, ${users} user${users === 1 ? "" : "s"}` : "sign-in, no users yet"}\n`,
+  `\n  Keelson ${VERSION}\n\n${label("Open")}${running.url}\n${shared.map((url) => `${label("Network")}${url}\n`).join("")}${label("Data")}${dataDir}\n${label("Auth")}${insecureNoAuth ? "none (sign-in is off: your proxy decides who gets in)" : users ? `sign-in, ${users} user${users === 1 ? "" : "s"}` : "sign-in, no users yet"}\n`,
 );
 const code = running.auth.setupCode;
 if (code) {

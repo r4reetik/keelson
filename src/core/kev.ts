@@ -6,6 +6,7 @@
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { ownRequest } from "./net.ts";
 
 const URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
 const DAY = 86_400_000;
@@ -29,7 +30,7 @@ async function fromDisk(toolDir: string | null): Promise<Stored | null> {
 }
 
 async function download(): Promise<string[]> {
-  const res = await fetch(URL, { signal: AbortSignal.timeout(TIMEOUT_MS), headers: { accept: "application/json" } });
+  const res = await ownRequest(URL, { signal: AbortSignal.timeout(TIMEOUT_MS), headers: { accept: "application/json" } });
   if (!res.ok) throw new Error(`CISA's catalog answered ${res.status}`);
   const body = (await res.json()) as { vulnerabilities?: { cveID?: unknown }[] };
   const ids = (body?.vulnerabilities ?? []).map((v) => String(v?.cveID ?? "")).filter((id) => /^CVE-\d{4}-\d+$/.test(id));

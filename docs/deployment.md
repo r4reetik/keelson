@@ -102,7 +102,7 @@ keelson.example.com {
 | Flag | Environment | Default | |
 |---|---|---|---|
 | `--port` | `KEELSON_PORT` | `4317` | Port to listen on |
-| `--host` | `KEELSON_HOST` | `0.0.0.0` (`127.0.0.1` from a clone) | Address to bind. Off loopback, creating the first admin needs the setup code |
+| `--host` | `KEELSON_HOST` | `0.0.0.0` (`127.0.0.1` from a clone) | Address to bind. Off loopback, creating the first admin needs the setup code. From a clone, `0.0.0.0` shares Keelson with everyone on your network, and it prints the addresses they open |
 | `--data-dir` | `KEELSON_DATA_DIR` | `/data` (`~/.keelson` from a clone) | Database and stored tokens |
 | `--trust-proxy` | `KEELSON_TRUST_PROXY=1` | off | Trust `X-Forwarded-*` from your reverse proxy |
 | `--no-open` | | | Don't open a browser (the image always passes it) |
@@ -118,8 +118,11 @@ keelson.example.com {
 Flags are for the command, so in a container they mean running it there: `docker exec keelson node dist/bin.js
 --reset-password <username>`.
 
-Everything else (users and their roles, scan schedule, retention, SLAs, the takeover probe, accounts, entities and
-alert destinations) is set in the web app and stored in the database.
+Everything else (users and their roles, scan schedule, retention, SLAs, the takeover probe, accounts, entities,
+alert destinations and networks) is set in the web app and stored in the database.
+
+A platform that only answers from inside your VPN or zero trust network, or a network that inspects TLS, is set up
+on the **Networks** page, per platform: see [Networks](networks.md).
 
 ## Data, backups and upgrades
 

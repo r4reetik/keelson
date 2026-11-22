@@ -6,6 +6,7 @@
 //   repo.findings   findings with triage, and each finding's timeline
 //   repo.users      the people who sign in, and their roles
 //   repo.cache      what providers keep between scans (GitHub's SBOMs)
+//   repo.networks   the networks requests can leave through, and which one each platform uses
 
 import type { Store } from "./db.ts";
 import { SettingsRepo } from "./settings.ts";
@@ -14,6 +15,7 @@ import { ScanRepo } from "./scans.ts";
 import { FindingRepo } from "./findings.ts";
 import { UserRepo } from "./users.ts";
 import { CacheRepo } from "./cache.ts";
+import { NetworkRepo } from "./networks.ts";
 import { resolveScope, type ResolvedScope } from "../shared/scope.ts";
 
 export type { Account, Entity, EntityNotifications, EntityUpdate } from "./accounts.ts";
@@ -23,6 +25,7 @@ export type { StoredFinding, TriagePatch } from "./findings.ts";
 export type { DoneScan } from "./scans.ts";
 export type { User } from "./users.ts";
 export type { AccountCache } from "./cache.ts";
+export type { Network, NewNetwork } from "./networks.ts";
 export type { Settings } from "../shared/api.ts";
 export { displayName } from "../shared/scope.ts";
 
@@ -38,6 +41,7 @@ export class Repo {
   readonly findings: FindingRepo;
   readonly users: UserRepo;
   readonly cache: CacheRepo;
+  readonly networks: NetworkRepo;
 
   constructor(store: Store) {
     this.store = store;
@@ -48,6 +52,7 @@ export class Repo {
     this.findings = new FindingRepo(store);
     this.users = new UserRepo(store);
     this.cache = new CacheRepo(store);
+    this.networks = new NetworkRepo(store);
   }
 
   /**

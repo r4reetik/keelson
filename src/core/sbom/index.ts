@@ -2,8 +2,11 @@
 // bill of materials made by Anchore's Syft, the packages' known vulnerabilities
 // matched by Grype, and their licenses sorted by Grant.
 //
-// Keelson fetches only those files (manifests, lock files, GitHub Actions
-// workflows and Dockerfiles, found in the default branch's file list), never the
+// Shared by every platform that hosts code (GitHub, Gitea): each gives a
+// CodeHost, and writes no reading, matching or caching of its own.
+//
+// Keelson fetches only those files (manifests, lock files, Actions workflows
+// and Dockerfiles, found in the default branch's file list), never the
 // code. They are written to a temporary folder for Syft and deleted as soon as it
 // has read them; only the SBOM is kept. An SBOM is made again only when one of
 // those files changes, so most scans fetch nothing but each repository's file
@@ -15,13 +18,48 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
-import { AnchoreError, anchore } from "../../../core/anchore.ts";
-import type { AccountCache } from "../../../store/repo.ts";
-import type { ProgressEvent } from "../../../core/types.ts";
-import type { GithubClient, GithubError, Json } from "../client.ts";
-import type { ActionUse, DependencyInventory, DepPackage, DepUsage, DepVuln, GithubRepo, RepoDependencies } from "../types.ts";
+import { AnchoreError, anchore } from "../anchore.ts";
+import type { AccountCache } from "../../store/repo.ts";
+import type { ProgressEvent } from "../types.ts";
+import type { ActionUse, DepPackage, DepUsage, DepVuln, RepoDependencies } from "../../shared/dependencies.ts";
 import { imageBuilds, type BuildRef } from "./builds.ts";
-import { ecosystemOfType, findParts, MAX_FILE_BYTES, MAX_FILES, wanted, type Part } from "./manifests.ts";
+import { CI_FILE, ecosystemOfType, findParts, isWorkflowDir, MAX_FILE_BYTES, MAX_FILES, wanted, WORKFLOW_FILE, type Part } from "./manifests.ts";
+
+/** A raw API or tool payload, read field by field. */
+export type Json = any;
+
+/**
+ * What reading dependencies needs of a platform that hosts code. GitHub and Gitea name the three reads alike
+ * (/repos/<org>/<repo>/git/trees/<branch>?recursive=1, …/git/blobs/<sha>, …/languages) and answer in the same
+ * shapes, so each platform's client is one of these; a platform that differs wraps its client to answer this way.
+ */
+export interface CodeHost {
+  /** The organization's name in addresses. */
+  org: string;
+  /** One GET under the platform's API. Rejects with an error that has a `status`. */
+  raw(path: string): Promise<Json>;
+  /** Records whether a source was readable, as the platform's client does for its own sources. */
+  note(source: "manifests" | "syft" | "grype" | "grant", ok: boolean, err?: unknown): void;
+  coverage: { get(key: "repos"): { ok: boolean } | undefined };
+}
+
+/** A repository whose dependencies are read. */
+export interface CodeRepo {
+  name: string;
+  archived: boolean;
+  empty: boolean;
+  defaultBranch: string;
+}
+
+export interface DependencyInventory {
+  repos: RepoDependencies[];
+  /** Versions of the tools that ran; null for one that isn't installed. */
+  tools: { syft: string | null; grype: string | null; grant: string | null };
+  /** When Grype's vulnerability database was built. */
+  dbBuilt: string | null;
+}
+
+type HostError = { status?: number };
 
 /** Bump when what's cached per repository changes shape, so every SBOM is made again. */
 const FORMAT = 2;
@@ -67,23 +105,18 @@ interface TreeFile {
  * repository contents (the coverage entry says so) or there is nothing to read.
  */
 export async function collectDependencies(
-  client: GithubClient,
-  repos: GithubRepo[],
+  client: CodeHost,
+  repos: CodeRepo[],
   cache: AccountCache,
   toolDir: string | null,
   onProgress: (p: ProgressEvent) => void,
+  /** Why the platform's credential can't read files at all (a permission nobody granted); null when it can. */
+  refused: Error | null = null,
 ): Promise<DependencyInventory | null> {
-  const granted = client.installation?.permissions?.contents;
   const targets = repos.filter((r) => !r.archived && !r.empty);
-  if (!granted) {
+  if (refused) {
     // Public repositories would still answer, but a partial inventory would pass checks on what wasn't read.
-    client.note(
-      "manifests",
-      false,
-      Object.assign(new Error("The GitHub App doesn't have the Contents permission. Add Contents: Read-only to the App, then accept it in the organization."), {
-        status: 403,
-      }),
-    );
+    client.note("manifests", false, refused);
     return null;
   }
 
@@ -157,8 +190,8 @@ export async function collectDependencies(
 
 /** One repository's file list, and its SBOM: cached, or made now. Null when its files couldn't be listed. */
 async function readRepo(
-  client: GithubClient,
-  r: GithubRepo,
+  client: CodeHost,
+  r: CodeRepo,
   cache: AccountCache,
   syftBin: string | null,
   syft: string | null,
@@ -179,7 +212,7 @@ async function readRepo(
     const workflows = new Map<string, string>();
     let unread = false;
     await pool(
-      files.filter((f) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(f.path)),
+      files.filter((f) => WORKFLOW_FILE.test(f.path)),
       BLOB_CONCURRENCY,
       async (f) => {
         try {
@@ -204,7 +237,7 @@ async function readRepo(
       contents.set(f.path, Buffer.from(String(blob?.content ?? ""), "base64").toString("utf8"));
     } catch (e) {
       // A file the App isn't allowed to read means the permission is missing; any other failure is retried next scan.
-      if ([401, 403].includes((e as GithubError).status)) client.note("manifests", false, e);
+      if ([401, 403].includes((e as HostError).status ?? 0)) client.note("manifests", false, e);
       missed = true;
     }
   });
@@ -257,7 +290,7 @@ async function readRepo(
 }
 
 /** The default branch's files, from GitHub's tree: in one request, or folder by folder when GitHub cuts the list short. */
-async function listFiles(client: GithubClient, base: string, branch: string): Promise<{ files: TreeFile[]; partial: boolean } | null> {
+async function listFiles(client: CodeHost, base: string, branch: string): Promise<{ files: TreeFile[]; partial: boolean } | null> {
   const toFiles = (tree: Json[], prefix = "") =>
     tree.filter((e) => e?.type === "blob").map((e) => ({ path: prefix + String(e.path), sha: String(e.sha), size: Number(e.size ?? 0) }));
   let body: Json;
@@ -266,7 +299,7 @@ async function listFiles(client: GithubClient, base: string, branch: string): Pr
     client.note("manifests", true);
   } catch (e) {
     // An empty repository has no tree (409); a branch that's gone, none either.
-    if ([404, 409].includes((e as GithubError).status)) return null;
+    if ([404, 409].includes((e as HostError).status ?? 0)) return null;
     client.note("manifests", false, e);
     return null;
   }
@@ -283,7 +316,7 @@ async function listFiles(client: GithubClient, base: string, branch: string): Pr
     for (const e of t?.tree ?? []) {
       const path = prefix + String(e.path);
       if (e.type === "blob") files.push({ path, sha: String(e.sha), size: Number(e.size ?? 0) });
-      else if (e.type === "tree" && (wanted(`${path}/package.json`) || path === ".github" || path === ".github/workflows"))
+      else if (e.type === "tree" && (wanted(`${path}/package.json`) || path === ".github" || path === ".gitea" || isWorkflowDir(path)))
         queue.push({ sha: String(e.sha), prefix: `${path}/` });
     }
   }
@@ -591,7 +624,7 @@ function dependenciesOf(repo: string, c: Cached, vulns: Map<string, DepVuln[]>, 
   const partAt = (location: string) => {
     const dir = posix.dirname(location.replace(/^\//, ""));
     const d = dir === "." ? "" : dir;
-    if (d === ".github/workflows") return d;
+    if (isWorkflowDir(d)) return d;
     return parts.find((p) => !p.workflows && (p.path === "" || d === p.path || d.startsWith(`${p.path}/`)))?.path ?? "";
   };
 
@@ -605,7 +638,7 @@ function dependenciesOf(repo: string, c: Cached, vulns: Map<string, DepVuln[]>, 
     if (!usage.get(id)?.size)
       for (const l of locations) {
         const at = partAt(l);
-        use(id, at, at === ".github/workflows", c.parts.find((p) => p.path === at)?.devOnly ?? false);
+        use(id, at, isWorkflowDir(at), c.parts.find((p) => p.path === at)?.devOnly ?? false);
       }
     const usedBy = [...(usage.get(id)?.values() ?? [])].sort((x, y) => Number(y.direct) - Number(x.direct) || x.part.localeCompare(y.part));
     const devOnly = dev.has(`${a.name}@${a.version}`) || (usedBy.length > 0 && usedBy.every((u) => u.dev));
@@ -641,9 +674,9 @@ function dependenciesOf(repo: string, c: Cached, vulns: Map<string, DepVuln[]>, 
 
 /** Steps that run another repository's action, from the workflows and composite actions. */
 export function actionUses(files: Map<string, string>): ActionUse[] {
-  const out: ActionUse[] = [];
+  const out: ActionUse[] = ciIncludes(files);
   for (const [path, text] of files) {
-    if (!/^\.github\/workflows\/[^/]+\.ya?ml$/.test(path) && !/(^|\/)action\.ya?ml$/.test(path)) continue;
+    if (!WORKFLOW_FILE.test(path) && !/(^|\/)action\.ya?ml$/.test(path)) continue;
     for (const m of text.matchAll(/^\s*(?:-\s*)?uses:\s*["']?([^\s"'#]+)["']?/gm)) {
       const uses = m[1];
       // Local actions (./…) and container images (docker://…) aren't another repository's action.
@@ -651,6 +684,51 @@ export function actionUses(files: Map<string, string>): ActionUse[] {
       const at = uses.lastIndexOf("@");
       if (at < 1) continue;
       out.push({ action: uses.slice(0, at), ref: uses.slice(at + 1), workflow: path });
+    }
+  }
+  return out;
+}
+
+/**
+ * What a GitLab CI configuration includes from outside its own project: another project's files (`project:` with a
+ * `ref:`), a CI/CD component (`component: host/group/name@version`) and a file at an address (`remote:`). Each is
+ * code the pipeline runs with the project's CI variables, as an action is in a workflow, so they are kept in the same
+ * shape: what is included, the ref it is included at, and the file that includes it. GitLab's own templates
+ * (`template:`) and the project's own files (`local:`) aren't someone else's code. A reading of text, like the rest.
+ */
+export function ciIncludes(files: Map<string, string>): ActionUse[] {
+  const out: ActionUse[] = [];
+  const value = (v: string) => v.trim().replace(/^["']|["']$/g, "");
+  for (const [path, text] of files) {
+    if (!CI_FILE.test(path)) continue;
+    const lines = text.split("\n").map((l) => l.replace(/\s+#.*$/, ""));
+    for (let i = 0; i < lines.length; i++) {
+      const m = /^(\s*)(?:-\s*)?(project|component|remote):\s*(\S.*)$/.exec(lines[i]);
+      if (!m) continue;
+      const what = value(m[3]);
+      if (m[2] === "component") {
+        // "$CI_SERVER_FQDN/group/name@1.2" or "gitlab.com/group/name@~latest": the host isn't part of whose it is.
+        const at = what.lastIndexOf("@");
+        const name = (at > 0 ? what.slice(0, at) : what).replace(/^[^/]+\//, "");
+        out.push({ action: name, ref: at > 0 ? what.slice(at + 1) : "~latest", workflow: path });
+      } else if (m[2] === "remote") {
+        try {
+          const u = new URL(what);
+          // An address is pinned only when a commit is part of it.
+          out.push({ action: `${u.host}${u.pathname}`, ref: /\b[0-9a-f]{40}\b/.exec(u.pathname)?.[0] ?? "an address that can change", workflow: path });
+        } catch {
+          /* a variable where the address goes: nothing to say about it */
+        }
+      } else {
+        // The ref is a sibling key of `project:`, on one of the next lines of the same list item.
+        let ref = "the default branch";
+        for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
+          if (/^\s*-\s/.test(lines[j]) || /^\S/.test(lines[j])) break;
+          const r = /^\s*ref:\s*(\S.*)$/.exec(lines[j]);
+          if (r) ref = value(r[1]);
+        }
+        out.push({ action: what.replace(/^\//, ""), ref, workflow: path });
+      }
     }
   }
   return out;
@@ -703,4 +781,20 @@ async function pool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>
       while (next < items.length) await fn(items[next++]);
     }),
   );
+}
+
+/**
+ * Keeps each repository's dependencies as the Repositories and Dependencies pages read them (`deps:<repo>` in the
+ * account's cache), replaced on every scan; a repository whose dependencies weren't read this time keeps its last
+ * view only while its SBOM is cached.
+ */
+export function saveDependencyViews(deps: DependencyInventory | null, unreadable: string[], cache: AccountCache): void {
+  if (!deps) return;
+  const seen = new Set<string>();
+  for (const d of deps.repos) {
+    seen.add(d.repo);
+    cache.put(`deps:${d.repo}`, { dependencies: d, tools: deps.tools, dbBuilt: deps.dbBuilt, unreadable });
+  }
+  const kept = new Set(cache.keys("sbom:").map((k) => k.slice(5)));
+  for (const key of cache.keys("deps:")) if (!seen.has(key.slice(5)) && !kept.has(key.slice(5))) cache.delete(key);
 }

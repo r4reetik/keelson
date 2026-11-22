@@ -6,6 +6,18 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--", "--mock"],
       "port": 5173
+    },
+    {
+      "name": "keelson-mock-beside",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["KEELSON_PORT=4517", "KEELSON_WEB_PORT=5373", "npm", "run", "dev", "--", "--mock"],
+      "port": 5373
+    },
+    {
+      "name": "keelson-mock-shared",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["KEELSON_PORT=4617", "KEELSON_WEB_PORT=5473", "npm", "run", "dev", "--", "--mock", "--host"],
+      "port": 5473
     }
   ]
 }

@@ -8,6 +8,7 @@
 import { createHash } from "node:crypto";
 import type { Api, CoverageEntry } from "./types.ts";
 import { SOURCES, type SourceKey } from "./sources.ts";
+import { ownRequest, request } from "./net.ts";
 
 const API = "https://api.cloudflare.com/client/v4";
 const MAX_IN_FLIGHT = 24;
@@ -71,7 +72,7 @@ export class CloudflareClient {
         this.#window.stamps.push(Date.now());
         let res: Response;
         try {
-          res = await fetch(API + path, {
+          res = await request(API + path, {
             ...init,
             signal: AbortSignal.timeout(TIMEOUT_MS),
             headers: { Authorization: `Bearer ${this.#token}`, "Content-Type": "application/json", ...(init.headers || {}) },
@@ -268,7 +269,7 @@ export const dohStats = { lookups: 0, failed: 0 };
 export async function doh(name: string, type = "A"): Promise<DohAnswer> {
   dohStats.lookups++;
   try {
-    const res = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${type}`, {
+    const res = await ownRequest(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=${type}`, {
       headers: { accept: "application/dns-json" },
       signal: AbortSignal.timeout(10_000),
     });

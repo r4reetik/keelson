@@ -5,6 +5,8 @@
 // a public file: no credential is sent, and it is only read when an AWS account
 // is connected.
 
+import { ownRequest } from "./net.ts";
+
 /** Inclusive [start, end] of IPv4 ranges as integers, sorted by start. */
 export type Prefixes = [number, number][];
 
@@ -48,7 +50,7 @@ export function inPrefixes(ip: string, prefixes: Prefixes): boolean {
 
 /** GET the published ranges and keep EC2's IPv4 ones. Throws when the file can't be read. */
 export async function fetchEc2Prefixes(): Promise<Prefixes> {
-  const res = await fetch(AWS_RANGES_URL, { method: "GET", signal: AbortSignal.timeout(30_000), headers: { Accept: "application/json" } });
+  const res = await ownRequest(AWS_RANGES_URL, { method: "GET", signal: AbortSignal.timeout(30_000), headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`AWS address ranges answered ${res.status}`);
   const body = (await res.json()) as { prefixes?: { ip_prefix?: string; service?: string }[] };
   return toPrefixes((body.prefixes ?? []).filter((p) => p.service === "EC2" && p.ip_prefix).map((p) => p.ip_prefix!));

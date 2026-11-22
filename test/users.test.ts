@@ -101,6 +101,7 @@ describe("roles", () => {
       accounts: ["/api/entities", "POST", { name: "Another Co" }],
       checks: ["/api/checks/CF-001", "PUT", { disabled: false, severity: null }],
       settings: ["/api/settings", "PUT", { retentionDays: 90 }],
+      networks: ["/api/network-use", "PUT", { target: "default", network: "direct" }],
       users: ["/api/users", "POST", { username: `new-${Math.random().toString(36).slice(2, 8)}`, role: "viewer" }],
     };
     for (const role of ROLES) {
@@ -119,6 +120,7 @@ describe("roles", () => {
       for (const path of ["/api/overview", "/api/findings", "/api/checks", "/api/settings", "/api/accounts", "/api/export/findings.csv"])
         assert.equal((await as.call(path)).status, 200, `${role} reads ${path}`);
       assert.equal((await as.call("/api/users")).status, can(role, "users") ? 200 : 403, "only admins list users");
+      assert.equal((await as.call("/api/networks")).status, can(role, "networks") ? 200 : 403, "only admins see how requests are routed");
     }
     t.cleanup();
   });

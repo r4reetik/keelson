@@ -746,6 +746,12 @@ export interface ProviderLinks {
   githubOrgs?: string[];
   /** Every repository of a GitHub organization ("org/name", lowercase), its default branch, and whether a change there needs a reviewed pull request. */
   githubRepos?: { repo: string; defaultBranch: string; reviewed: boolean }[];
+  /** Custom domains of a GitLab group's Pages sites, with the project that serves each. */
+  gitlabPages?: { host: string; repo: string }[];
+  /** The GitLab group's full path, lowercase, with the host of the instance it is on, so cloud roles can tell a project inside the entity from one outside it. */
+  gitlabGroups?: { host: string; group: string }[];
+  /** Every project of a GitLab group ("group/subgroup/name", lowercase), its instance, its default branch, and whether a change there needs a merge request. */
+  gitlabProjects?: { host: string; repo: string; defaultBranch: string; reviewed: boolean }[];
   /** Cloudflare zones, so an outside view can tell a domain whose DNS Keelson reads from one it doesn't. */
   cloudflareZones?: string[];
   /** Cloudflare's host records (A, AAAA, CNAME), with whether Cloudflare proxies each. */
@@ -912,6 +918,9 @@ export const LINK_KEYS = [
   "githubPages",
   "githubOrgs",
   "githubRepos",
+  "gitlabPages",
+  "gitlabGroups",
+  "gitlabProjects",
   "cloudflareZones",
   "cloudflareDns",
   "route53Zones",
@@ -948,6 +957,9 @@ export const LINK_PROVIDER: Record<LinkKey, ProviderId> = {
   githubPages: "github",
   githubOrgs: "github",
   githubRepos: "github",
+  gitlabPages: "gitlab",
+  gitlabGroups: "gitlab",
+  gitlabProjects: "gitlab",
   cloudflareZones: "cloudflare",
   cloudflareDns: "cloudflare",
   route53Zones: "aws",
@@ -1071,6 +1083,8 @@ export interface RepoRow {
   accountId?: string;
   /** The organization's login on GitHub, so "owner/repo" can be copied; null when the scan didn't record it. */
   owner?: string | null;
+  /** Where the repository is opened, on a platform people host themselves (Gitea); absent where the owner and name say it. */
+  url?: string | null;
   /** "public", "private" or "internal". */
   visibility: string;
   archived: boolean;

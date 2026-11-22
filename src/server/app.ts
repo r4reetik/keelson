@@ -2,7 +2,7 @@
 // guards it needs (see router.ts), so access never depends on registration order.
 // Every change also names the permission it needs (src/shared/roles.ts):
 //   open       health, session, first admin, sign in/out, own password
-//   authed     accounts, entities, settings, checks, triage, users
+//   authed     accounts, entities, settings, checks, triage, users, networks
 //   configured findings permalinks (needs a connected account)
 //   scoped     dashboard data and exports (?scope=all | e:<id> | a:<id>)
 
@@ -21,6 +21,7 @@ import { settingsRoutes } from "./routes/settings.ts";
 import { dashboardRoutes, findingRoutes } from "./routes/dashboard.ts";
 import { exportRoutes } from "./routes/exports.ts";
 import { userRoutes } from "./routes/users.ts";
+import { networkRoutes } from "./routes/networks.ts";
 import { dependencyRoutes, sbomRoutes } from "./routes/dependencies.ts";
 import { complianceRoutes } from "./routes/compliance.ts";
 import { imageBuildRoutes, imageRoutes } from "./routes/images.ts";
@@ -50,6 +51,7 @@ export function createApp(ctx: AppContext) {
   entityRoutes(authed, ctx);
   settingsRoutes(authed, ctx);
   userRoutes(authed, ctx);
+  networkRoutes(authed, ctx);
   findingRoutes(configured, ctx);
   dependencyRoutes(configured, ctx);
   imageBuildRoutes(configured, ctx);

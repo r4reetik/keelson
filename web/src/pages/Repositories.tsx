@@ -1,4 +1,4 @@
-// GitHub repositories: how each default branch is protected, whether secret
+// Repositories on GitHub and Gitea: how each default branch is protected, whether secret
 // scanning and push protection are on, open security alerts, the Pages site, and
 // open findings. The GitHub counterpart of Zones, Projects and Regions. Filter by
 // language or visibility, and pick repositories to copy or download them.
@@ -13,7 +13,7 @@ import { CopyMenu, DownloadCsvButton, SelectPage, SelectRow, SelectionBar, downl
 
 const TITLE = "Repositories";
 const DESCRIPTION =
-  "Every repository the GitHub App can read: how its default branch is protected, secret scanning, open security alerts, what it depends on and open findings.";
+  "Every repository Keelson can read: how its default branch is protected and its open findings, and on GitHub also secret scanning, open security alerts and what it depends on.";
 
 /** Open alerts by kind; Dependabot and code scanning count critical and high only. */
 const ALERTS: [keyof RepoRow["alerts"], string][] = [
@@ -25,8 +25,10 @@ const ALERTS: [keyof RepoRow["alerts"], string][] = [
 const ALL = "all";
 const VISIBILITY = { public: "Public", private: "Private", internal: "Internal", archived: "Archived" };
 const keyOf = (r: RepoRow) => `${r.accountId ?? ""}/${r.name}`;
-/** "owner/repo" on GitHub, or the bare name when the scan didn't record the organization's login. */
+/** "owner/repo", or the bare name when the scan didn't record the organization's login. */
 const fullName = (r: RepoRow) => (r.owner ? `${r.owner}/${r.name}` : r.name);
+/** Where the repository is opened: the address its scan recorded (a platform people host themselves), else GitHub's. */
+const linkTo = (r: RepoRow) => r.url ?? (r.owner ? `https://github.com/${r.owner}/${r.name}` : r.name);
 const languagesOf = (r: RepoRow) => r.dependencies?.languages.map((l) => l.name) ?? [];
 
 export function RepositoriesPage() {
@@ -47,6 +49,8 @@ export function RepositoriesPage() {
       />
     );
   }
+  // Secret scanning, security alerts and Pages are read on GitHub only: a view without any shows the rest.
+  const scanners = data.repos.some((r) => r.secretScanning != null || !!r.pages || Object.values(r.alerts).some((n) => n != null));
   const q = (params.get("q") || "").toLowerCase();
   const issuesOnly = params.get("issues") === "1";
   const language = params.get("language");
@@ -108,7 +112,7 @@ export function RepositoriesPage() {
                   {
                     label: "Repository links",
                     run: () => ({
-                      lines: picked.map((r) => (r.owner ? `https://github.com/${r.owner}/${r.name}` : r.name)),
+                      lines: picked.map(linkTo),
                       what: ["repository link", "repository links"],
                     }),
                   },
@@ -211,11 +215,15 @@ export function RepositoriesPage() {
                 </Table.Head>
                 <Table.Head sticky="left">Repository</Table.Head>
                 <Table.Head className="whitespace-nowrap">Default branch</Table.Head>
-                <Table.Head className="whitespace-nowrap">Secret scanning</Table.Head>
-                <Table.Head className="whitespace-nowrap">Push protection</Table.Head>
-                <Table.Head className="whitespace-nowrap">Open alerts</Table.Head>
+                {scanners && (
+                  <>
+                    <Table.Head className="whitespace-nowrap">Secret scanning</Table.Head>
+                    <Table.Head className="whitespace-nowrap">Push protection</Table.Head>
+                    <Table.Head className="whitespace-nowrap">Open alerts</Table.Head>
+                  </>
+                )}
                 <Table.Head className="whitespace-nowrap">Dependencies</Table.Head>
-                <Table.Head className="whitespace-nowrap">Pages</Table.Head>
+                {scanners && <Table.Head className="whitespace-nowrap">Pages</Table.Head>}
                 <Table.Head className="whitespace-nowrap">Open findings</Table.Head>
               </Table.Row>
             </Table.Header>
@@ -250,30 +258,34 @@ export function RepositoriesPage() {
                         <span className="text-kumo-default">{r.protection}</span>
                       )}
                     </Table.Cell>
-                    <Table.Cell className="whitespace-nowrap">
-                      {/* Free on public repositories; on private ones it needs GitHub Secret Protection, so off there is a softer warning. */}
-                      <Flag value={r.archived ? null : r.secretScanning} warn={r.visibility === "private"} />
-                    </Table.Cell>
-                    <Table.Cell className="whitespace-nowrap">
-                      <Flag value={r.archived || !r.secretScanning ? null : r.pushProtection} />
-                    </Table.Cell>
-                    <Table.Cell>
-                      {alerts.length ? (
-                        <span className="flex max-w-md flex-wrap gap-x-4 gap-y-1">
-                          {alerts.map(([k, label]) => (
-                            <span key={k} className="whitespace-nowrap text-kumo-subtle">
-                              {label} <span className="tabular-nums text-kumo-default">{num(r.alerts[k] ?? 0)}</span>
+                    {scanners && (
+                      <>
+                        <Table.Cell className="whitespace-nowrap">
+                          {/* Free on public repositories; on private ones it needs GitHub Secret Protection, so off there is a softer warning. */}
+                          <Flag value={r.archived ? null : r.secretScanning} warn={r.visibility === "private"} />
+                        </Table.Cell>
+                        <Table.Cell className="whitespace-nowrap">
+                          <Flag value={r.archived || !r.secretScanning ? null : r.pushProtection} />
+                        </Table.Cell>
+                        <Table.Cell>
+                          {alerts.length ? (
+                            <span className="flex max-w-md flex-wrap gap-x-4 gap-y-1">
+                              {alerts.map(([k, label]) => (
+                                <span key={k} className="whitespace-nowrap text-kumo-subtle">
+                                  {label} <span className="tabular-nums text-kumo-default">{num(r.alerts[k] ?? 0)}</span>
+                                </span>
+                              ))}
                             </span>
-                          ))}
-                        </span>
-                      ) : (
-                        <span className="text-kumo-subtle">None</span>
-                      )}
-                    </Table.Cell>
+                          ) : (
+                            <span className="text-kumo-subtle">None</span>
+                          )}
+                        </Table.Cell>
+                      </>
+                    )}
                     <Table.Cell className="whitespace-nowrap">
                       <Dependencies r={r} href={page} />
                     </Table.Cell>
-                    <Table.Cell className="whitespace-nowrap text-kumo-subtle">{r.pages ?? "None"}</Table.Cell>
+                    {scanners && <Table.Cell className="whitespace-nowrap text-kumo-subtle">{r.pages ?? "None"}</Table.Cell>}
                     <Table.Cell>
                       <Link variant="plain" href={href} className="flex items-center gap-3 whitespace-nowrap">
                         {SCORED_SEVERITIES.filter((s) => r.findings[s]).map((s) => (

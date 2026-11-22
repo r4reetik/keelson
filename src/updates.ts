@@ -9,6 +9,7 @@
 // installation pinned to its current line never receives one automatically.
 
 import type { InstallKind, UpdateStatus } from "./shared/api.ts";
+import { ownRequest } from "./core/net.ts";
 
 const DAY_MS = 86_400_000;
 const FIRST_CHECK_MS = 30_000;
@@ -117,7 +118,7 @@ export class UpdateChecker {
     const { repository, version } = this.#o;
     if (!repository || !this.#on()) return this.status();
     try {
-      const res = await (this.#o.fetch ?? fetch)(`https://api.github.com/repos/${repository}/releases?per_page=30`, {
+      const res = await (this.#o.fetch ?? ownRequest)(`https://api.github.com/repos/${repository}/releases?per_page=30`, {
         headers: { accept: "application/vnd.github+json", "user-agent": "Keelson update check" },
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });

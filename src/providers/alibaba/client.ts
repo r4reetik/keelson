@@ -17,6 +17,7 @@ import { find, parseXml, text, type XmlNode } from "../../core/xml.ts";
 import { ALIBABA_POLICY_ACTIONS } from "../../shared/alibaba.ts";
 import { CREDENTIAL_SEPARATOR } from "../../shared/providers.ts";
 import type { Coverage } from "../../shared/api.ts";
+import { request } from "../../core/net.ts";
 
 const MAX_IN_FLIGHT = 8;
 /** The first pause before a retry, doubled each time. Tests set it to 0. */
@@ -307,7 +308,7 @@ export class AlibabaClient {
         let res: Response;
         try {
           const { host: _host, ...headers } = req.sign(new Date());
-          res = await fetch(`https://${host}${req.path}${qs ? `?${qs}` : ""}`, { method: "GET", signal: AbortSignal.timeout(TIMEOUT_MS), headers });
+          res = await request(`https://${host}${req.path}${qs ? `?${qs}` : ""}`, { method: "GET", signal: AbortSignal.timeout(TIMEOUT_MS), headers });
         } catch (e) {
           // A host that doesn't resolve is a product Alibaba Cloud doesn't offer at that endpoint.
           const cause = (e as { cause?: { code?: string } }).cause?.code;

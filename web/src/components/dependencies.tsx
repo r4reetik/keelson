@@ -267,7 +267,7 @@ function License({ l }: { l: LicenseEvidence }) {
         ))}
       </ul>
       <p className="mt-1 text-xs text-kumo-subtle">
-        {l.repositoryLicense ? `The repository is under ${l.repositoryLicense}.` : "GitHub doesn't detect a license for the repository."}
+        {l.repositoryLicense ? `The repository is under ${l.repositoryLicense}.` : "No license is detected for the repository."}
       </p>
     </Section>
   );

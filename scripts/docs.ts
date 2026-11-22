@@ -11,6 +11,8 @@ import { VERCEL_SOURCES, VERCEL_SOURCE_KEYS } from "../src/providers/vercel/sour
 import { AWS_SOURCES, AWS_SOURCE_KEYS } from "../src/providers/aws/sources.ts";
 import { ALIBABA_SOURCES, ALIBABA_SOURCE_KEYS } from "../src/providers/alibaba/sources.ts";
 import { GITHUB_SOURCES, GITHUB_SOURCE_KEYS } from "../src/providers/github/sources.ts";
+import { GITEA_SOURCES, GITEA_SOURCE_KEYS } from "../src/providers/gitea/sources.ts";
+import { GITLAB_SOURCES, GITLAB_SOURCE_KEYS } from "../src/providers/gitlab/sources.ts";
 import { INTERNET_SOURCES, INTERNET_SOURCE_KEYS } from "../src/providers/internet/sources.ts";
 import { PROVIDERS, PROVIDER_INFO, providerOfUrl, type ProviderId } from "../src/shared/providers.ts";
 import { SEVERITY_LABEL } from "../src/shared/severity.ts";
@@ -39,6 +41,8 @@ const SOURCE_REGISTRY: Record<ProviderId, Record<string, { label: string }>> = {
   aws: AWS_SOURCES,
   alibaba: ALIBABA_SOURCES,
   github: GITHUB_SOURCES,
+  gitlab: GITLAB_SOURCES,
+  gitea: GITEA_SOURCES,
   internet: INTERNET_SOURCES,
 };
 const sourceLabel = (c: CheckDef, k: string) => SOURCE_REGISTRY[c.provider][k].label;
@@ -121,6 +125,16 @@ export function permissionsDoc(): string {
     const ids = needs(k, "github");
     return `| ${s.label} | ${s.permission} | ${ids.length ? ids.join(", ") : "Supporting data for other checks"} |`;
   });
+  const gitlabRows = GITLAB_SOURCE_KEYS.map((k) => {
+    const s = GITLAB_SOURCES[k];
+    const ids = needs(k, "gitlab");
+    return `| ${s.label} | ${s.permission} | ${ids.length ? ids.join(", ") : "Supporting data for other checks"} |`;
+  });
+  const giteaRows = GITEA_SOURCE_KEYS.map((k) => {
+    const s = GITEA_SOURCES[k];
+    const ids = needs(k, "gitea");
+    return `| ${s.label} | ${s.permission} | ${ids.length ? ids.join(", ") : "Supporting data for other checks"} |`;
+  });
   const internetRows = INTERNET_SOURCE_KEYS.map((k) => {
     const s = INTERNET_SOURCES[k];
     const ids = needs(k, "internet");
@@ -138,7 +152,7 @@ export function permissionsDoc(): string {
     "# Permissions",
     "",
     "Keelson only reads, on every provider. Each provider's section lists the data a scan reads and what grants it:",
-    "a token permission on Cloudflare, a team role on Vercel, IAM actions on AWS, RAM actions on Alibaba Cloud, an App permission on GitHub, and for Sonar, public sources and Shodan.",
+    "a token permission on Cloudflare, a team role on Vercel, IAM actions on AWS, RAM actions on Alibaba Cloud, an App permission on GitHub, a token scope and a role on GitLab, a token scope on Gitea, and for Sonar, public sources and Shodan.",
     "",
     "## Cloudflare",
     "",
@@ -235,6 +249,40 @@ export function permissionsDoc(): string {
     "| Source | App permission | Checks that read it |",
     "|---|---|---|",
     ...githubRows,
+    "",
+    "## GitLab",
+    "",
+    "The credential is the address you open GitLab at (https://gitlab.com, or your own instance's) and an access token with the **read_api**",
+    "scope, which reads through the API and can change nothing. A group access token of the group you scan, with the Owner role, is the best fit:",
+    "it belongs to the group, not to a person. A personal access token of one of the group's Owners works the same way. Every request is a GET to",
+    "`<your instance>/api/v4` (`test/gitlab.test.ts` fails on anything else), with the token in a header, and a redirect is never followed. A webhook",
+    "keeps the scheme and host of its address; deploy tokens keep their name, scopes and expiry (GitLab never returns their values); CI/CD",
+    "variables aren't read at all, because GitLab's API returns their values. Each project's files are listed, and only manifest and lock files,",
+    "`.gitlab-ci.yml` and Dockerfiles are fetched for its SBOM, never the code. Images in private and internal projects are listed and not",
+    "scanned: GitLab's registry takes a pull only with the token itself, which a scanner is never given. Syft, Grype, Grant and Trivy are tools",
+    "Keelson runs, when installed, and aren't token scopes. If the instance is only reachable inside your VPN, choose a network for GitLab on the",
+    "Networks page ([Networks](networks.md)).",
+    "",
+    "| Source | Needs | Feeds |",
+    "|---|---|---|",
+    ...gitlabRows,
+    "",
+    "## Gitea",
+    "",
+    "Gitea runs on your own servers, so the credential is your instance's address and an access token from **Settings → Applications** there.",
+    "Give the token read scopes only (organization, repository and user; admin as well, on a site administrator's token, to learn who signs",
+    "in without two-factor authentication) and access to all repositories. It should belong to an owner of the organizations you scan: Gitea",
+    "shows branch rules, webhooks, deploy keys and collaborators only to someone who administers the repository. Every request is a GET to",
+    "`<your instance>/api/v1` (`test/gitea.test.ts` fails on anything else), and a redirect is never followed. A webhook keeps the scheme and",
+    "host of its address and never its secret or authorization header; a push mirror keeps the host it pushes to. If the instance is only",
+    "reachable inside your VPN, or its certificate is from your own authority, choose a network for Gitea on the Networks page",
+    "([Networks](networks.md)). Forgejo serves the same API. With the repository scope Keelson also lists each repository's files and",
+    "fetches only manifest and lock files, workflows and Dockerfiles for its SBOM, never the code; Syft, Grype and Grant are tools Keelson",
+    "runs, when installed, and aren't token scopes.",
+    "",
+    "| Source | Needs | Feeds |",
+    "|---|---|---|",
+    ...giteaRows,
     "",
     "## Internet (Sonar)",
     "",

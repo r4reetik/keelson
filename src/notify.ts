@@ -5,6 +5,7 @@
 import { SEVERITY_WEIGHT } from "./core/catalog.ts";
 import type { EntityNotifications } from "./store/repo.ts";
 import type { Severity } from "./core/types.ts";
+import { ownRequest } from "./core/net.ts";
 
 export interface ScanSummary {
   accountId: string;
@@ -106,7 +107,7 @@ async function send(
 async function post(url: string, body: unknown): Promise<string> {
   if (!validWebhookUrl(url)) return "URL must be https";
   try {
-    const res = await fetch(url, {
+    const res = await ownRequest(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),

@@ -21,7 +21,7 @@ import { coverage, scanMeta, type AccountScan } from "./scope.ts";
 import { buildersOf } from "../core/image-checks.ts";
 import { IndexBuilder, INDEX_FORMAT, type ImageIndex } from "../core/image-index.ts";
 import { INDEX_KEY, runningIn, upgradeScan, usageOf } from "../core/images.ts";
-import { ecosystemOfType } from "../providers/github/sbom/manifests.ts";
+import { ecosystemOfType } from "../core/sbom/manifests.ts";
 import type { Coverage, DnsHostRecord, ProviderLinks, ScanMeta } from "../shared/api.ts";
 import type { RepoDependencies } from "../shared/dependencies.ts";
 import {
@@ -148,9 +148,11 @@ function hostsByTarget(records: DnsHostRecord[]): (target: string) => string[] {
 function joinEntity(scanned: Scanned[], now: number): { images: ImageRow[]; workloads: WorkloadRow[] } {
   const workloads = scanned.flatMap((s) => WORKLOAD_LISTS.flatMap((k) => (s.links[k] ?? []).map((w) => ({ ...w, accountId: s.account.id }))));
   const builds: ImageBuildLink[] = scanned.flatMap((s) => s.links.githubImageBuilds ?? []);
-  const repos = scanned.flatMap((s) => (s.links.githubRepos ?? []).map((r) => r.repo));
-  // The GitHub account that holds each organization, to link a repository's name to its page.
-  const orgAccount = new Map(scanned.flatMap((s) => (s.links.githubOrgs ?? []).map((org) => [org, s.account.id] as const)));
+  const repos = scanned.flatMap((s) => [...(s.links.githubRepos ?? []), ...(s.links.gitlabProjects ?? [])].map((r) => r.repo));
+  // The GitHub or GitLab account that holds each organization or group, to link a repository's name to its page.
+  const orgAccount = new Map(
+    scanned.flatMap((s) => [...(s.links.githubOrgs ?? []), ...(s.links.gitlabGroups ?? []).map((g) => g.group)].map((org) => [org, s.account.id] as const)),
+  );
   const spelled = new Map(scanned.flatMap((s) => [...(s.repoNames ?? [])]));
   const hostsOf = hostsByTarget(scanned.flatMap((s) => DNS_LISTS.flatMap((k) => s.links[k] ?? [])));
   const reach = (w: WorkloadLink) => [...new Set(w.loadBalancers.flatMap(hostsOf))].slice(0, 10);
@@ -263,7 +265,8 @@ export function imagesView(repo: Repo, scope: Scope, now = Date.now()): View {
         scanId: scan.id,
         links: scan.snap.links ?? {},
         images: scan.snap.images ?? null,
-        repoNames: new Map((scan.snap.repos ?? []).map((r) => [`${scan.snap.links?.githubOrgs?.[0] ?? ""}/${r.name}`.toLowerCase(), r.name])),
+        // "owner/name" as registries and workflows spell it, to the name its account knows it by.
+        repoNames: new Map((scan.snap.repos ?? []).map((r) => [`${r.owner ?? scan.snap.links?.githubOrgs?.[0] ?? ""}/${r.name}`.toLowerCase(), r.name])),
       });
   }
   const mine = scanned.filter((s) => inView.has(s.account.id));

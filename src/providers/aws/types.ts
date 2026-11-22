@@ -48,6 +48,12 @@ export interface AwsTrust {
    * such as "repo:org/app:ref:refs/heads/main" or "repo:org/*". An empty list means no subject condition: any repository.
    */
   github?: string[];
+  /**
+   * For any other OIDC provider (GitLab's, most often): the provider as the trust policy names it ("gitlab.com", or an
+   * instance's own host) and the subjects its condition allows, lowercase, such as
+   * "project_path:group/app:ref_type:branch:ref:main". An empty list means no subject condition.
+   */
+  oidc?: { host: string; subjects: string[] };
 }
 
 export interface AwsRole {

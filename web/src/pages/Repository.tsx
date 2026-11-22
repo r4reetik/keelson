@@ -1,4 +1,4 @@
-// One GitHub repository's dependencies, from its software bill of materials: its
+// One repository's dependencies (GitHub or Gitea), from its software bill of materials: its
 // projects (each part of a monorepo, with its ecosystems, lock file and base
 // images), every package with where it's used, its known vulnerabilities and its
 // license, and the SBOM itself to download as CycloneDX, SPDX or Syft JSON.
@@ -146,7 +146,7 @@ export function RepositoryPage({ params }: { params: Record<string, string> }) {
         <>
           {back}
           <Link href={data.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm">
-            Open on GitHub <ArrowSquareOutIcon />
+            Open the repository <ArrowSquareOutIcon />
           </Link>
           <Link variant="plain" href={`/dependencies?repo=${encodeURIComponent(`${data.accountId}/${data.repo}`)}`} className="text-sm">
             Across every repository
@@ -259,7 +259,7 @@ export function RepositoryPage({ params }: { params: Record<string, string> }) {
                   <Table.Row key={p.path}>
                     <Table.Cell sticky="left" className="whitespace-nowrap">
                       <Link variant="plain" render={<button type="button" onClick={() => setParams({ part: p.path, vulnerable: null })} />}>
-                        <span className="font-mono text-sm">{p.workflows ? ".github/workflows" : p.path || "/"}</span>
+                        <span className="font-mono text-sm">{p.path || "/"}</span>
                       </Link>
                       {p.name && !p.workflows && <div className="max-w-80 truncate text-sm text-kumo-subtle">{p.name}</div>}
                       {p.devOnly && <Badge variant="outline">Examples or tests</Badge>}

@@ -5,7 +5,8 @@
 // name the binary ("off" never runs it), else the tool on the PATH.
 //
 // Nothing of Keelson's environment reaches them: each runs with only the PATH, a
-// home folder of its own, proxy settings, and the tool's own settings below.
+// home folder of its own, proxy settings (the machine's, or those of the network
+// chosen on the Networks page), and the tool's own settings below.
 // Syft and Grant never use the network here (no registry lookups for licenses,
 // no update checks). Grype downloads its vulnerability database from Anchore
 // (grype.anchore.io) into the tool folder and refreshes it when a newer one is
@@ -13,10 +14,11 @@
 
 import { spawn } from "node:child_process";
 import { accessSync, constants } from "node:fs";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { availableParallelism, constants as osConstants, setPriority, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { env } from "../env.ts";
+import { caBundle, childProxyEnv, currentRoute, own } from "./net.ts";
 
 export type AnchoreTool = "syft" | "grype" | "grant";
 
@@ -79,7 +81,8 @@ export function runTool(
   args: string[],
   { seconds, extraEnv = {}, cwd, okCodes = [0] }: { seconds: number; extraEnv?: Record<string, string>; cwd?: string; okCodes?: number[] },
 ): Promise<string> {
-  return runChild(label(tool), bin, args, { seconds, env: { ...QUIET[tool], ...extraEnv }, cwd, okCodes, fail: (m) => new AnchoreError(m) });
+  // Grype's database is Keelson's own download, not a platform's: it takes the default route even in the middle of a scan.
+  return own(() => runChild(label(tool), bin, args, { seconds, env: { ...QUIET[tool], ...extraEnv }, cwd, okCodes, fail: (m) => new AnchoreError(m) }));
 }
 
 /**
@@ -110,6 +113,13 @@ export async function runChild(
   };
   for (const k of PROXY) if (process.env[k]) childEnv[k] = process.env[k];
   try {
+    // Whatever the scanner downloads goes the way Keelson's own requests would here: through the network's proxy,
+    // trusting the certificates the network signs with (written beside the scanner's other temporary files).
+    const route = currentRoute();
+    const authorities = caBundle(route);
+    const caFile = authorities ? join(home, "authorities.pem") : null;
+    if (caFile) await writeFile(caFile, authorities!, { mode: 0o600 });
+    Object.assign(childEnv, childProxyEnv(route, caFile));
     return await new Promise<string>((resolve, reject) => {
       const child = spawn(bin, args, { env: childEnv, cwd: cwd ?? home, detached: true, stdio: ["ignore", "pipe", "pipe"] });
       // The lowest priority: a scan takes what's free and gives way to whatever the person at the machine is doing.

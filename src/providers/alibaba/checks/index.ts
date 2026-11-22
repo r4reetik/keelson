@@ -15,9 +15,25 @@ import edge from "./edge.ts";
 import dns from "./dns.ts";
 import monitoring from "./monitoring.ts";
 import cloudflareLinks from "./cloudflare-links.ts";
+import gitlabLinks from "./gitlab-links.ts";
 import type { CheckModule } from "../../../core/checks/define.ts";
 
-export const ALIBABA_MODULES = [identity, access, storage, network, compute, data, workloads, images, secrets, edge, dns, monitoring, cloudflareLinks] as const;
+export const ALIBABA_MODULES = [
+  identity,
+  access,
+  storage,
+  network,
+  compute,
+  data,
+  workloads,
+  images,
+  secrets,
+  edge,
+  dns,
+  monitoring,
+  cloudflareLinks,
+  gitlabLinks,
+] as const;
 
 type IdsOf<M> = M extends CheckModule<infer Id, infer _C, infer _S> ? Id : never;
 export type AlibabaCheckId = IdsOf<(typeof ALIBABA_MODULES)[number]>;

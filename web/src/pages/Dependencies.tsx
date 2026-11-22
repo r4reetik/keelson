@@ -1,4 +1,4 @@
-// Every package the GitHub repositories in view depend on, from each one's
+// Every package the repositories in view (GitHub and Gitea) depend on, from each one's
 // software bill of materials (Syft), with their known vulnerabilities (Grype) and
 // licenses (Grant). Three tabs over one set of filters kept in the URL: packages
 // (each at each version, with the repositories that use it and their findings'
@@ -49,7 +49,7 @@ import {
 
 const TITLE = "Dependencies";
 const DESCRIPTION =
-  "Every package your GitHub repositories depend on, from each repository's software bill of materials: what it is, where it's used, its known vulnerabilities and its license.";
+  "Every package your repositories depend on, from each repository's software bill of materials: what it is, where it's used, its known vulnerabilities and its license.";
 const PER_PAGE = 50;
 const ALL = "all";
 type Tab = "packages" | "vulnerabilities" | "licenses";
@@ -134,7 +134,7 @@ const USE_COLUMNS = (r: PackageRow): FullListColumn<Use>[] => [
       ),
   },
   { label: "Account", value: (u) => u.account, csvOnly: true },
-  { label: "On GitHub", value: (u) => u.url ?? "", copy: { label: "Links on GitHub", what: ["link", "links"] }, csvOnly: true },
+  { label: "Link", value: (u) => u.url ?? "", copy: { label: "Repository links", what: ["link", "links"] }, csvOnly: true },
   { label: "Package", value: () => r.name, csvOnly: true },
   { label: "Version", value: () => r.version, csvOnly: true },
   { label: "Package manager", value: () => r.ecosystem, csvOnly: true },

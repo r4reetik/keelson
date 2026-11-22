@@ -12,6 +12,8 @@ import dns from "./dns.ts";
 import monitoring from "./monitoring.ts";
 import cloudflareLinks from "./cloudflare-links.ts";
 import githubActions from "./github-actions.ts";
+import gitlabCi from "./gitlab-ci.ts";
+import gitlabPages from "./gitlab-pages.ts";
 import access from "./access.ts";
 import workloads from "./workloads.ts";
 import datastores from "./datastores.ts";
@@ -43,6 +45,8 @@ export const AWS_MODULES = [
   logging,
   cloudflareLinks,
   githubActions,
+  gitlabCi,
+  gitlabPages,
 ] as const;
 
 type IdsOf<M> = M extends CheckModule<infer Id, infer _C, infer _S> ? Id : never;

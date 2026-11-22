@@ -44,7 +44,7 @@ import {
   type RegistryImage,
 } from "../src/core/images.ts";
 import { trivy, trivyFailure, trivyLimits, TrivyError } from "../src/core/trivy.ts";
-import { imageBuilds } from "../src/providers/github/sbom/builds.ts";
+import { imageBuilds } from "../src/core/sbom/builds.ts";
 import { Abandoned, fixPlaces, imagesView, inSlices, SLICE_MS, vulnPage } from "../src/server/images.ts";
 import type { RepoDependencies } from "../src/shared/dependencies.ts";
 import {

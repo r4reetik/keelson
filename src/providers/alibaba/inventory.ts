@@ -11,7 +11,7 @@
 
 import { AlibabaError, type AlibabaClient, type Json } from "./client.ts";
 import { ALIBABA_SOURCE_KEYS, ALIBABA_SOURCES, HOME_REGION, type AlibabaSourceKey } from "./sources.ts";
-import { bucketPolicy, escalationPaths, grantsEverything, listOf, statements, trustOf, type Statement } from "./policy.ts";
+import { bucketPolicy, escalationPaths, grantsEverything, listOf, statements, trustOf, type Statement, issuerHost } from "./policy.ts";
 import { find, items, text, type XmlNode } from "../../core/xml.ts";
 import { inCloudflare, isInternal } from "../../core/cloudflare-ranges.ts";
 import { secretInVariables, secretKindIn } from "../../core/secret-patterns.ts";
@@ -377,6 +377,13 @@ async function readIdentities(client: AlibabaClient): Promise<Identities> {
     const github = new Set(
       providers.filter((p) => /^https:\/\/token\.actions\.githubusercontent\.com\/?$/.test(String(p.IssuerUrl))).map((p) => String(p.Arn)),
     );
+    // Every other provider's issuer, as a host: a role that trusts GitLab's is judged against the entity's GitLab groups.
+    const issuers = new Map(
+      providers.flatMap((p) => {
+        const host = issuerHost(p.IssuerUrl);
+        return host && !github.has(String(p.Arn)) ? [[String(p.Arn), host] as const] : [];
+      }),
+    );
     const list = await byMarker(
       (q) => client.rpc("ram", null, "ListRoles", q),
       (p) => listOf<Json>(p?.Roles?.Role),
@@ -388,7 +395,7 @@ async function readIdentities(client: AlibabaClient): Promise<Identities> {
       const role = d?.Role ?? {};
       out.push({
         name,
-        trust: trustOf(statements(role.AssumeRolePolicyDocument), github),
+        trust: trustOf(statements(role.AssumeRolePolicyDocument), github, issuers),
         admin: false,
         serviceLinked: role.IsServiceLinkedRole === true || /^AliyunServiceRoleFor/.test(name),
       });

@@ -262,12 +262,16 @@ export const AWS_CASES: Record<AwsCheckId, () => AwsInventory> = {
   "ADN-002": () => ({ ...withRecord("old-vm.example.com", "A", "198.51.100.77"), released: [{ ip: "198.51.100.77", at: "2026-05-20T00:00:00.000Z" }] }),
   "ADN-003": () => withRecord("partner.example.com", "A", "198.51.100.77"),
   "XP-005": () => withRecord("docs.example.com", "CNAME", "cname.vercel-dns.com"),
+  "XP-034": () => withRecord("handbook.example.com", "CNAME", "example.gitlab.io"),
   "XP-021": () => withRecord("files.example.com", "CNAME", "old-bucket.oss-cn-hangzhou.aliyuncs.com"),
   // The fixture's load balancer uses a group that lets everyone reach 443; a Cloudflare-proxied hostname points at it.
   "XP-006": () => awsInventory(),
   "AID-012": () => withGithubRole([]),
   "XP-010": () => withGithubRole(["repo:other-org/app:ref:refs/heads/main"]),
   "XP-011": () => withGithubRole(["repo:example/app:*"]),
+  "AID-016": () => withGitlabRole([]),
+  "XP-029": () => withGitlabRole(["project_path:other-group/app:ref_type:branch:ref:main"]),
+  "XP-030": () => withGitlabRole(["project_path:example/app:*"]),
 
   "AMO-001": () => withRegion({ guardDuty: false }),
   "AMO-002": () => withRegion({ vpcs: [{ id: VPC, isDefault: false, flowLogs: false }] }),
@@ -358,6 +362,19 @@ function withGithubRole(github: string[]) {
   return awsInventory({ roles: [role({ name: "deploy", trust: [{ principal, kind: "federated", conditional: true, github }], profiles: [] })] });
 }
 
+/** A role GitLab CI on gitlab.com can assume, with these subjects on its trust policy. */
+function withGitlabRole(subjects: string[]) {
+  const principal = "arn:aws:iam::111122223333:oidc-provider/gitlab.com";
+  return awsInventory({
+    roles: [role({ name: "deploy", trust: [{ principal, kind: "federated", conditional: true, oidc: { host: "gitlab.com", subjects } }], profiles: [] })],
+  });
+}
+
+const GITLAB_ENTITY = {
+  gitlabGroups: [{ host: "gitlab.com", group: "example" }],
+  gitlabProjects: [{ host: "gitlab.com", repo: "example/app", defaultBranch: "main", reviewed: true }],
+};
+
 const GITHUB_ENTITY = {
   githubOrgs: ["example"],
   githubRepos: [{ repo: "example/app", defaultBranch: "main", reviewed: true }],
@@ -366,6 +383,9 @@ const GITHUB_ENTITY = {
 export const AWS_CASE_OPTS: Partial<Record<AwsCheckId, Partial<EngineOptions>>> = {
   "XP-010": { related: GITHUB_ENTITY },
   "XP-011": { related: GITHUB_ENTITY },
+  "XP-029": { related: GITLAB_ENTITY },
+  "XP-034": { related: { gitlabPages: [{ host: "www.example.com", repo: "example/site" }] } },
+  "XP-030": { related: GITLAB_ENTITY },
   "XP-021": { related: { alibabaEndpoints: [{ kind: "oss", name: "current-bucket" }] } },
   "XP-005": { related: { vercelDomains: [{ host: "app.example.com", project: "web", projectId: "prj_1", protectsDeploymentUrls: true }] } },
   "XP-006": { related: { toAws: [{ host: "shop.example.com", zone: "example.com", target: LB_DNS, kind: "elb", name: LB_DNS, proxied: true }] } },

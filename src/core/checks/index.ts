@@ -18,6 +18,7 @@ import cost from "./cost.ts";
 import vercelLinks from "./vercel-links.ts";
 import awsLinks from "./aws-links.ts";
 import githubLinks from "./github-links.ts";
+import gitlabLinks from "./gitlab-links.ts";
 import alibabaLinks from "./alibaba-links.ts";
 import type { CheckModule } from "./define.ts";
 
@@ -39,6 +40,7 @@ export const MODULES = [
   awsLinks,
   alibabaLinks,
   githubLinks,
+  gitlabLinks,
 ] as const;
 
 type IdsOf<M> = M extends CheckModule<infer Id> ? Id : never;

@@ -189,6 +189,20 @@ const withGithubRole = (subjects: string[]) =>
       role({ name: "deploy", trust: [{ principal: `acs:ram::${ACCOUNT}:oidc-provider/github`, kind: "federated", conditional: true, github: subjects }] }),
     ],
   });
+/** A role GitLab CI on gitlab.com can assume, with these subjects on its trust policy. */
+const withGitlabRole = (subjects: string[]) =>
+  alibabaInventory({
+    roles: [
+      role({
+        name: "deploy",
+        trust: [{ principal: `acs:ram::${ACCOUNT}:oidc-provider/gitlab`, kind: "federated", conditional: true, oidc: { host: "gitlab.com", subjects } }],
+      }),
+    ],
+  });
+const GITLAB_ENTITY = {
+  gitlabGroups: [{ host: "gitlab.com", group: "example" }],
+  gitlabProjects: [{ host: "gitlab.com", repo: "example/app", defaultBranch: "main", reviewed: true }],
+};
 const instance = region().instances![0];
 
 /** An image in the account's registry instance, run by a workload the internet reaches, failing image check `n`. */
@@ -288,6 +302,10 @@ export const ALIBABA_CASES: Record<AlibabaCheckId, () => AlibabaInventory> = {
   "XP-019": () => withRecord("promo.example.com", "CNAME", "cname.vercel-dns.com"),
   "XP-020": () => withRecord("media.example.com", "CNAME", "d9gone.cloudfront.net"),
   "XP-024": () => withRecord("docs.example.com", "CNAME", "someone.github.io"),
+  "LID-016": () => withGitlabRole([]),
+  "XP-031": () => withGitlabRole(["project_path:other-group/app:ref_type:branch:ref:main"]),
+  "XP-032": () => withGitlabRole(["project_path:example/app:*"]),
+  "XP-033": () => withRecord("handbook.example.com", "CNAME", "someone.gitlab.io"),
 
   "LMO-001": () => alibabaInventory({ trails: [] }),
   "LMO-002": () => withRegion({ vpcs: [{ id: VPC, flowLogs: false }] }),
@@ -315,4 +333,7 @@ export const ALIBABA_CASE_OPTS: Partial<Record<AlibabaCheckId, Partial<EngineOpt
   "XP-019": { related: { vercelDomains: [{ host: "app.example.com", project: "web", projectId: "prj_1", protectsDeploymentUrls: true }] } },
   "XP-020": { related: { awsEndpoints: [{ kind: "cloudfront", name: "d1current.cloudfront.net" }] } },
   "XP-024": { related: { githubPages: [{ host: "www.example.com", repo: "site" }] } },
+  "XP-031": { related: GITLAB_ENTITY },
+  "XP-032": { related: GITLAB_ENTITY },
+  "XP-033": { related: { gitlabPages: [{ host: "www.example.com", repo: "example/site" }] } },
 };

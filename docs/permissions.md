@@ -3,7 +3,7 @@
 # Permissions
 
 Keelson only reads, on every provider. Each provider's section lists the data a scan reads and what grants it:
-a token permission on Cloudflare, a team role on Vercel, IAM actions on AWS, RAM actions on Alibaba Cloud, an App permission on GitHub, and for Sonar, public sources and Shodan.
+a token permission on Cloudflare, a team role on Vercel, IAM actions on AWS, RAM actions on Alibaba Cloud, an App permission on GitHub, a token scope and a role on GitLab, a token scope on Gitea, and for Sonar, public sources and Shodan.
 
 ## Cloudflare
 
@@ -52,7 +52,7 @@ skipped rather than passed. Add accounts tests a token against each source befor
 | mTLS certificates | Account · SSL and Certificates · Read | TLS-014 |
 | Load balancer pools | Account · Load Balancing: Monitors and Pools · Read | DNS-009 |
 | Zone settings | Zone · Zone Settings · Read | TLS-001, TLS-002, TLS-003, TLS-004, TLS-005, TLS-006, TLS-007, TLS-009, TLS-012, WAF-006, WAF-007, WAF-011, TRF-006 |
-| DNS records | Zone · DNS · Read | ZT-008, TLS-010, WAF-015, DNS-001, DNS-002, DNS-003, DNS-004, DNS-005, DNS-007, DNS-008, EML-001, EML-002, EML-003, EML-004, EML-005, EML-006, EML-007, EML-008, EML-009, EML-011, ATS-001, ATS-002, ATS-003, ATS-006, ATS-007, ATS-008, TRF-009, XP-001, XP-002, XP-004, XP-007, XP-008, XP-016, XP-017, XP-009 |
+| DNS records | Zone · DNS · Read | ZT-008, TLS-010, WAF-015, DNS-001, DNS-002, DNS-003, DNS-004, DNS-005, DNS-007, DNS-008, EML-001, EML-002, EML-003, EML-004, EML-005, EML-006, EML-007, EML-008, EML-009, EML-011, ATS-001, ATS-002, ATS-003, ATS-006, ATS-007, ATS-008, TRF-009, XP-001, XP-002, XP-004, XP-007, XP-008, XP-016, XP-017, XP-009, XP-028 |
 | DNSSEC | Zone · DNS · Read | DNS-006 |
 | Edge certificates | Zone · SSL and Certificates · Read | TLS-008, TLS-010, TLS-015 |
 | Origin certificates | Zone · SSL and Certificates · Read | TLS-011, TLS-014, ATS-002 |
@@ -133,7 +133,7 @@ for example) is skipped and shown as not readable on the Regions page: nothing t
 | IAM account summary (root user) | `iam:GetAccountSummary` | AID-001, AID-002 |
 | IAM password policy | `iam:GetAccountPasswordPolicy` | AID-007 |
 | IAM users, their access keys and MFA devices | `iam:ListUsers`, `iam:ListAccessKeys`, `iam:GetAccessKeyLastUsed`, `iam:ListMFADevices`, `iam:GetLoginProfile` | AID-003, AID-004, AID-005, AID-006, AID-007, AID-008 |
-| IAM roles, groups and policies | `iam:GetAccountAuthorizationDetails` | AID-008, AID-009, AID-010, AID-011, AID-013, AEC-007, AID-012, XP-010, XP-011 |
+| IAM roles, groups and policies | `iam:GetAccountAuthorizationDetails` | AID-008, AID-009, AID-010, AID-011, AID-013, AEC-007, AID-012, XP-010, XP-011, AID-016, XP-029, XP-030 |
 | S3 Block Public Access for the account | `s3:GetAccountPublicAccessBlock` | AS3-001, AS3-002, AS3-003 |
 | S3 buckets | `s3:ListAllMyBuckets`, `s3:GetBucketLocation` | AS3-001, AS3-002, AS3-003, ADN-001 |
 | S3 bucket access settings | `s3:GetBucketPublicAccessBlock`, `s3:GetBucketPolicyStatus`, `s3:GetBucketAcl` | AS3-002, AS3-003 |
@@ -152,7 +152,7 @@ for example) is skipped and shown as not readable on the Regions page: nothing t
 | API Gateway custom domain names (every enabled region) | `apigateway:GET` | Supporting data for other checks |
 | GuardDuty detectors (every enabled region) | `guardduty:ListDetectors`, `guardduty:GetDetector` | AMO-001 |
 | CloudFront distributions | `cloudfront:ListDistributions` | AED-001, AED-002, AED-003, AED-004, AED-007, AED-010, ADN-001 |
-| Route 53 hosted zones and records | `route53:ListHostedZones`, `route53:ListResourceRecordSets` | ADN-001, ADN-002, ADN-003, XP-005, XP-021 |
+| Route 53 hosted zones and records | `route53:ListHostedZones`, `route53:ListResourceRecordSets` | ADN-001, ADN-002, ADN-003, XP-005, XP-021, XP-034 |
 | AWS's published address ranges (ip-ranges.amazonaws.com) | None: a public file, read without the access key | ADN-003 |
 | IAM server certificates | `iam:ListServerCertificates` | AED-012 |
 | S3 bucket policies (reduced to the accounts they allow, never stored) | `s3:GetBucketPolicy` | AS3-004 |
@@ -220,7 +220,7 @@ Keelson's policy grows when a check needs a new read. A policy made from an earl
 | RAM password policy | `ram:GetPasswordPolicy` | LID-006 |
 | RAM security settings: MFA at sign-in, and whether users manage their own AccessKeys | `ram:GetSecurityPreference` | LID-014 |
 | RAM policies and who they're attached to (documents reduced to what they allow, never stored) | `ram:ListPolicies`, `ram:GetPolicy`, `ram:ListEntitiesForPolicy`, `ram:ListUsersForGroup` | LID-007, LID-009, LID-011, LEC-007 |
-| RAM roles and their trust policies | `ram:ListRoles`, `ram:GetRole`, `ram:ListOIDCProviders` | LID-008, LID-010, LID-012, XP-022, XP-023, LEC-007 |
+| RAM roles and their trust policies | `ram:ListRoles`, `ram:GetRole`, `ram:ListOIDCProviders` | LID-008, LID-010, LID-012, XP-022, XP-023, LEC-007, LID-016, XP-031, XP-032 |
 | OSS Block Public Access for the account | `oss:GetPublicAccessBlock` | LOS-001, LOS-002, LOS-003 |
 | OSS buckets | `oss:ListBuckets` | LOS-001, LOS-002, LOS-003, LDN-001 |
 | OSS bucket ACLs and Block Public Access | `oss:GetBucketAcl`, `oss:GetBucketPublicAccessBlock` | LOS-002, LOS-003 |
@@ -252,7 +252,7 @@ Keelson's policy grows when a check needs a new read. A policy made from an earl
 | ActionTrail trails | `actiontrail:DescribeTrails` | LMO-001 |
 | Security Center agents | `yundun-sas:DescribeCloudCenterInstances` | LMO-003 |
 | CDN domains | `cdn:DescribeUserDomains` | LLB-003, LDN-001 |
-| Alibaba Cloud DNS domains and records | `alidns:DescribeDomains`, `alidns:DescribeDomainRecords` | LDN-001, LDN-002, XP-019, XP-020, XP-024 |
+| Alibaba Cloud DNS domains and records | `alidns:DescribeDomains`, `alidns:DescribeDomainRecords` | LDN-001, LDN-002, XP-019, XP-020, XP-024, XP-033 |
 
 ## GitHub
 
@@ -301,6 +301,71 @@ Keelson runs, when installed, and aren't GitHub permissions: without one, its so
 | Packages, vulnerabilities and stored credentials in public container images (Aqua Trivy) | Trivy installed where Keelson runs: on the PATH, or its path in KEELSON_TRIVY (not in the Docker image yet). Its database, about 1.6 GB, is downloaded into the data folder | GIM-001, GIM-002, GIM-003, GIM-004 |
 | CISA's catalog of known exploited vulnerabilities | None: a public file, read from www.cisa.gov without a credential | GIM-001 |
 | Secret scanning alerts | Repository permissions → Secret scanning alerts: Read-only | GSC-003 |
+
+## GitLab
+
+The credential is the address you open GitLab at (https://gitlab.com, or your own instance's) and an access token with the **read_api**
+scope, which reads through the API and can change nothing. A group access token of the group you scan, with the Owner role, is the best fit:
+it belongs to the group, not to a person. A personal access token of one of the group's Owners works the same way. Every request is a GET to
+`<your instance>/api/v4` (`test/gitlab.test.ts` fails on anything else), with the token in a header, and a redirect is never followed. A webhook
+keeps the scheme and host of its address; deploy tokens keep their name, scopes and expiry (GitLab never returns their values); CI/CD
+variables aren't read at all, because GitLab's API returns their values. Each project's files are listed, and only manifest and lock files,
+`.gitlab-ci.yml` and Dockerfiles are fetched for its SBOM, never the code. Images in private and internal projects are listed and not
+scanned: GitLab's registry takes a pull only with the token itself, which a scanner is never given. Syft, Grype, Grant and Trivy are tools
+Keelson runs, when installed, and aren't token scopes. If the instance is only reachable inside your VPN, choose a network for GitLab on the
+Networks page ([Networks](networks.md)).
+
+| Source | Needs | Feeds |
+|---|---|---|
+| Group settings | Token scope read_api, on a token with the Owner role in the group | GLG-001, GLG-003 |
+| Group members and their roles | Token scope read_api | GLG-002 |
+| Group webhooks (GitLab Premium and Ultimate) | Token scope read_api, on a token with the Owner role in the group | GLH-001, GLH-002 |
+| Projects, in the group and its subgroups | Token scope read_api | Supporting data for other checks |
+| Protected branches | Token scope read_api, on a token with at least the Developer role | GLB-001, GLB-002, GLB-004 |
+| Merge request approval rules and settings (GitLab Premium and Ultimate) | Token scope read_api, on a token with at least the Maintainer role in the project (an Owner of the group has it) | GLB-003 |
+| Project webhooks | Token scope read_api, on a token with at least the Maintainer role in the project (an Owner of the group has it) | GLH-001, GLH-002 |
+| Deploy keys | Token scope read_api, on a token with at least the Maintainer role in the project (an Owner of the group has it) | GLH-003 |
+| Deploy tokens (never their values) | Token scope read_api, on a token with at least the Maintainer role in the project (an Owner of the group has it) | GLH-004 |
+| GitLab Pages custom domains | Token scope read_api, on a token with at least the Maintainer role in the project (an Owner of the group has it) | Supporting data for other checks |
+| Manifest and lock files and CI configuration, for each project's SBOM (never the code) | Token scope read_api, on a token with at least the Reporter role | GLD-001, GLD-002, GLD-003, GLD-004, GLD-005, GLD-006 |
+| Software bill of materials (Anchore Syft) | Syft installed where Keelson runs: on the PATH, or its path in KEELSON_SYFT (not in the Docker image yet) | GLD-001, GLD-002, GLD-003, GLD-006 |
+| Known vulnerabilities in dependencies (Anchore Grype) | Grype installed where Keelson runs: on the PATH, or its path in KEELSON_GRYPE (not in the Docker image yet). Its database, about 3 GB, is downloaded from Anchore into the data folder | GLD-001, GLD-002, GLD-003 |
+| Dependency licenses (Anchore Grant) | Grant installed where Keelson runs: on the PATH, or its path in KEELSON_GRANT (not in the Docker image yet) | GLD-006 |
+| Container registry repositories and their tags | Token scope read_api, on a token with at least the Reporter role | GLM-001, GLM-002, GLM-003, GLM-004 |
+| Packages, vulnerabilities and stored credentials in public container images (Aqua Trivy) | Trivy installed where Keelson runs: on the PATH, or its path in KEELSON_TRIVY (not in the Docker image yet). Its database, about 1.6 GB, is downloaded into the data folder | GLM-001, GLM-002, GLM-003, GLM-004 |
+| CISA's catalog of known exploited vulnerabilities | None: a public file, read from www.cisa.gov without a credential | GLM-001 |
+
+## Gitea
+
+Gitea runs on your own servers, so the credential is your instance's address and an access token from **Settings → Applications** there.
+Give the token read scopes only (organization, repository and user; admin as well, on a site administrator's token, to learn who signs
+in without two-factor authentication) and access to all repositories. It should belong to an owner of the organizations you scan: Gitea
+shows branch rules, webhooks, deploy keys and collaborators only to someone who administers the repository. Every request is a GET to
+`<your instance>/api/v1` (`test/gitea.test.ts` fails on anything else), and a redirect is never followed. A webhook keeps the scheme and
+host of its address and never its secret or authorization header; a push mirror keeps the host it pushes to. If the instance is only
+reachable inside your VPN, or its certificate is from your own authority, choose a network for Gitea on the Networks page
+([Networks](networks.md)). Forgejo serves the same API. With the repository scope Keelson also lists each repository's files and
+fetches only manifest and lock files, workflows and Dockerfiles for its SBOM, never the code; Syft, Grype and Grant are tools Keelson
+runs, when installed, and aren't token scopes.
+
+| Source | Needs | Feeds |
+|---|---|---|
+| Organization settings | Token scope organization: Read | Supporting data for other checks |
+| Organization members | Token scope organization: Read | TEI-001, TEI-004 |
+| Teams, their access and their members | Token scope organization: Read | TEI-002, TEI-003 |
+| Which users sign in without two-factor authentication | Token scope admin: Read, on a token of a site administrator. Gitea tells nobody else | TEI-001 |
+| Organization webhooks | Token scope organization: Read, on a token of an owner of the organization | TEH-001 |
+| Repositories | Token scopes organization: Read and repository: Read, with access to all repositories (public, private and limited) | TER-001, TER-002 |
+| Branch protection | Token scope repository: Read, on a token of someone who administers the repository (an owner of the organization does) | TEB-001, TEB-002, TEB-003, TEB-004 |
+| Repository webhooks | Token scope repository: Read, on a token of someone who administers the repository (an owner of the organization does) | TEH-001 |
+| Deploy keys | Token scope repository: Read, on a token of someone who administers the repository (an owner of the organization does) | TEH-002 |
+| Collaborators outside the organization | Token scope repository: Read, on a token of someone who administers the repository (an owner of the organization does) | TEI-004 |
+| Push mirrors | Token scope repository: Read, on a token of someone who administers the repository (an owner of the organization does) | TER-002 |
+| Manifest and lock files, for each repository's SBOM (never the code) | Token scope repository: Read, with access to all repositories | TED-001, TED-002, TED-003, TED-004, TED-005, TED-006 |
+| Software bill of materials (Anchore Syft) | Syft installed where Keelson runs: on the PATH, or its path in KEELSON_SYFT (not in the Docker image yet) | TED-001, TED-002, TED-003, TED-006 |
+| Known vulnerabilities in dependencies (Anchore Grype) | Grype installed where Keelson runs: on the PATH, or its path in KEELSON_GRYPE (not in the Docker image yet). Its database, about 3 GB, is downloaded from Anchore into the data folder | TED-001, TED-002, TED-003 |
+| Dependency licenses (Anchore Grant) | Grant installed where Keelson runs: on the PATH, or its path in KEELSON_GRANT (not in the Docker image yet) | TED-006 |
+| Whether the instance shows public repositories without signing in | None: one request without the token | TER-001 |
 
 ## Internet (Sonar)
 

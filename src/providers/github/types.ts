@@ -202,14 +202,8 @@ export interface GithubInventory {
 }
 
 export type { ActionUse, DepPackage, DepUsage, DepVuln, RepoDependencies } from "../../shared/dependencies.ts";
-import type { RepoDependencies } from "../../shared/dependencies.ts";
 import type { ImageBacklog, ImageHighlights } from "../../core/images.ts";
 import type { ImagesSnapshot, WorkloadLink } from "../../shared/images.ts";
 
-export interface DependencyInventory {
-  repos: RepoDependencies[];
-  /** Versions of the tools that ran; null for one that isn't installed. */
-  tools: { syft: string | null; grype: string | null; grant: string | null };
-  /** When Grype's vulnerability database was built. */
-  dbBuilt: string | null;
-}
+export type { DependencyInventory } from "../../core/sbom/index.ts";
+import type { DependencyInventory } from "../../core/sbom/index.ts";

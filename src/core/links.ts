@@ -18,6 +18,16 @@ export function pointsAtVercel(type: string, content: string): boolean {
 const PAGES_CNAME = /\.github\.io\.?$/i;
 const PAGES_ADDR = /^(185\.199\.(108|109|110|111)\.153|2606:50c0:800[0-3]::153)$/i;
 
+/** GitLab Pages on gitlab.com: a site's own name under gitlab.io, or the address GitLab gives for an apex record. */
+const GITLAB_PAGES_CNAME = /(^|\.)gitlab\.io\.?$/i;
+const GITLAB_PAGES_ADDR = /^(35\.185\.44\.232|2600:1901:0:7b8a::)$/i;
+
+export function pointsAtGitlabPages(type: string, content: string): boolean {
+  if (type === "CNAME") return GITLAB_PAGES_CNAME.test(content);
+  if (type === "A" || type === "AAAA") return GITLAB_PAGES_ADDR.test(content);
+  return false;
+}
+
 export function pointsAtGithubPages(type: string, content: string): boolean {
   if (type === "CNAME") return PAGES_CNAME.test(content);
   if (type === "A" || type === "AAAA") return PAGES_ADDR.test(content);

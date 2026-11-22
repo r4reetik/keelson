@@ -28,6 +28,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir, totalmem } from "node:os";
 import { delimiter, join } from "node:path";
 import { runChild, scannerCpus } from "./anchore.ts";
+import { own } from "./net.ts";
 import { env } from "../env.ts";
 
 /** How long one image may take, and how long a scan spends on images in all. Tests lower them. */
@@ -123,13 +124,15 @@ export function trivyFailure(message: string): TrivyError {
     );
   if (net) {
     const host = /(?:Get|Head) "https?:\/\/([^/"]+)/.exec(flat)?.[1] ?? net[1] ?? "the registry";
-    const why = net[1]
-      ? "its name doesn't resolve here"
-      : /refused/i.test(net[0])
-        ? "the connection was refused"
-        : /unreachable|no route/i.test(net[0])
-          ? "there is no route to it"
-          : "the connection timed out";
+    const why = /proxyconnect/i.test(flat)
+      ? "the proxy of the network chosen for this platform couldn't be connected to"
+      : net[1]
+        ? "its name doesn't resolve here"
+        : /refused/i.test(net[0])
+          ? "the connection was refused"
+          : /unreachable|no route/i.test(net[0])
+            ? "there is no route to it"
+            : "the connection timed out";
     e.unreachable = host;
     e.message = `Keelson couldn't connect to ${host} from where it runs: ${why}.`;
   }
@@ -145,9 +148,14 @@ function inTurn<T>(work: () => Promise<T>): Promise<T> {
   return mine;
 }
 
-async function run(bin: string, args: string[], seconds: number, extra: Record<string, string> = {}): Promise<string> {
+/**
+ * `pull`: the command contacts a platform's registry, so it goes through the network chosen for that platform. Every
+ * other command either contacts nothing or downloads Trivy's own database, which takes the default route.
+ */
+async function run(bin: string, args: string[], seconds: number, extra: Record<string, string> = {}, pull = false): Promise<string> {
   try {
-    return await runChild("Trivy", bin, args, { seconds, env: { ...QUIET, ...extra }, fail: (m) => new TrivyError(m) });
+    const child = () => runChild("Trivy", bin, args, { seconds, env: { ...QUIET, ...extra }, fail: (m) => new TrivyError(m) });
+    return await (pull ? child() : own(child));
   } catch (e) {
     throw trivyFailure((e as Error).message);
   }
@@ -210,6 +218,7 @@ export const trivy = {
           ],
           trivyLimits.imageSeconds + 30,
           { DOCKER_CONFIG: docker },
+          true,
         ),
       );
     } finally {

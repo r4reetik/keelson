@@ -9,6 +9,8 @@ import { MOCK_VERCEL_TEAM, MOCK_VERCEL_TOKEN, MOCK_VERCEL_TOKEN_2, MOCK_VERCEL_U
 import { MOCK_AWS_ACCOUNT, MOCK_AWS_TOKEN } from "./aws.ts";
 import { MOCK_ALIBABA_ACCOUNT, MOCK_ALIBABA_TOKEN } from "./alibaba.ts";
 import { MOCK_GITHUB_ACCOUNT, MOCK_GITHUB_TOKEN } from "./github.ts";
+import { MOCK_GITEA_ACCOUNT, MOCK_GITEA_TOKEN } from "./gitea.ts";
+import { MOCK_GITLAB_ACCOUNT, MOCK_GITLAB_TOKEN } from "./gitlab.ts";
 import { MOCK_LEGACY_DOMAIN } from "./internet.ts";
 import { accountIdForEntity } from "../../src/shared/providers.ts";
 import { DAY_MS, isoDate } from "../../src/shared/time.ts";
@@ -67,6 +69,28 @@ export function seedGithub(repo: Repo, vault: TokenVault, o: { entity?: string |
     name: "mock-org",
     entity: o.entity ?? "Mock Group",
     provider: "github",
+  });
+}
+
+/** Adds the mock GitLab group the way the Accounts page would. */
+export function seedGitlab(repo: Repo, vault: TokenVault, o: { entity?: string | number } = {}) {
+  return seedAccount(repo, vault, {
+    id: MOCK_GITLAB_ACCOUNT,
+    token: MOCK_GITLAB_TOKEN,
+    name: "Mock Labs",
+    entity: o.entity ?? "Mock Group",
+    provider: "gitlab",
+  });
+}
+
+/** Adds the mock Gitea organization the way the Accounts page would. */
+export function seedGitea(repo: Repo, vault: TokenVault, o: { entity?: string | number } = {}) {
+  return seedAccount(repo, vault, {
+    id: MOCK_GITEA_ACCOUNT,
+    token: MOCK_GITEA_TOKEN,
+    name: "Mock Platform",
+    entity: o.entity ?? "Mock Group",
+    provider: "gitea",
   });
 }
 

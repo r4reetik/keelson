@@ -254,14 +254,22 @@ const GITHUB_SUB = "token.actions.githubusercontent.com:sub";
  * so they're left out. Only these patterns are kept, never the rest of the policy.
  */
 function githubSubjects(condition: unknown): string[] {
+  return subjectsOf(condition, GITHUB_SUB);
+}
+
+/** The values a condition allows for one claim, under a String… operator that narrows who may assume the role. */
+function subjectsOf(condition: unknown, claimName: string): string[] {
   const out: string[] = [];
   for (const [op, claims] of Object.entries((condition ?? {}) as Record<string, Record<string, string | string[]>>)) {
     if (!/String(Equals|Like)/i.test(op) || /Not/i.test(op)) continue;
     for (const [claim, values] of Object.entries(claims ?? {}))
-      if (claim.toLowerCase() === GITHUB_SUB) out.push(...list(values).map((v) => String(v).toLowerCase()));
+      if (claim.toLowerCase() === claimName) out.push(...list(values).map((v) => String(v).toLowerCase()));
   }
   return out;
 }
+
+/** Another OIDC provider, by the host (and path) IAM names it with: "arn:aws:iam::…:oidc-provider/gitlab.com" → "gitlab.com". */
+const oidcHost = (principal: string): string | null => /:oidc-provider\/(.+)$/i.exec(principal)?.[1].toLowerCase() ?? null;
 
 /** Who a trust policy lets assume the role. */
 export function trustOf(st: Statement[]): AwsTrust[] {
@@ -278,7 +286,10 @@ export function trustOf(st: Statement[]): AwsTrust[] {
         out.push(
           GITHUB_OIDC.test(p)
             ? { principal: p, kind: "federated", conditional, github: githubSubjects(s.Condition) }
-            : { principal: p, kind: "federated", conditional },
+            : oidcHost(p)
+              ? // Only the provider's name and the subject patterns are kept, as for GitHub: never the rest of the policy.
+                { principal: p, kind: "federated", conditional, oidc: { host: oidcHost(p)!, subjects: subjectsOf(s.Condition, `${oidcHost(p)}:sub`) } }
+              : { principal: p, kind: "federated", conditional },
         );
     }
   }

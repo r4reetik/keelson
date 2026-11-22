@@ -15,6 +15,7 @@ import { GITHUB_APP_PERMISSIONS, GITHUB_PERMISSION_KEYS } from "../../shared/git
 import { CREDENTIAL_SEPARATOR } from "../../shared/providers.ts";
 import { GITHUB_SOURCES, type GithubSourceKey } from "./sources.ts";
 import type { Coverage } from "../../shared/api.ts";
+import { request } from "../../core/net.ts";
 
 export const GITHUB_API = "https://api.github.com";
 const MAX_IN_FLIGHT = 8;
@@ -257,7 +258,7 @@ export class GithubClient {
         this.calls++;
         let res: Response;
         try {
-          res = await fetch(GITHUB_API + path, {
+          res = await request(GITHUB_API + path, {
             method: body ? "POST" : "GET",
             signal: AbortSignal.timeout(TIMEOUT_MS),
             headers: {
