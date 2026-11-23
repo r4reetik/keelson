@@ -12,6 +12,7 @@
 // are vendors').
 
 import { doh, pool, type DohAnswer } from "../../core/cloudflare.ts";
+import { notInstalled } from "../../shared/tools.ts";
 import { inCloudflare, isInternal } from "../../core/cloudflare-ranges.ts";
 import { inPrefixes, ipToInt, type Prefixes } from "../../core/aws-ranges.ts";
 import { alibabaEndpointOf, awsEndpointOf, pointsAtGithubPages, pointsAtVercel } from "../../core/links.ts";
@@ -190,7 +191,7 @@ export async function discover(client: InternetClient, input: DiscoverInput): Pr
   let amass: InternetInventory["amass"] = null;
   const amassIps = new Map<string, string[]>();
   const live = domains.filter((d) => !d.unregistered).map((d) => d.name);
-  if (!input.amass) client.note("amass", false, new AmassError("Amass isn't installed where Keelson runs."));
+  if (!input.amass) client.note("amass", false, new AmassError(notInstalled("Amass")));
   else if (live.length) {
     const started = Date.now();
     onProgress({ phase: "Running Amass" });

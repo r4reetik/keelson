@@ -46,6 +46,7 @@ import {
   type Coverage,
   type InstallKind,
   unreadableSentence,
+  coverageNeed,
 } from "../lib.ts";
 
 /**
@@ -601,6 +602,17 @@ export function NoScan({ action }: { action?: ReactNode }) {
  * Why a page has no data although a scan exists: its source couldn't be read.
  * Names the permission to add, from the scan's coverage.
  */
+/** One unreadable source in a page's banner: what failed, and what it needs unless that is already what failed. */
+export function GapLine({ c, install }: { c: Coverage; install: InstallKind }) {
+  const need = coverageNeed(c, install);
+  return (
+    <>
+      {c.label}: {c.message ?? `needs ${need}.`}
+      {c.message && need && <span className="text-kumo-subtle"> Needs: {need}.</span>}
+    </>
+  );
+}
+
 export function unreadableText(coverage: Coverage[] | undefined, key: string, what: string, install?: InstallKind): string {
   const c = coverage?.find((x) => x.key === key && !x.ok);
   if (!c) return `No ${what} in the latest scan.`;

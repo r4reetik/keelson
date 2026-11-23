@@ -6,8 +6,8 @@
 import { Badge, Banner, Input, Select, Switch, Table, Link, Tooltip } from "@cloudflare/kumo";
 import { FireIcon, WarningIcon } from "@phosphor-icons/react";
 import { useScopedApi, useShell } from "../shell.tsx";
-import { coverageNeed, isScannerTool, num, plural, SCORED_SEVERITIES, setParams, totalScored, useLocation, type RepoRow, type ReposResponse } from "../lib.ts";
-import { Flag, ListCard, NoRows, Page, PageState, SeverityBadge, unreadableText } from "../components/ui.tsx";
+import { num, plural, SCORED_SEVERITIES, setParams, totalScored, useLocation, type RepoRow, type ReposResponse } from "../lib.ts";
+import { Flag, GapLine, ListCard, NoRows, Page, PageState, SeverityBadge, unreadableText } from "../components/ui.tsx";
 import { MoreNames } from "../components/full-list.tsx";
 import { CopyMenu, DownloadCsvButton, SelectPage, SelectRow, SelectionBar, downloadCsv, useSelection } from "../components/selection.tsx";
 
@@ -95,8 +95,7 @@ export function RepositoriesPage() {
             <ul className="list-disc space-y-1 pl-5">
               {sbomGaps.map((c) => (
                 <li key={c.key}>
-                  {c.label}: {c.message ?? `needs ${coverageNeed(c, session.install)}.`}
-                  {c.message && isScannerTool(c.key) && <span className="text-kumo-subtle"> Needs: {coverageNeed(c, session.install)}.</span>}
+                  <GapLine c={c} install={session.install} />
                 </li>
               ))}
             </ul>

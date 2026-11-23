@@ -13,6 +13,7 @@
 
 import { eol } from "../../src/core/eol.ts";
 import { mockDatabaseUpdate } from "./anchore.ts";
+import { lastError } from "../../src/core/anchore.ts";
 import { kev } from "../../src/core/kev.ts";
 import { trivy, TrivyError, trivyFailure, type RegistryLogin } from "../../src/core/trivy.ts";
 
@@ -29,6 +30,8 @@ export interface MockTrivyOptions {
   deny?: RegExp[];
   /** Images (regex on the reference) whose registry host Keelson can't connect to, as behind an allowlist. */
   unreachable?: RegExp[];
+  /** Images (regex on the reference) with a layer Trivy can't unpack, failing with the real Trivy's error line. */
+  badLayer?: RegExp[];
   /** Print something that isn't a report. */
   garbled?: boolean;
   /** CISA's list can't be read. */
@@ -44,6 +47,13 @@ export interface MockTrivyOptions {
   /** Matching a bill of materials fails: the image is read again. */
   matchFails?: boolean;
 }
+
+/**
+ * Trivy's error line for a layer it can't unpack: the real one's start (from a real ECR scan, whose cause was cut off)
+ * with a fictional cause at the end, where Go puts it.
+ */
+export const MOCK_BAD_LAYER_LINE =
+  "2026-11-23T01:17:59Z\tFATAL\tFatal error\trun error: image scan error: scan error: scan failed: failed analysis: analyze error: pipeline error: failed to analyze layer (sha256:b4537c179eef7b49f206957f8460000000000000000000000000000000000000): walk error: failed to extract the archive: archive/tar: invalid tar header";
 
 /** Values the mock puts where Keelson must not keep them. */
 export const MOCK_IMAGE_ENV_SECRET = "mock-image-env-value-DO-NOT-STORE";
@@ -442,6 +452,8 @@ export function installMockTrivy(o: MockTrivyOptions = {}): () => void {
       // Go's own words when a connection times out, after Trivy's retries.
       if (current.unreachable?.some((re) => re.test(ref)))
         throw trivyFailure(`Trivy failed: * remote error: Get "https://${ref.split("/")[0]}/v2/": dial tcp 192.0.2.10:443: connect: operation timed out`);
+      // The line a real Trivy printed on a real ECR image, read the way runChild reads Trivy's error output.
+      if (current.badLayer?.some((re) => re.test(ref))) throw trivyFailure(`Trivy failed: ${lastError(MOCK_BAD_LAYER_LINE)}`);
       // As the real one fails on them (src/core/trivy.ts tells them apart by Trivy's own words).
       if (current.notImage?.some((re) => re.test(ref)) || ref.includes(MOCK_DIGEST.webAttestation))
         throw trivyFailure('Trivy failed: * remote error: unsupported artifact type "application/vnd.docker.attestation.manifest.v1+json" for image');

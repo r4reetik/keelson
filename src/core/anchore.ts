@@ -170,7 +170,24 @@ export async function runChild(
 
 const label = (tool: AnchoreTool) => tool[0].toUpperCase() + tool.slice(1);
 
-/** The most useful line of a tool's error output: its last ERROR line, without timestamps and colours. */
+/** The longest error Keelson keeps from a tool: enough for a registry's or the disk's own words. */
+const MAX_ERROR = 600;
+
+/** The wrappers Go tools put in front of the cause ("run error: image scan error: scan error: …"), which say nothing. */
+const WRAPPERS = /^(fatal error|run error|image scan error|scan error|scan failed|failed analysis|analyze error|pipeline error|artifact error|inspect error)$/i;
+
+/**
+ * A Go error chain ("a: b: cause") without the wrappers that say nothing, kept to its end when it is long: the cause
+ * is the last part. Learned on a real scan, where the first 240 characters were all wrappers and the cause was lost.
+ */
+export function shortChain(message: string, max = MAX_ERROR): string {
+  const parts = message.replace(/\s+/g, " ").trim().split(": ");
+  while (parts.length > 1 && WRAPPERS.test(parts[0].trim())) parts.shift();
+  const text = parts.join(": ");
+  return text.length > max ? `…${text.slice(-(max - 1))}` : text;
+}
+
+/** The most useful line of a tool's error output: its last ERROR line, without timestamps, levels and colours. */
 export function lastError(stderr: string): string {
   const lines = stderr
     .replace(/\u001b\[[0-9;]*m/g, "")
@@ -178,10 +195,14 @@ export function lastError(stderr: string): string {
     .map((l) => l.trim())
     .filter(Boolean);
   const line = [...lines].reverse().find((l) => /error|fatal|failed/i.test(l)) ?? lines.at(-1) ?? "";
-  return line
-    .replace(/^\[\d+\]\s*/, "")
-    .replace(/^(ERROR|FATAL)\s*/i, "")
-    .slice(0, 240);
+  return shortChain(
+    line
+      .replace(/^\[\d+\]\s*/, "")
+      // Trivy's "2026-11-23T01:17:59Z\tFATAL\tFatal error\trun error: …"
+      .replace(/^\d{4}-\d\d-\d\dT[\d:.]+(?:Z|[+-]\d\d:?\d\d)?\s+/, "")
+      .replace(/^(ERROR|FATAL|WARN)\s+/i, "")
+      .replace(/^Fatal error\s+/i, ""),
+  );
 }
 
 /** The installed version of a tool ("1.57.1"), or null when it can't tell. */

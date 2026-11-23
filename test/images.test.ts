@@ -25,7 +25,7 @@ import {
   mockTrivy,
   type MockTrivyOptions,
 } from "../dev/mock/trivy.ts";
-import { scannerCpus } from "../src/core/anchore.ts";
+import { lastError, scannerCpus, shortChain } from "../src/core/anchore.ts";
 import { supportOf } from "../src/core/eol.ts";
 import { buildersOf, imageCheckMeta } from "../src/core/image-checks.ts";
 import {
@@ -682,6 +682,68 @@ test("a registry host Keelson can't connect to is tried once a scan, and each of
   } finally {
     restore();
   }
+});
+
+test("a layer Trivy can't unpack fails that image alone, and its error keeps the cause at the end of Trivy's line", async () => {
+  const { installMockTrivy } = await import("../dev/mock/trivy.ts");
+  const restore = installMockTrivy({ badLayer: [/mock\/broken/] });
+  try {
+    const store = new Map<string, unknown>();
+    const cache = {
+      get: <T>(k: string) => (store.get(k) as T) ?? null,
+      put: (k: string, v: unknown) => void store.set(k, v),
+      keys: (prefix: string) => [...store.keys()].filter((k) => k.startsWith(prefix)),
+      delete: (k: string) => void store.delete(k),
+    };
+    const target = (repository: string): ImageTarget => ({
+      registry: "docker.io",
+      repository,
+      region: null,
+      digest: null,
+      tags: ["1"],
+      pushedAt: null,
+      pulledAt: null,
+      public: true,
+      own: true,
+      why: ["newest in its repository"],
+      priority: 40,
+      latest: true,
+      login: null,
+    });
+    const notes: string[] = [];
+    const out = await scanImages([target("mock/broken"), target("mock/log-shipper")], {
+      repositories: 2,
+      cache,
+      toolDir: null,
+      onProgress: () => {},
+      note: (source, ok, err) => notes.push(`${source}:${ok}${err ? ` ${(err as Error).message}` : ""}`),
+    });
+    const broken = out.snapshot.images.find((i) => i.repository === "mock/broken")!;
+    const web = out.snapshot.images.find((i) => i.repository === "mock/log-shipper")!;
+    // On a real scan only the first 240 characters were kept: timestamps and wrappers, and never the cause.
+    assert.match(broken.error ?? "", /failed to analyze layer \(sha256:b4537c[0-9a-f]+\): walk error: .*archive\/tar: invalid tar header$/);
+    assert.doesNotMatch(broken.error ?? "", /FATAL|2026-11-23T|run error|pipeline error/);
+    assert.equal(web.error ?? null, null, "the next image is read");
+    assert.ok(!notes.some((n) => n.startsWith("trivy:false")), "one image's layer isn't Trivy failing");
+  } finally {
+    restore();
+  }
+});
+
+test("Trivy's error line keeps its cause, and a full disk is told apart from an image's own failure", () => {
+  const long = `2026-11-23T01:17:59Z\tFATAL\tFatal error\trun error: image scan error: scan error: ${"x: ".repeat(400)}the cause`;
+  const kept = lastError(`some progress\n${long}\n`);
+  assert.ok(kept.endsWith("the cause"), "a long chain keeps its end");
+  assert.ok(kept.length <= 600);
+  assert.ok(!kept.includes("FATAL") && !kept.startsWith("run error"));
+  assert.equal(shortChain("run error: image scan error: scan failed: failed to analyze layer (sha256:ab): boom"), "failed to analyze layer (sha256:ab): boom");
+
+  const disk = trivyFailure("Trivy failed: failed to analyze layer (sha256:ab): write /tmp/x/layer: no space left on device");
+  assert.ok(disk.diskFull && !disk.image, "a full disk stops every image: it stays Trivy's gap");
+  assert.match(disk.message, /ran out of disk space/);
+  const layer = trivyFailure("Trivy failed: failed to analyze layer (sha256:ab): unexpected EOF");
+  assert.ok(layer.image && !layer.diskFull && !layer.denied);
+  assert.equal(layer.message, "Trivy failed: failed to analyze layer (sha256:ab): unexpected EOF");
 });
 
 test("an image is pulled once: later scans match its stored packages against the database, and only a tag is asked for again", async () => {

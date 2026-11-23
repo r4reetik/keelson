@@ -30,10 +30,12 @@
 // than the source repository and revision are dropped.
 
 import { eol, supportOf } from "./eol.ts";
+import { notInstalled } from "../shared/tools.ts";
 import { IndexBuilder } from "./image-index.ts";
 import { kev } from "./kev.ts";
 import { secretInVariables, secretKindIn } from "./secret-patterns.ts";
 import { trivy, trivyLimits, TrivyError, type RegistryLogin } from "./trivy.ts";
+import { shortChain } from "./anchore.ts";
 import type { ProgressEvent } from "./types.ts";
 import type { AccountCache } from "../store/repo.ts";
 import {
@@ -295,7 +297,7 @@ export async function scanImages(
   const bin = trivy.path();
   const wanted = targets.some((t) => !t.unreadable);
   // Without anything to scan, a missing Trivy is no gap.
-  if (!bin && wanted) o.note("trivy", false, new TrivyError("Trivy isn't installed where Keelson runs."));
+  if (!bin && wanted) o.note("trivy", false, new TrivyError(notInstalled("Trivy")));
   // The database first, on its own: without one nothing can be matched, and no registry login is around while it downloads.
   let ready = !!bin;
   if (bin && wanted) {
@@ -383,7 +385,8 @@ export async function scanImages(
       // one Trivy can't read, is that image's own: only a failure of the tool itself is a gap.
       if (t.login && (te.denied || !(e instanceof TrivyError))) note("pull", false, e);
       else if (e instanceof TrivyError && !te.image) note("trivy", false, e);
-      return { error: String(te?.message || e).slice(0, 240) };
+      // Its end: a Go error's cause is its last part.
+      return { error: shortChain(String(te?.message || e), 480) };
     }
   };
 

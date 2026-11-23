@@ -15,6 +15,7 @@
 // change.
 
 import { createHash } from "node:crypto";
+import { notInstalled } from "../../shared/tools.ts";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
@@ -128,11 +129,11 @@ export async function collectDependencies(
     grypeBin ? anchore.version("grype", grypeBin) : null,
     grantBin ? anchore.version("grant", grantBin) : null,
   ]);
-  if (!syftBin) client.note("syft", false, new AnchoreError("Syft isn't installed where Keelson runs."));
+  if (!syftBin) client.note("syft", false, new AnchoreError(notInstalled("Syft")));
   // Cached SBOMs count as read; a repository Syft fails on now marks it unreadable.
   else client.note("syft", true);
-  if (!grypeBin) client.note("grype", false, new AnchoreError("Grype isn't installed where Keelson runs."));
-  if (!grantBin) client.note("grant", false, new AnchoreError("Grant isn't installed where Keelson runs."));
+  if (!grypeBin) client.note("grype", false, new AnchoreError(notInstalled("Grype")));
+  if (!grantBin) client.note("grant", false, new AnchoreError(notInstalled("Grant")));
 
   // 1. Each repository's file list, and its SBOM: the cached one when no manifest or lock file changed.
   const cached = new Map<string, Cached>();

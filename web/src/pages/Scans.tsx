@@ -142,7 +142,8 @@ export function ScansPage() {
 /** What to do about a source that couldn't be read: install a scanner, replace the account's credential, or reach the network. */
 function CoverageFixes({ c, install }: { c: Coverage; install: InstallKind }) {
   const fix = coverageFix(c);
-  const tool = fix.kind === "tool" ? SCANNER_TOOLS[fix.tool] : null;
+  // Only a scanner that isn't there is installed; one that ran and failed says why in its message.
+  const tool = fix.kind === "tool" && fix.missing ? SCANNER_TOOLS[fix.tool] : null;
   // A scanner's row is worded for where this copy runs, not from the text its scan kept.
   const need = coverageNeed(c, install);
   const info = PROVIDER_INFO[c.provider ?? "cloudflare"];

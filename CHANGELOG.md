@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **A Trivy failure says what went wrong, and one image's failure no longer stops the others.** Keelson kept only the first 240 characters of a scanner's error, which for Trivy were a timestamp and wrappers ("run error: image scan error: scan error: …"), and dropped the cause Go puts at the end. It now drops the wrappers and keeps the end. A layer Trivy can't download or unpack ("failed to analyze layer") is that image's error, shown on its row, and the other images are still read; before, it marked all of Trivy as unreadable. A full disk is said as such ("Trivy ran out of disk space…"). A scanner that ran and failed is no longer said to need installing.
+
 ## 0.18.2
 
 - **Settings → Scanners shows the tools Keelson runs and updates their databases on request.** Each scanner (Syft, Grype, Grant, Trivy, Amass) is listed with its version, or what it needs when it isn't installed, and Grype's and Trivy's vulnerability databases with when they were built. Admins can update either with **Update now**: it downloads the newest database in the background, and a scan that needs it waits until it is in place. Scans still keep both current on their own.

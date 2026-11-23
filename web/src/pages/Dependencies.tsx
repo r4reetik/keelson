@@ -28,11 +28,9 @@ import {
   type Severity,
   type TriageStatus,
   type VulnRow,
-  coverageNeed,
-  isScannerTool,
 } from "../lib.ts";
 import { useScopedApi, useShell } from "../shell.tsx";
-import { DialogHeader, ListCard, NoRows, Page, PageState, Row, SeverityBadge, Stat, unreadableText } from "../components/ui.tsx";
+import { DialogHeader, GapLine, ListCard, NoRows, Page, PageState, Row, SeverityBadge, Stat, unreadableText } from "../components/ui.tsx";
 import { SearchBox } from "../components/search.tsx";
 import { MoreLink, MoreNames, type FullList, type FullListColumn } from "../components/full-list.tsx";
 import { ExploitedBadges, UsedBy, VulnSeverity, VulnTable, epssText } from "../components/dependencies.tsx";
@@ -391,8 +389,7 @@ export function DependenciesPage() {
             <ul className="list-disc space-y-1 pl-5">
               {gaps.map((c) => (
                 <li key={c.key}>
-                  {c.label}: {c.message ?? `needs ${coverageNeed(c, session.install)}.`}
-                  {c.message && isScannerTool(c.key) && <span className="text-kumo-subtle"> Needs: {coverageNeed(c, session.install)}.</span>}
+                  <GapLine c={c} install={session.install} />
                 </li>
               ))}
             </ul>

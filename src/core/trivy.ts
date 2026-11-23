@@ -27,7 +27,7 @@ import { accessSync, constants } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir, totalmem } from "node:os";
 import { delimiter, join } from "node:path";
-import { runChild, scannerCpus } from "./anchore.ts";
+import { runChild, scannerCpus, shortChain } from "./anchore.ts";
 import { own } from "./net.ts";
 import { env } from "../env.ts";
 
@@ -47,6 +47,8 @@ export class TrivyError extends Error {
   notImage = false;
   /** The failure is about this image or its registry, not about Trivy: other images can still be scanned. */
   image = false;
+  /** The disk where Trivy unpacks layers is full: no image can be read until there is room. */
+  diskFull = false;
   /**
    * The registry's host couldn't be reached from where Keelson runs (no connection, or its name doesn't resolve): none
    * of its images can be pulled, and each try costs minutes of Trivy's retries.
@@ -106,7 +108,7 @@ export function trivyFailure(message: string): TrivyError {
   // "remote error: GET https://ghcr.io/token?…: DENIED: requested access to the resource is denied"
   const registry = /(?:GET|HEAD|POST) https?:\/\/[^\s]+: (?:unexpected status code (\d{3})[^:]*:?|([A-Z_]{4,}):) ?(.{0,160})/.exec(flat);
   const code = registry?.[2] ?? registry?.[1] ?? "";
-  const e = new TrivyError(registry ? `The registry answered ${code}${registry[3] ? `: ${registry[3].trim()}` : ""}`.slice(0, 240) : flat.slice(-240));
+  const e = new TrivyError(registry ? `The registry answered ${code}${registry[3] ? `: ${registry[3].trim()}` : ""}`.slice(0, 240) : shortChain(flat));
   e.denied = /^(UNAUTHORIZED|DENIED|401|403)$/.test(code) || /no basic auth credentials|authentication required|unauthorized/i.test(flat);
   e.missing = /^(MANIFEST_UNKNOWN|NAME_UNKNOWN|404)$/.test(code);
   // Learned on real registries: an index lists build attestations beside its images, and an image built only for
@@ -136,7 +138,16 @@ export function trivyFailure(message: string): TrivyError {
     e.unreachable = host;
     e.message = `Keelson couldn't connect to ${host} from where it runs: ${why}.`;
   }
-  e.image = !!registry || e.denied || e.missing || e.notImage || e.noPlatform || !!net || /remote error|unable to find the specified image/i.test(flat);
+  // Unpacking a layer needs room where temporary files go: a full disk stops every image, so it stays Trivy's own gap.
+  e.diskFull = /no space left on device|disk quota exceeded/i.test(flat);
+  if (e.diskFull)
+    e.message =
+      "Trivy ran out of disk space unpacking an image's layers where Keelson runs. Free space where temporary files go (in Docker, the Docker host's disk) and scan again.";
+  // A layer Trivy couldn't download or unpack is that image's own: the next image may read fine. Learned on a real
+  // ECR scan, where "failed to analyze layer" counted as Trivy failing and the cause after it was cut off.
+  const layer = !e.diskFull && /failed to analyze layer|unable to get uncompressed layer|failed to get (?:the )?layer|unexpected EOF/i.test(flat);
+  e.image =
+    !!registry || e.denied || e.missing || e.notImage || e.noPlatform || !!net || layer || /remote error|unable to find the specified image/i.test(flat);
   return e;
 }
 

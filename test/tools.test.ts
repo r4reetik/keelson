@@ -5,7 +5,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { coverageFix, coverageNeed, isScannerTool, SCANNER_TOOLS, toolNeed, unreadableSentence } from "../src/shared/tools.ts";
+import { coverageFix, coverageNeed, isScannerTool, notInstalled, SCANNER_TOOLS, scannerMissing, toolNeed, unreadableSentence } from "../src/shared/tools.ts";
 import { GITHUB_SOURCES } from "../src/providers/github/sources.ts";
 import { AWS_SOURCES } from "../src/providers/aws/sources.ts";
 
@@ -37,7 +37,7 @@ describe("a scanner's data source", () => {
   test("is fixed by installing the scanner, not by replacing the credential", () => {
     // A scan from before the image carried Syft kept the old words; the page words it again.
     const stored = { key: "syft", permission: "Syft installed where Keelson runs: on the PATH, or its path in KEELSON_SYFT (not in the Docker image yet)" };
-    assert.deepEqual(coverageFix(stored), { kind: "tool", tool: "syft" });
+    assert.deepEqual(coverageFix(stored), { kind: "tool", tool: "syft", missing: true });
     assert.match(coverageNeed(stored, "docker")!, /which the Docker image includes/);
     assert.equal(coverageFix({ key: "manifests", permission: "Repository permissions → Contents: Read-only" }).kind, "credential");
     assert.equal(coverageFix({ key: "kev", permission: "None: a public file, read from www.cisa.gov without a credential" }).kind, "none");
@@ -68,6 +68,30 @@ describe("a scanner's data source", () => {
     };
     assert.match(unreadableSentence(contents, "docker"), /replace the GitHub App on the Accounts page/);
     assert.match(unreadableSentence({ key: "dns", label: "Public DNS lookups" }), /reach the internet over HTTPS/);
+  });
+
+  test("a scanner that ran and failed says why, and isn't said to need installing", () => {
+    // The Images page said Trivy needed installing in the image after Trivy itself had failed on one image.
+    const failed = {
+      key: "trivy",
+      label: "Packages, vulnerabilities and stored credentials in container images (Aqua Trivy)",
+      permission: toolNeed("trivy"),
+      message: "Trivy's database couldn't be downloaded: connection refused",
+    };
+    assert.deepEqual(coverageFix(failed), { kind: "tool", tool: "trivy", missing: false });
+    assert.equal(coverageNeed(failed, "docker"), undefined);
+    assert.equal(
+      unreadableSentence(failed, "docker"),
+      "Keelson can't read packages, vulnerabilities and stored credentials in container images (Aqua Trivy): Trivy's database couldn't be downloaded: connection refused. Then scan again.",
+    );
+
+    // What every scan says when the scanner isn't there, in its own words, and a gap from before messages were kept.
+    for (const name of ["Syft", "Grype", "Grant", "Trivy", "Amass"]) {
+      const missing = { key: name.toLowerCase(), permission: "", message: notInstalled(name) };
+      assert.ok(scannerMissing(missing), name);
+      assert.match(coverageNeed(missing, "source") ?? "", /installed on the machine Keelson runs on/, name);
+    }
+    assert.ok(scannerMissing({ message: undefined }));
   });
 
   test("providers' registries take the scanners' words from one place", () => {

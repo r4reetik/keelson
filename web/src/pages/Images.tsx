@@ -44,7 +44,7 @@ import {
   coverageNeed,
 } from "../lib.ts";
 import { useScopedApi, useShell } from "../shell.tsx";
-import { ListCard, NoRows, Page, PageState, ProviderIcon, Row, SeverityBadge, Stat } from "../components/ui.tsx";
+import { GapLine, ListCard, NoRows, Page, PageState, ProviderIcon, Row, SeverityBadge, Stat } from "../components/ui.tsx";
 import { SearchBox } from "../components/search.tsx";
 import { ExploitedBadges, VulnSeverity } from "../components/dependencies.tsx";
 import {
@@ -584,8 +584,7 @@ export function ImagesPage() {
             <ul className="list-disc space-y-1 pl-5">
               {gaps.map((c) => (
                 <li key={`${c.provider}${c.key}`}>
-                  {c.label}: {c.message ?? `needs ${coverageNeed(c, session.install)}.`}
-                  {c.message && c.permission && <span className="text-kumo-subtle"> Needs: {coverageNeed(c, session.install)}.</span>}
+                  <GapLine c={c} install={session.install} />
                 </li>
               ))}
             </ul>
