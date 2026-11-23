@@ -96,16 +96,18 @@ describe("the image, the only way Keelson ships", () => {
     assert.match(dockerfile, /RUN node --version/);
   });
 
-  test("the image carries Syft, Grype and Grant, checked against their published sums for both platforms", () => {
+  test("the image carries every scanner, checked against its published sums for both platforms", () => {
     const dockerfile = read("Dockerfile");
-    for (const tool of ["SYFT", "GRYPE", "GRANT"]) {
+    for (const tool of ["SYFT", "GRYPE", "GRANT", "TRIVY", "AMASS"]) {
       assert.match(dockerfile, new RegExp(`${tool}_VERSION=\\d+\\.\\d+\\.\\d+ `), `${tool}'s version is pinned`);
       for (const arch of ["AMD64", "ARM64"]) assert.match(dockerfile, new RegExp(`${tool}_${arch}=[0-9a-f]{64}`), `${tool} has a sum for ${arch}`);
-      assert.ok(dockerfile.includes(`fetch ${tool.toLowerCase()} "$${tool}_VERSION" "$${tool}_AMD64" "$${tool}_ARM64"`), `${tool} is fetched`);
+      const fetch = new RegExp(`fetch ${tool.toLowerCase()} "https://github\\.com/[^"]+/v\\$${tool}_VERSION/[^"]+" "\\$${tool}_AMD64" "\\$${tool}_ARM64"`);
+      assert.match(dockerfile, fetch, `${tool} is fetched at its pinned version and checked`);
     }
     assert.match(dockerfile, /sha256sum -c -/);
-    assert.ok(dockerfile.includes("COPY --from=anchore /out/ /usr/local/bin/"));
+    assert.ok(dockerfile.includes("COPY --from=scanners /out/ /usr/local/bin/"));
     assert.ok(dockerfile.includes("syft version >/dev/null && grype version >/dev/null && grant version >/dev/null"));
+    assert.ok(dockerfile.includes("trivy --version >/dev/null && test -x /usr/local/bin/amass"));
   });
 
   test("runtime dependencies are plain JavaScript, since the image's build stage runs on the build machine's platform", () => {

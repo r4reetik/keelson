@@ -140,8 +140,8 @@ settings only. The mock (`dev/mock/anchore.ts`) replaces them in tests and the m
 ## Container images: from the repository to what runs
 
 AWS, Alibaba Cloud and GitHub scans also look at container images (`src/core/images.ts`, shared by the three),
-with Aqua's Trivy when it's installed where Keelson runs (`src/core/trivy.ts`: `KEELSON_TRIVY`, or `trivy` on the
-PATH):
+with Aqua's Trivy, which the Docker image includes and a clone needs installed (`src/core/trivy.ts`:
+`KEELSON_TRIVY`, or `trivy` on the PATH):
 
 1. **What exists.** Each platform lists its registry: ECR repositories' images with their tags, push and last
    pull dates (`ecr:DescribeImages`), Container Registry Enterprise Edition instances' repositories and tags, and

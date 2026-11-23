@@ -251,7 +251,11 @@ export function DependenciesPage() {
         empty={!!data}
         retry={reload}
         emptyText={
-          data?.scan ? (gaps.length ? unreadableText(gaps, gaps[0].key ?? "", "dependencies") : "No repository in this view has an SBOM yet.") : undefined
+          data?.scan
+            ? gaps.length
+              ? unreadableText(gaps, gaps[0].key ?? "", "dependencies", session.install)
+              : "No repository in this view has an SBOM yet."
+            : undefined
         }
       />
     );

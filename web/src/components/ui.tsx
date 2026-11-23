@@ -43,6 +43,9 @@ import {
   type ProviderId,
   type Severity,
   type TriageStatus,
+  type Coverage,
+  type InstallKind,
+  unreadableSentence,
 } from "../lib.ts";
 
 /**
@@ -598,14 +601,11 @@ export function NoScan({ action }: { action?: ReactNode }) {
  * Why a page has no data although a scan exists: its source couldn't be read.
  * Names the permission to add, from the scan's coverage.
  */
-export function unreadableText(
-  coverage: { key?: string; label: string; permission?: string; ok: boolean; notReadableIn?: { name: string }[] }[] | undefined,
-  key: string,
-  what: string,
-): string {
+export function unreadableText(coverage: Coverage[] | undefined, key: string, what: string, install?: InstallKind): string {
   const c = coverage?.find((x) => x.key === key && !x.ok);
   if (!c) return `No ${what} in the latest scan.`;
-  return `Keelson can't read ${c.label.toLowerCase()}${c.notReadableIn?.length ? ` for ${c.notReadableIn.map((a) => a.name).join(", ")}` : ""}. It needs ${c.permission || "the matching read permission"}: grant it, or replace the credential on the Accounts page, then scan again.`;
+  // A scanner that isn't installed is worded for how Keelson runs (`install`), and never blamed on the credential.
+  return unreadableSentence(c, install);
 }
 
 /** Page wrapper for the loading, error and no-scan states so they sit in the same frame as the content. */

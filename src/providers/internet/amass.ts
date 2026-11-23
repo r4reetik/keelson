@@ -1,4 +1,4 @@
-// Runs OWASP Amass, when it is installed, to find more of an entity's hostnames.
+// Runs OWASP Amass, when it is installed (the Docker image carries it), to find more of an entity's hostnames.
 //
 // Amass 5 works through a collection engine. For each scan Keelson starts its own engine
 // with a home directory of its own (so its asset database belongs to the scan and is

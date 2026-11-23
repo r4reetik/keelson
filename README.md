@@ -198,7 +198,7 @@ With Syft, Grype and Grant installed, each repository's dependencies are read as
 
 Images in Amazon ECR, Alibaba Cloud Container Registry (Enterprise Edition) and GitHub Container Registry, and the
 images your workloads run from public registries such as Docker Hub, scanned with Aqua's
-[Trivy](https://github.com/aquasecurity/trivy) when it is installed where Keelson runs. A registry can hold
+[Trivy](https://github.com/aquasecurity/trivy), which the Docker image includes. A registry can hold
 thousands of images, so Keelson scans the ones that matter: every image a workload runs, images pulled in the
 last 30 days (something runs them that Keelson can't see, such as a Kubernetes cluster), and the newest image of
 each repository. Each image is followed from the repository that builds it (its own source label, the GitHub
@@ -232,8 +232,8 @@ listed with where they run but not scanned.
 
 Sonar looks at an entity from outside, starting from what its connected accounts know: their domains, DNS records,
 the addresses AWS and Alibaba Cloud hold and the hostnames their load balancers route. It finds more hostnames under those domains in
-certificate transparency logs (crt.sh), Shodan and [OWASP Amass](https://owasp.org/www-project-amass/) (when it is
-installed where Keelson runs, on the domains of every connected account), looks them up in public DNS, and asks Shodan
+certificate transparency logs (crt.sh), Shodan and [OWASP Amass](https://owasp.org/www-project-amass/) (the Docker image
+includes it; on the domains of every connected account), looks them up in public DNS, and asks Shodan
 what it has seen open on the entity's addresses. Each hostname is then followed into AWS or Alibaba Cloud: the load balancer its DNS
 names, internal or internet-facing, the listener rules that match it, and the targets behind them, down to whether a
 target's own public address and security groups let anyone skip the load balancer. It is passive: nothing is sent to
@@ -384,8 +384,8 @@ buckets or databases. An access key belongs to one account, so each account need
 needs are in [docs/permissions.md](docs/permissions.md#aws).
 
 To have the images in ECR scanned, add an inline policy to the user that allows `ecr:GetAuthorizationToken`,
-`ecr:BatchGetImage` and `ecr:GetDownloadUrlForLayer` on every resource, and install Trivy where Keelson runs
-(it isn't in the Docker image yet). All three only read: Keelson asks ECR for a registry login that lasts twelve
+`ecr:BatchGetImage` and `ecr:GetDownloadUrlForLayer` on every resource (Trivy, which scans them, is in the Docker
+image; run from a clone, install it on the same machine). All three only read: Keelson asks ECR for a registry login that lasts twelve
 hours, and Trivy pulls each image with it to look inside. Trivy never gets the access key. Without the policy,
 images are listed with where they run, and not scanned.
 

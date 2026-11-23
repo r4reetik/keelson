@@ -51,12 +51,13 @@ jobs:
           docker logs keelson
           curl -fsS http://127.0.0.1:4318/api/health
       - name: The image stays small
-        # Keelson ships only as this image (AGENTS.md). Alpine with the Node.js binary and Anchore's Syft, Grype and
-        # Grant (about 85 MB each): no npm, and a size budget that a switch back to a full Node.js base image would break.
+        # Keelson ships only as this image (AGENTS.md). Alpine with the Node.js binary and the scanners Keelson runs
+        # (Syft, Grype and Grant about 85 MB each, Trivy about 210, Amass about 55): no npm, and a size budget that a
+        # switch back to a full Node.js base image would break.
         run: |
           size=$(docker image inspect keelson:ci --format '{{.Size}}')
           echo "Image size: $((size / 1000000)) MB"
-          test "$size" -lt 500000000 || { echo "The image grew past 500 MB"; exit 1; }
-          docker run --rm --entrypoint sh keelson:ci -c 'syft version && grype version && grant version' >/dev/null
+          test "$size" -lt 800000000 || { echo "The image grew past 800 MB"; exit 1; }
+          docker run --rm --entrypoint sh keelson:ci -c 'syft version && grype version && grant version && trivy --version && command -v amass' >/dev/null
           if docker run --rm --entrypoint sh keelson:ci -c 'command -v npm'; then echo "npm is in the image"; exit 1; fi
           test "$(docker run --rm --entrypoint id keelson:ci -u)" = 1000

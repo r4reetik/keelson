@@ -3,7 +3,7 @@
 # Keelson ships only as this image. It is kept small: the final stage is Alpine with
 # the Node.js binary and the C++ runtime it needs, nothing else from Node's image
 # (no npm, Yarn or Corepack, which also keeps their dependencies out of image scans),
-# and the scanners Keelson runs for dependencies (Syft, Grype and Grant).
+# and the scanners Keelson runs (Syft, Grype, Grant, Trivy and Amass).
 
 # The build runs on the build machine's own platform, even for the arm64 image: its
 # output is plain JavaScript, and so are the runtime dependencies (test/env.test.ts
@@ -21,13 +21,15 @@ RUN npm run build \
  && find node_modules -type d -empty -delete \
  && rm -f node_modules/.package-lock.json
 
-# Anchore's Syft, Grype and Grant, which make each repository's SBOM and judge its
-# vulnerabilities and licenses (src/core/anchore.ts). Their release archives for the
-# target platform are checked against the SHA-256 sums published with each release;
-# to move to a newer one, change its version and both sums together. They are Go
-# binaries without C dependencies, so they run on Alpine as they are. Downloading
-# runs on the build machine's platform: nothing here executes the binaries.
-FROM --platform=$BUILDPLATFORM alpine:3.24 AS anchore
+# The scanners Keelson runs beside itself: Anchore's Syft, Grype and Grant for each
+# repository's SBOM, vulnerabilities and licenses (src/core/anchore.ts), Aqua's Trivy
+# for container images (src/core/trivy.ts), and OWASP Amass for Sonar's subdomains
+# (src/providers/internet/amass.ts). Their release archives for the target platform
+# are checked against the SHA-256 sums published with each release; to move to a
+# newer one, change its version and both sums together. They are Go binaries without
+# C dependencies, so they run on Alpine as they are. Downloading runs on the build
+# machine's platform: nothing in this stage executes them.
+FROM --platform=$BUILDPLATFORM alpine:3.24 AS scanners
 ARG TARGETARCH
 ARG SYFT_VERSION=1.57.2 \
     SYFT_AMD64=ad92bd3ec1b94a3df01d4d0aec199afa9c42b72e86da436ff5f837914d32706b \
@@ -37,20 +39,33 @@ ARG SYFT_VERSION=1.57.2 \
     GRYPE_ARM64=819e5be3d9516432fedb7b6b56df7306c3a16607606dfc05826eefbb00e471da \
     GRANT_VERSION=0.8.0 \
     GRANT_AMD64=d0e545dd4ce42566c1a0fc97c355777a4ad0375f67508359ade40d1d80a11074 \
-    GRANT_ARM64=be8f254217797aeedbc2211fbf9f6160b3f871891a511b2fddb1b2326fed44d6
+    GRANT_ARM64=be8f254217797aeedbc2211fbf9f6160b3f871891a511b2fddb1b2326fed44d6 \
+    TRIVY_VERSION=0.76.2 \
+    TRIVY_AMD64=bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf \
+    TRIVY_ARM64=ab9d51f86e6a5fb936f605faff6b593ac51bc378fff4d3e8b9d58358b9c367c3 \
+    AMASS_VERSION=5.1.3 \
+    AMASS_AMD64=4c12b725e4ce4981ece93a5e1566bd7391be1f349468856a79d31a43012ae201 \
+    AMASS_ARM64=02316f4e5703420cd86890c3c61f6d56ed10277d2bfea076d4e5cfd1a6b6099a
+# Each archive is unpacked in a folder of its own and only the tool's binary is kept,
+# wherever the archive puts it (Amass's sits in a folder named after the platform).
 RUN set -eu; mkdir -p /out; \
+    case "$TARGETARCH" in amd64) TRIVY_ARCH=64bit ;; arm64) TRIVY_ARCH=ARM64 ;; *) echo "No scanners for $TARGETARCH" >&2; exit 1 ;; esac; \
     fetch() { \
-      tool=$1 version=$2; \
-      case "$TARGETARCH" in amd64) sum=$3 ;; arm64) sum=$4 ;; *) echo "No $tool build for $TARGETARCH" >&2; exit 1 ;; esac; \
-      file="${tool}_${version}_linux_${TARGETARCH}.tar.gz"; \
-      wget -q -O "/tmp/$file" "https://github.com/anchore/$tool/releases/download/v$version/$file"; \
-      echo "$sum  /tmp/$file" | sha256sum -c -; \
-      tar -xzf "/tmp/$file" -C /out "$tool"; \
-      rm "/tmp/$file"; \
+      tool=$1 url=$2; \
+      if [ "$TARGETARCH" = amd64 ]; then sum=$3; else sum=$4; fi; \
+      mkdir "/tmp/$tool"; \
+      wget -q -O "/tmp/$tool.tar.gz" "$url"; \
+      echo "$sum  /tmp/$tool.tar.gz" | sha256sum -c -; \
+      tar -xzf "/tmp/$tool.tar.gz" -C "/tmp/$tool"; \
+      find "/tmp/$tool" -type f -name "$tool" -exec mv {} /out/ \; ; \
+      test -f "/out/$tool" || { echo "No $tool binary in its archive" >&2; exit 1; }; \
     }; \
-    fetch syft "$SYFT_VERSION" "$SYFT_AMD64" "$SYFT_ARM64"; \
-    fetch grype "$GRYPE_VERSION" "$GRYPE_AMD64" "$GRYPE_ARM64"; \
-    fetch grant "$GRANT_VERSION" "$GRANT_AMD64" "$GRANT_ARM64"
+    fetch syft "https://github.com/anchore/syft/releases/download/v$SYFT_VERSION/syft_${SYFT_VERSION}_linux_$TARGETARCH.tar.gz" "$SYFT_AMD64" "$SYFT_ARM64"; \
+    fetch grype "https://github.com/anchore/grype/releases/download/v$GRYPE_VERSION/grype_${GRYPE_VERSION}_linux_$TARGETARCH.tar.gz" "$GRYPE_AMD64" "$GRYPE_ARM64"; \
+    fetch grant "https://github.com/anchore/grant/releases/download/v$GRANT_VERSION/grant_${GRANT_VERSION}_linux_$TARGETARCH.tar.gz" "$GRANT_AMD64" "$GRANT_ARM64"; \
+    fetch trivy "https://github.com/aquasecurity/trivy/releases/download/v$TRIVY_VERSION/trivy_${TRIVY_VERSION}_Linux-$TRIVY_ARCH.tar.gz" "$TRIVY_AMD64" "$TRIVY_ARM64"; \
+    fetch amass "https://github.com/owasp-amass/amass/releases/download/v$AMASS_VERSION/amass_linux_$TARGETARCH.tar.gz" "$AMASS_AMD64" "$AMASS_ARM64"; \
+    chmod 755 /out/*
 
 # Node.js for the target platform. Keep its Alpine version the same as the stage below,
 # so the binary and the libraries installed there come from the same release.
@@ -68,11 +83,14 @@ RUN apk add --no-cache libatomic libstdc++ \
  && adduser -u 1000 -G node -s /bin/sh -D node \
  && mkdir -p /data && chown node:node /data && chmod 700 /data
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
-# On the PATH, where Keelson finds them without KEELSON_SYFT, KEELSON_GRYPE or KEELSON_GRANT.
-# Grype's database (about 3 GB) isn't in the image: it is downloaded into /data/tools on the first scan.
-COPY --from=anchore /out/ /usr/local/bin/
+# On the PATH, where Keelson finds them without KEELSON_SYFT, KEELSON_GRYPE, KEELSON_GRANT,
+# KEELSON_TRIVY or KEELSON_AMASS. Grype's and Trivy's databases aren't in the image: they
+# are downloaded into /data/tools on the first scan that needs them. Amass's engine
+# listens on port 4000 inside the container while Sonar runs; it isn't published.
+COPY --from=scanners /out/ /usr/local/bin/
 # Fails the build, not the first start or scan, when a binary can't run here.
-RUN node --version && syft version >/dev/null && grype version >/dev/null && grant version >/dev/null
+RUN node --version && syft version >/dev/null && grype version >/dev/null && grant version >/dev/null \
+ && trivy --version >/dev/null && test -x /usr/local/bin/amass
 # Only the install marker: in the image, Keelson defaults to 0.0.0.0 and /data itself (src/env.ts).
 ENV NODE_ENV=production \
     KEELSON_INSTALL=docker

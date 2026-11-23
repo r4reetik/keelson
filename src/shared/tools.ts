@@ -1,11 +1,12 @@
 // The scanners Keelson runs beside itself (Syft, Grype, Grant, Trivy, Amass), and
 // what a data source that comes from one needs. The words depend on how Keelson
-// runs: the Docker image carries some of them, and from a clone they are installed
-// on the machine. Coverage is stored with each scan, so the Data coverage table
+// runs: the Docker image carries them (a scanner added later may not be in it yet),
+// and from a clone they are installed on the machine. Coverage is stored with each scan, so the Data coverage table
 // words a scanner's row from here rather than from the text the scan kept, which
 // may be from before the image carried it.
 
 import type { Coverage, InstallKind } from "./api.ts";
+import { PROVIDER_INFO } from "./providers.ts";
 
 export interface ScannerTool {
   name: string;
@@ -32,11 +33,11 @@ const DEFS = {
   trivy: {
     name: "Trivy",
     variable: "KEELSON_TRIVY",
-    inImage: false,
+    inImage: true,
     installUrl: "https://trivy.dev/latest/getting-started/installation/",
     note: "Its database, about 1.6 GB, is downloaded into the data folder",
   },
-  amass: { name: "Amass 5", variable: "KEELSON_AMASS", inImage: false, installUrl: "https://github.com/owasp-amass/amass#installation" },
+  amass: { name: "Amass 5", variable: "KEELSON_AMASS", inImage: true, installUrl: "https://github.com/owasp-amass/amass#installation" },
 } satisfies Record<string, ScannerTool>;
 
 export type ScannerToolKey = keyof typeof DEFS;
@@ -79,4 +80,19 @@ export function coverageFix(c: Pick<Coverage, "key" | "permission">): CoverageFi
   // Read without a credential (public files, other accounts' scans) or a connection to a registry: the needs line says what it takes.
   if (c.permission.startsWith("None:") || c.key === "registryNetwork") return { kind: "none" };
   return { kind: "credential" };
+}
+
+/**
+ * Why a page has nothing to show although a scan exists: which source couldn't be read and what to do, in one
+ * sentence. A scanner is installed, a credential is replaced, anything else is said by what it needs.
+ */
+export function unreadableSentence(c: Pick<Coverage, "key" | "label" | "permission" | "provider" | "notReadableIn">, install?: InstallKind): string {
+  const label = c.label.charAt(0).toLowerCase() + c.label.slice(1);
+  const where = `Keelson can't read ${label}${c.notReadableIn?.length ? ` for ${c.notReadableIn.map((a) => a.name).join(", ")}` : ""}`;
+  const fix = coverageFix(c);
+  const need = coverageNeed(c, install);
+  if (fix.kind === "credential")
+    return `${where}. It needs ${need}: grant it, or replace the ${PROVIDER_INFO[c.provider ?? "cloudflare"].credential} on the Accounts page, then scan again.`;
+  if (fix.kind === "network") return `${where}. Check that this server can reach the internet over HTTPS, then scan again.`;
+  return `${where}. It needs ${need}. Then scan again.`;
 }

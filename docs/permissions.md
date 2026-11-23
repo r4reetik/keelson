@@ -172,7 +172,7 @@ for example) is skipped and shown as not readable on the Regions page: nothing t
 | ECR images: tags, digests, and when each was pushed and last pulled (every enabled region) | `ecr:DescribeImages` | AIM-001, AIM-002, AIM-003, AIM-004 |
 | Pulling ECR images, for Trivy to scan | ecr:GetAuthorizationToken, ecr:BatchGetImage, ecr:GetDownloadUrlForLayer. SecurityAudit doesn't grant them: add them to the key's user in an inline policy (all three only read) | AIM-001, AIM-002, AIM-003, AIM-004 |
 | Connecting to container registries from where Keelson runs, to pull images | A connection to the account's ECR registry hosts (<account>.dkr.ecr.<region>.amazonaws.com) and the S3 hosts its layers come from. A firewall or proxy that blocks them stops the pull | AIM-001, AIM-002, AIM-003, AIM-004 |
-| Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) | Trivy installed where Keelson runs: on the PATH, or its path in KEELSON_TRIVY (not in the Docker image yet). Its database, about 1.6 GB, is downloaded into the data folder | AIM-001, AIM-002, AIM-003, AIM-004 |
+| Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) | Trivy: included in the Docker image. Run from a clone, it must be on the PATH, or its path in KEELSON_TRIVY. Its database, about 1.6 GB, is downloaded into the data folder | AIM-001, AIM-002, AIM-003, AIM-004 |
 | CISA's catalog of known exploited vulnerabilities | None: a public file, read from www.cisa.gov without a credential | AIM-001 |
 | ECS services and their task definitions (environment variables scanned for credentials, never stored) (every enabled region) | `ecs:ListClusters`, `ecs:ListServices`, `ecs:DescribeServices`, `ecs:DescribeTaskDefinition` | ACN-004, ACN-005 |
 | EKS clusters (every enabled region) | `eks:ListClusters`, `eks:DescribeCluster`, `eks:DescribeClusterVersions` | ACN-001, ACN-002, ACN-003 |
@@ -245,7 +245,7 @@ Keelson's policy grows when a check needs a new read. A policy made from an earl
 | Pulling images from Container Registry, for Trivy to scan | `cr:GetAuthorizationToken`, `cr:PullRepository` | LIM-001, LIM-002, LIM-003, LIM-004 |
 | Connecting to Container Registry from where Keelson runs, to pull images | A connection to each instance's registry host. An instance whose internet access is off, or admits only an allowlist, refuses others: add the address Keelson connects from to the allowlist (Container Registry console, the instance's Access Control, Internet), or run Keelson in a VPC linked to the instance | LIM-001, LIM-002, LIM-003, LIM-004 |
 | Elastic Container Instance groups and their images (environment variables dropped) (every available region) | `eci:DescribeContainerGroups` | Supporting data for other checks |
-| Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) | Trivy installed where Keelson runs: on the PATH, or its path in KEELSON_TRIVY (not in the Docker image yet). Its database, about 1.6 GB, is downloaded into the data folder | LIM-001, LIM-002, LIM-003, LIM-004 |
+| Packages, vulnerabilities and stored credentials in container images (Aqua Trivy) | Trivy: included in the Docker image. Run from a clone, it must be on the PATH, or its path in KEELSON_TRIVY. Its database, about 1.6 GB, is downloaded into the data folder | LIM-001, LIM-002, LIM-003, LIM-004 |
 | CISA's catalog of known exploited vulnerabilities | None: a public file, read from www.cisa.gov without a credential | LIM-001 |
 | KMS keys and secrets (names and dates, never values) (every available region) | `kms:ListKeys`, `kms:DescribeKey`, `kms:ListSecrets`, `kms:DescribeSecret` | LKM-001, LKM-002, LKM-003 |
 | Container Service (ACK) clusters | `cs:GetClusters` | LCN-001 |
@@ -298,7 +298,7 @@ Keelson runs, when installed, and aren't GitHub permissions: without one, its so
 | Known vulnerabilities in dependencies (Anchore Grype) | Grype: included in the Docker image. Run from a clone, it must be on the PATH, or its path in KEELSON_GRYPE. Its database, about 3 GB, is downloaded from Anchore into the data folder | GDP-001, GDP-002, GDP-003 |
 | Dependency licenses (Anchore Grant) | Grant: included in the Docker image. Run from a clone, it must be on the PATH, or its path in KEELSON_GRANT | GLI-001 |
 | Container packages in GitHub Container Registry, and their tags | None: GitHub lists an organization's packages for any installation of the App | GIM-001, GIM-002, GIM-003, GIM-004 |
-| Packages, vulnerabilities and stored credentials in public container images (Aqua Trivy) | Trivy installed where Keelson runs: on the PATH, or its path in KEELSON_TRIVY (not in the Docker image yet). Its database, about 1.6 GB, is downloaded into the data folder | GIM-001, GIM-002, GIM-003, GIM-004 |
+| Packages, vulnerabilities and stored credentials in public container images (Aqua Trivy) | Trivy: included in the Docker image. Run from a clone, it must be on the PATH, or its path in KEELSON_TRIVY. Its database, about 1.6 GB, is downloaded into the data folder | GIM-001, GIM-002, GIM-003, GIM-004 |
 | CISA's catalog of known exploited vulnerabilities | None: a public file, read from www.cisa.gov without a credential | GIM-001 |
 | Secret scanning alerts | Repository permissions → Secret scanning alerts: Read-only | GSC-003 |
 
@@ -332,7 +332,7 @@ Networks page ([Networks](networks.md)).
 | Known vulnerabilities in dependencies (Anchore Grype) | Grype: included in the Docker image. Run from a clone, it must be on the PATH, or its path in KEELSON_GRYPE. Its database, about 3 GB, is downloaded from Anchore into the data folder | GLD-001, GLD-002, GLD-003 |
 | Dependency licenses (Anchore Grant) | Grant: included in the Docker image. Run from a clone, it must be on the PATH, or its path in KEELSON_GRANT | GLD-006 |
 | Container registry repositories and their tags | Token scope read_api, on a token with at least the Reporter role | GLM-001, GLM-002, GLM-003, GLM-004 |
-| Packages, vulnerabilities and stored credentials in public container images (Aqua Trivy) | Trivy installed where Keelson runs: on the PATH, or its path in KEELSON_TRIVY (not in the Docker image yet). Its database, about 1.6 GB, is downloaded into the data folder | GLM-001, GLM-002, GLM-003, GLM-004 |
+| Packages, vulnerabilities and stored credentials in public container images (Aqua Trivy) | Trivy: included in the Docker image. Run from a clone, it must be on the PATH, or its path in KEELSON_TRIVY. Its database, about 1.6 GB, is downloaded into the data folder | GLM-001, GLM-002, GLM-003, GLM-004 |
 | CISA's catalog of known exploited vulnerabilities | None: a public file, read from www.cisa.gov without a credential | GLM-001 |
 
 ## Gitea
@@ -386,4 +386,4 @@ accepts its key in the address of each request; Keelson never puts it in an erro
 | What Shodan has seen on the entity's addresses | a Shodan API key for service details, or none for Shodan's free InternetDB | NSV-001, NSV-002, NSV-003, XP-012 |
 | Subdomains Shodan has seen | a Shodan API key on a plan with query credits | Finding hostnames and addresses for other checks |
 | Load balancers, their rules and targets, and security groups in the entity's AWS accounts | None: read from the AWS accounts' latest scans. Each needs a scan since this was added. | XP-013, XP-014, XP-015, XP-025, XP-026, XP-027 |
-| Subdomains Amass found (OWASP Amass, passive) | Amass 5 installed where Keelson runs: on the PATH, or its path in KEELSON_AMASS (not in the Docker image yet) | Finding hostnames and addresses for other checks |
+| Subdomains Amass found (OWASP Amass, passive) | Amass 5: included in the Docker image. Run from a clone, it must be on the PATH, or its path in KEELSON_AMASS | Finding hostnames and addresses for other checks |

@@ -1,7 +1,7 @@
 // Runs Aqua Security's Trivy, when it is installed, to scan a container image
 // straight from its registry: the packages in it, their known vulnerabilities, and
 // credentials left in its files. KEELSON_TRIVY names the binary ("off" never runs
-// it), else `trivy` on the PATH; unlike Syft, Grype and Grant it isn't in the Docker image yet.
+// it), else `trivy` on the PATH; the Docker image carries it.
 //
 // Trivy pulls the image's layers itself, reads them and keeps nothing of them:
 // its cache (the tool folder Keelson was given) holds what it found in each
