@@ -26,6 +26,8 @@ import {
   providerList,
   type ProviderId,
   withProvider,
+  coverageFix,
+  coverageNeed,
 } from "../lib.ts";
 import {
   Aside,
@@ -48,7 +50,7 @@ import { TrendCharts } from "../components/charts.tsx";
 const TITLE = "Overview";
 
 export function OverviewPage() {
-  const { startScan, status, multi, view, setScope, can } = useShell();
+  const { startScan, status, multi, view, setScope, can, session } = useShell();
   const { data, error, loading, reload } = useScopedApi<Overview>("/api/overview");
   const [since, setSince] = useState<"new" | "resolved">("new");
   const description = multi
@@ -88,6 +90,8 @@ export function OverviewPage() {
   const gaps = data.coverage.filter((c) => !c.ok);
   const gapAccounts = [...new Set(gaps.flatMap((g) => (g.notReadableIn || []).map((a) => a.name)))];
   const skipped = new Set(gaps.flatMap((g) => g.skippedChecks || []));
+  // Only blame the credential when it is the credential: a scanner that isn't installed or a network that is down isn't.
+  const credentialGaps = gaps.length > 0 && gaps.every((g) => coverageFix(g).kind === "credential");
   const categories = Object.entries(data.categoryScores)
     .filter((e): e is [string, number] => e[1] != null)
     .sort((a, b) => a[1] - b[1]);
@@ -108,8 +112,12 @@ export function OverviewPage() {
         <Banner
           variant="alert"
           icon={<WarningIcon weight="fill" />}
-          title={`${multi && gapAccounts.length ? `The credential for ${gapAccounts.join(", ")}` : "The account's credential"} can't read ${plural(gaps.length, "data source")}`}
-          description={`${skipped.size ? `${plural(skipped.size, "check")} were skipped, not passed. ` : ""}Missing: ${[...new Set(gaps.map((g) => g.permission || g.label))].slice(0, 3).join("; ")}${gaps.length > 3 ? "; and more" : ""}.`}
+          title={
+            credentialGaps
+              ? `${multi && gapAccounts.length ? `The credential for ${gapAccounts.join(", ")}` : "The account's credential"} can't read ${plural(gaps.length, "data source")}`
+              : `Keelson can't read ${plural(gaps.length, "data source")}${multi && gapAccounts.length ? ` for ${gapAccounts.join(", ")}` : ""}`
+          }
+          description={`${skipped.size ? `${plural(skipped.size, "check")} were skipped, not passed. ` : ""}Missing: ${[...new Set(gaps.map((g) => coverageNeed(g, session.install) || g.label))].slice(0, 3).join("; ")}${gaps.length > 3 ? "; and more" : ""}.`}
           action={<Banner.Action onClick={() => navigate("/scans#coverage")}>See what's missing</Banner.Action>}
         />
       )}

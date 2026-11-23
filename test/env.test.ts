@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { defaultDataDir, defaultHost, env } from "../src/env.ts";
+import { defaultDataDir, defaultHost, env, installKind } from "../src/env.ts";
 import { networkUrls } from "../src/main.ts";
 import { devHost } from "../scripts/dev-host.ts";
 
@@ -17,6 +17,11 @@ describe("settings from the environment", () => {
     assert.equal(env("PORT", { KEELSON_PORT: "5000" }), "5000");
     assert.equal(env("PORT", { KEELSON_PORT: "" }), undefined);
     assert.equal(env("PORT", {}), undefined);
+  });
+
+  test("KEELSON_INSTALL=docker is the Docker image; anything else runs from a clone", () => {
+    assert.equal(installKind({ KEELSON_INSTALL: "docker" }), "docker");
+    assert.equal(installKind({}), "source");
   });
 
   test("the Docker image listens on every interface unless told otherwise", () => {
@@ -89,6 +94,18 @@ describe("the image, the only way Keelson ships", () => {
     const dockerfile = read("Dockerfile");
     assert.match(dockerfile, /apk add --no-cache libatomic libstdc\+\+/);
     assert.match(dockerfile, /RUN node --version/);
+  });
+
+  test("the image carries Syft, Grype and Grant, checked against their published sums for both platforms", () => {
+    const dockerfile = read("Dockerfile");
+    for (const tool of ["SYFT", "GRYPE", "GRANT"]) {
+      assert.match(dockerfile, new RegExp(`${tool}_VERSION=\\d+\\.\\d+\\.\\d+ `), `${tool}'s version is pinned`);
+      for (const arch of ["AMD64", "ARM64"]) assert.match(dockerfile, new RegExp(`${tool}_${arch}=[0-9a-f]{64}`), `${tool} has a sum for ${arch}`);
+      assert.ok(dockerfile.includes(`fetch ${tool.toLowerCase()} "$${tool}_VERSION" "$${tool}_AMD64" "$${tool}_ARM64"`), `${tool} is fetched`);
+    }
+    assert.match(dockerfile, /sha256sum -c -/);
+    assert.ok(dockerfile.includes("COPY --from=anchore /out/ /usr/local/bin/"));
+    assert.ok(dockerfile.includes("syft version >/dev/null && grype version >/dev/null && grant version >/dev/null"));
   });
 
   test("runtime dependencies are plain JavaScript, since the image's build stage runs on the build machine's platform", () => {

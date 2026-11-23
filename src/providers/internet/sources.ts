@@ -3,6 +3,8 @@
 // and Shodan. Like the other providers' registries, each has a coverage label and
 // what it needs, so a source that couldn't be read skips the checks built on it.
 
+import { toolNeed } from "../../shared/tools.ts";
+
 export interface InternetSource {
   label: string;
   /** What it needs, in the words the Accounts page shows. */
@@ -27,7 +29,7 @@ const DEFS = {
   },
   amass: {
     label: "Subdomains Amass found (OWASP Amass, passive)",
-    permission: "Amass 5 installed where Keelson runs: on the PATH, or its path in KEELSON_AMASS (not in the Docker image yet)",
+    permission: toolNeed("amass"),
   },
 } satisfies Record<string, InternetSource>;
 

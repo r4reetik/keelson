@@ -4,6 +4,7 @@
 // grants all of them and nothing that writes.
 
 import type { AwsClient } from "./client.ts";
+import { toolNeed } from "../../shared/tools.ts";
 
 export interface AwsSource {
   label: string;
@@ -213,8 +214,7 @@ const DEFS = {
   },
   trivy: {
     label: "Packages, vulnerabilities and stored credentials in container images (Aqua Trivy)",
-    permission:
-      "Trivy installed where Keelson runs: on the PATH, or its path in KEELSON_TRIVY (not in the Docker image yet). Its database, about 1.6 GB, is downloaded into the data folder",
+    permission: toolNeed("trivy"),
   },
   kev: {
     label: "CISA's catalog of known exploited vulnerabilities",

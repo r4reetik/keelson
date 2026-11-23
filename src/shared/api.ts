@@ -198,6 +198,8 @@ export interface Session {
   /** Creating the admin from here needs the setup code from Keelson's log (it isn't opened on this machine). */
   setupCodeRequired: boolean;
   configured: boolean;
+  /** How this copy runs: the Data coverage table words what a missing scanner needs from it. */
+  install: InstallKind;
   user?: SessionUser;
   accounts?: SessionAccount[];
   entities?: SessionEntity[];

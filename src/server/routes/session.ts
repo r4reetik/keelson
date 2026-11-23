@@ -9,6 +9,7 @@ import { password, personName, readJson, requireJson, username } from "../valida
 import { HttpError, badRequest } from "../errors.ts";
 import { hashPassword } from "../passwords.ts";
 import { log } from "../../log.ts";
+import { installKind } from "../../env.ts";
 import type { Session, SessionUser } from "../../shared/api.ts";
 
 export function sessionRoutes(r: Routes, { repo, auth, vault, version, updates }: AppContext) {
@@ -30,6 +31,7 @@ export function sessionRoutes(r: Routes, { repo, auth, vault, version, updates }
       setupRequired: auth.setupRequired,
       setupCodeRequired: auth.setupRequired && auth.setupCodeRequired(c),
       configured: accounts.length > 0,
+      install: installKind(),
       ...(user ? { user } : {}),
       ...(ready ? { accounts: accounts.map((a) => publicAccount(vault, a)), entities: entities.map(sessionEntity), update: updates?.status() } : {}),
     } satisfies Session);

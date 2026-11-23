@@ -294,9 +294,9 @@ Keelson runs, when installed, and aren't GitHub permissions: without one, its so
 | Dependabot alerts | Repository permissions → Dependabot alerts: Read-only | GSC-004, GSC-006 |
 | Code scanning alerts | Repository permissions → Code scanning alerts: Read-only | GSC-005 |
 | Manifest and lock files, for each repository's SBOM (never the code) | Repository permissions → Contents: Read-only | GDP-001, GDP-002, GDP-003, GDP-004, GDP-005, GLI-001 |
-| Software bill of materials (Anchore Syft) | Syft installed where Keelson runs: on the PATH, or its path in KEELSON_SYFT (not in the Docker image yet) | GDP-001, GDP-002, GDP-003, GLI-001 |
-| Known vulnerabilities in dependencies (Anchore Grype) | Grype installed where Keelson runs: on the PATH, or its path in KEELSON_GRYPE (not in the Docker image yet). Its database, about 3 GB, is downloaded from Anchore into the data folder | GDP-001, GDP-002, GDP-003 |
-| Dependency licenses (Anchore Grant) | Grant installed where Keelson runs: on the PATH, or its path in KEELSON_GRANT (not in the Docker image yet) | GLI-001 |
+| Software bill of materials (Anchore Syft) | Syft: included in the Docker image. Run from a clone, it must be on the PATH, or its path in KEELSON_SYFT | GDP-001, GDP-002, GDP-003, GLI-001 |
+| Known vulnerabilities in dependencies (Anchore Grype) | Grype: included in the Docker image. Run from a clone, it must be on the PATH, or its path in KEELSON_GRYPE. Its database, about 3 GB, is downloaded from Anchore into the data folder | GDP-001, GDP-002, GDP-003 |
+| Dependency licenses (Anchore Grant) | Grant: included in the Docker image. Run from a clone, it must be on the PATH, or its path in KEELSON_GRANT | GLI-001 |
 | Container packages in GitHub Container Registry, and their tags | None: GitHub lists an organization's packages for any installation of the App | GIM-001, GIM-002, GIM-003, GIM-004 |
 | Packages, vulnerabilities and stored credentials in public container images (Aqua Trivy) | Trivy installed where Keelson runs: on the PATH, or its path in KEELSON_TRIVY (not in the Docker image yet). Its database, about 1.6 GB, is downloaded into the data folder | GIM-001, GIM-002, GIM-003, GIM-004 |
 | CISA's catalog of known exploited vulnerabilities | None: a public file, read from www.cisa.gov without a credential | GIM-001 |
@@ -328,9 +328,9 @@ Networks page ([Networks](networks.md)).
 | Deploy tokens (never their values) | Token scope read_api, on a token with at least the Maintainer role in the project (an Owner of the group has it) | GLH-004 |
 | GitLab Pages custom domains | Token scope read_api, on a token with at least the Maintainer role in the project (an Owner of the group has it) | Supporting data for other checks |
 | Manifest and lock files and CI configuration, for each project's SBOM (never the code) | Token scope read_api, on a token with at least the Reporter role | GLD-001, GLD-002, GLD-003, GLD-004, GLD-005, GLD-006 |
-| Software bill of materials (Anchore Syft) | Syft installed where Keelson runs: on the PATH, or its path in KEELSON_SYFT (not in the Docker image yet) | GLD-001, GLD-002, GLD-003, GLD-006 |
-| Known vulnerabilities in dependencies (Anchore Grype) | Grype installed where Keelson runs: on the PATH, or its path in KEELSON_GRYPE (not in the Docker image yet). Its database, about 3 GB, is downloaded from Anchore into the data folder | GLD-001, GLD-002, GLD-003 |
-| Dependency licenses (Anchore Grant) | Grant installed where Keelson runs: on the PATH, or its path in KEELSON_GRANT (not in the Docker image yet) | GLD-006 |
+| Software bill of materials (Anchore Syft) | Syft: included in the Docker image. Run from a clone, it must be on the PATH, or its path in KEELSON_SYFT | GLD-001, GLD-002, GLD-003, GLD-006 |
+| Known vulnerabilities in dependencies (Anchore Grype) | Grype: included in the Docker image. Run from a clone, it must be on the PATH, or its path in KEELSON_GRYPE. Its database, about 3 GB, is downloaded from Anchore into the data folder | GLD-001, GLD-002, GLD-003 |
+| Dependency licenses (Anchore Grant) | Grant: included in the Docker image. Run from a clone, it must be on the PATH, or its path in KEELSON_GRANT | GLD-006 |
 | Container registry repositories and their tags | Token scope read_api, on a token with at least the Reporter role | GLM-001, GLM-002, GLM-003, GLM-004 |
 | Packages, vulnerabilities and stored credentials in public container images (Aqua Trivy) | Trivy installed where Keelson runs: on the PATH, or its path in KEELSON_TRIVY (not in the Docker image yet). Its database, about 1.6 GB, is downloaded into the data folder | GLM-001, GLM-002, GLM-003, GLM-004 |
 | CISA's catalog of known exploited vulnerabilities | None: a public file, read from www.cisa.gov without a credential | GLM-001 |
@@ -362,9 +362,9 @@ runs, when installed, and aren't token scopes.
 | Collaborators outside the organization | Token scope repository: Read, on a token of someone who administers the repository (an owner of the organization does) | TEI-004 |
 | Push mirrors | Token scope repository: Read, on a token of someone who administers the repository (an owner of the organization does) | TER-002 |
 | Manifest and lock files, for each repository's SBOM (never the code) | Token scope repository: Read, with access to all repositories | TED-001, TED-002, TED-003, TED-004, TED-005, TED-006 |
-| Software bill of materials (Anchore Syft) | Syft installed where Keelson runs: on the PATH, or its path in KEELSON_SYFT (not in the Docker image yet) | TED-001, TED-002, TED-003, TED-006 |
-| Known vulnerabilities in dependencies (Anchore Grype) | Grype installed where Keelson runs: on the PATH, or its path in KEELSON_GRYPE (not in the Docker image yet). Its database, about 3 GB, is downloaded from Anchore into the data folder | TED-001, TED-002, TED-003 |
-| Dependency licenses (Anchore Grant) | Grant installed where Keelson runs: on the PATH, or its path in KEELSON_GRANT (not in the Docker image yet) | TED-006 |
+| Software bill of materials (Anchore Syft) | Syft: included in the Docker image. Run from a clone, it must be on the PATH, or its path in KEELSON_SYFT | TED-001, TED-002, TED-003, TED-006 |
+| Known vulnerabilities in dependencies (Anchore Grype) | Grype: included in the Docker image. Run from a clone, it must be on the PATH, or its path in KEELSON_GRYPE. Its database, about 3 GB, is downloaded from Anchore into the data folder | TED-001, TED-002, TED-003 |
+| Dependency licenses (Anchore Grant) | Grant: included in the Docker image. Run from a clone, it must be on the PATH, or its path in KEELSON_GRANT | TED-006 |
 | Whether the instance shows public repositories without signing in | None: one request without the token | TER-001 |
 
 ## Internet (Sonar)

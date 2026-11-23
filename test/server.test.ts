@@ -26,6 +26,7 @@ describe("the API", () => {
     assert.equal(s.authRequired, true);
     assert.equal(s.authenticated, false);
     assert.equal(s.setupRequired, false, "an admin exists");
+    assert.equal(s.install, process.env.KEELSON_INSTALL === "docker" ? "docker" : "source", "the page words a missing scanner for how Keelson runs");
     cleanup();
   });
 

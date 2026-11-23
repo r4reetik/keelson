@@ -4,6 +4,7 @@
 // the Add accounts flow.
 
 import type { GiteaClient } from "./client.ts";
+import { toolNeed } from "../../shared/tools.ts";
 
 export interface GiteaSource {
   label: string;
@@ -46,16 +47,15 @@ const DEFS = {
   },
   syft: {
     label: "Software bill of materials (Anchore Syft)",
-    permission: "Syft installed where Keelson runs: on the PATH, or its path in KEELSON_SYFT (not in the Docker image yet)",
+    permission: toolNeed("syft"),
   },
   grype: {
     label: "Known vulnerabilities in dependencies (Anchore Grype)",
-    permission:
-      "Grype installed where Keelson runs: on the PATH, or its path in KEELSON_GRYPE (not in the Docker image yet). Its database, about 3 GB, is downloaded from Anchore into the data folder",
+    permission: toolNeed("grype"),
   },
   grant: {
     label: "Dependency licenses (Anchore Grant)",
-    permission: "Grant installed where Keelson runs: on the PATH, or its path in KEELSON_GRANT (not in the Docker image yet)",
+    permission: toolNeed("grant"),
   },
   anonymous: {
     label: "Whether the instance shows public repositories without signing in",

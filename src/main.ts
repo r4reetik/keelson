@@ -17,7 +17,7 @@ import { importLegacy } from "./store/legacy.ts";
 import { log } from "./log.ts";
 import { REPOSITORY, VERSION } from "./meta.ts";
 import { UpdateChecker } from "./updates.ts";
-import { env } from "./env.ts";
+import { env, installKind } from "./env.ts";
 import { net } from "./core/net.ts";
 import { routeFor } from "./networks.ts";
 
@@ -98,8 +98,7 @@ export async function start(o: StartOptions): Promise<Running> {
       : new UpdateChecker({
           version: VERSION,
           repository: REPOSITORY,
-          // The Docker image sets KEELSON_INSTALL=docker; anything else runs from a clone.
-          install: env("INSTALL") === "docker" ? "docker" : "source",
+          install: installKind(),
           lockedOff: env("UPDATE_CHECK") === "off",
           enabled: () => repo.settings.get().updates.check,
           log: log.info,

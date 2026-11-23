@@ -417,8 +417,8 @@ On every scan Keelson asks GitHub for a token limited to reading what it checks,
 That request is the one POST Keelson sends to GitHub; everything else is GET. The permissions each source needs
 are in [docs/permissions.md](docs/permissions.md#github).
 
-To keep an SBOM of each repository, give the App **Contents: Read-only** and install Syft, Grype and Grant where
-Keelson runs (they aren't in the Docker image yet). Keelson fetches only manifest and lock files, workflows and
+To keep an SBOM of each repository, give the App **Contents: Read-only**. The Docker image includes Anchore's
+Syft, Grype and Grant, which do the work; run from a clone, install them on the same machine. Keelson fetches only manifest and lock files, workflows and
 Dockerfiles, never the code, and makes a repository's SBOM again only when one of them changes. Grype keeps its
 vulnerability database, about 3 GB, in the data folder and downloads it from Anchore on the first scan.
 

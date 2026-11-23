@@ -28,6 +28,8 @@ import {
   type Severity,
   type TriageStatus,
   type VulnRow,
+  coverageNeed,
+  isScannerTool,
 } from "../lib.ts";
 import { useScopedApi, useShell } from "../shell.tsx";
 import { DialogHeader, ListCard, NoRows, Page, PageState, Row, SeverityBadge, Stat, unreadableText } from "../components/ui.tsx";
@@ -210,7 +212,7 @@ function fullLists(scope: string, filterQuery: string) {
 type Lists = ReturnType<typeof fullLists>;
 
 export function DependenciesPage() {
-  const { view } = useShell();
+  const { view, session } = useShell();
   const { params } = useLocation();
   const tab = (["vulnerabilities", "licenses"].includes(params.get("tab") ?? "") ? params.get("tab") : "packages") as Tab;
   const page = Math.max(1, Number(params.get("page")) || 1);
@@ -385,7 +387,8 @@ export function DependenciesPage() {
             <ul className="list-disc space-y-1 pl-5">
               {gaps.map((c) => (
                 <li key={c.key}>
-                  {c.label}: {c.message ?? `needs ${c.permission}.`}
+                  {c.label}: {c.message ?? `needs ${coverageNeed(c, session.install)}.`}
+                  {c.message && isScannerTool(c.key) && <span className="text-kumo-subtle"> Needs: {coverageNeed(c, session.install)}.</span>}
                 </li>
               ))}
             </ul>

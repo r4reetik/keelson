@@ -2,7 +2,8 @@
 // software bill of materials (SBOM) from manifest and lock files, Grype matches
 // its packages against known vulnerabilities, and Grant sorts their licenses by
 // risk. Each is found like Amass: KEELSON_SYFT, KEELSON_GRYPE and KEELSON_GRANT
-// name the binary ("off" never runs it), else the tool on the PATH.
+// name the binary ("off" never runs it), else the tool on the PATH. The Docker image
+// carries all three in /usr/local/bin (see the Dockerfile).
 //
 // Nothing of Keelson's environment reaches them: each runs with only the PATH, a
 // home folder of its own, proxy settings (the machine's, or those of the network

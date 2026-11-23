@@ -1,6 +1,19 @@
 import { Badge, Table, Link } from "@cloudflare/kumo";
+import { ArrowSquareOutIcon } from "@phosphor-icons/react";
 import { useScopedApi, useShell } from "../shell.tsx";
-import { dateTime, num, plural, PROVIDER_INFO, score, type ScansResponse } from "../lib.ts";
+import {
+  type Coverage,
+  coverageFix,
+  coverageNeed,
+  dateTime,
+  type InstallKind,
+  num,
+  plural,
+  PROVIDER_INFO,
+  SCANNER_TOOLS,
+  score,
+  type ScansResponse,
+} from "../lib.ts";
 import { Aside, Flag, ListCard, NoRows, Page, PageState } from "../components/ui.tsx";
 import { MoreNames } from "../components/full-list.tsx";
 
@@ -17,7 +30,7 @@ const TRIGGER: Record<string, string> = {
 };
 
 export function ScansPage() {
-  const { status, multi } = useShell();
+  const { status, multi, session } = useShell();
   // Refetch as each queued account starts and finishes, so the history fills in live.
   const { data, error, loading, reload } = useScopedApi<ScansResponse>("/api/scans", [status?.running, status?.accountId]);
   if (error || !data) return <PageState title={TITLE} description={DESCRIPTION} error={error} loading={loading} empty={false} retry={reload} />;
@@ -113,40 +126,7 @@ export function ScansPage() {
                   <Table.Cell className="whitespace-nowrap">
                     <Flag value={c.ok} on={multi ? "Readable in all" : "Readable"} off={`Not readable${c.status ? ` (${c.status})` : ""}`} />
                   </Table.Cell>
-                  <Table.Cell className="max-w-xl text-sm text-kumo-subtle">
-                    {c.ok ? (
-                      "—"
-                    ) : (
-                      <div className="flex flex-col gap-0.5">
-                        {c.permission && (
-                          <span className="text-kumo-default">
-                            Needs <span className="font-medium">{c.permission}</span>
-                            {c.notReadableIn?.length ? ` for ${c.notReadableIn.map((a) => a.name).join(", ")}` : ""}
-                          </span>
-                        )}
-                        {c.skippedChecks?.length ? (
-                          <span>
-                            {plural(c.skippedChecks.length, "check")} skipped: {c.skippedChecks.slice(0, 6).join(", ")}
-                            <MoreNames names={c.skippedChecks} shown={6} title={`Checks skipped without ${c.label}`} noun={["check", "checks"]} />
-                          </span>
-                        ) : null}
-                        {c.message && (
-                          <span className="truncate" title={c.message}>
-                            {c.permission ? `${PROVIDER_INFO[c.provider ?? "cloudflare"].label} said: ` : ""}
-                            {c.message}
-                          </span>
-                        )}
-                        {c.permission ? (
-                          <Link variant="plain" href={"/accounts"}>
-                            Replace the token on the Accounts page
-                          </Link>
-                        ) : (
-                          // Public DNS lookups and probes need no permission, only outbound network access.
-                          <span>Check that this server can reach the internet over HTTPS.</span>
-                        )}
-                      </div>
-                    )}
-                  </Table.Cell>
+                  <Table.Cell className="max-w-xl text-sm text-kumo-subtle">{c.ok ? "—" : <CoverageFixes c={c} install={session.install} />}</Table.Cell>
                 </Table.Row>
               ))}
             </Table.Body>
@@ -156,5 +136,51 @@ export function ScansPage() {
         )}
       </ListCard>
     </Page>
+  );
+}
+
+/** What to do about a source that couldn't be read: install a scanner, replace the account's credential, or reach the network. */
+function CoverageFixes({ c, install }: { c: Coverage; install: InstallKind }) {
+  const fix = coverageFix(c);
+  const tool = fix.kind === "tool" ? SCANNER_TOOLS[fix.tool] : null;
+  // A scanner's row is worded for where this copy runs, not from the text its scan kept.
+  const need = coverageNeed(c, install);
+  const info = PROVIDER_INFO[c.provider ?? "cloudflare"];
+  return (
+    <div className="flex flex-col gap-0.5">
+      {need && (
+        <span className="text-kumo-default">
+          Needs <span className="font-medium">{need}</span>
+          {c.notReadableIn?.length ? ` for ${c.notReadableIn.map((a) => a.name).join(", ")}` : ""}
+        </span>
+      )}
+      {c.skippedChecks?.length ? (
+        <span>
+          {plural(c.skippedChecks.length, "check")} skipped: {c.skippedChecks.slice(0, 6).join(", ")}
+          <MoreNames names={c.skippedChecks} shown={6} title={`Checks skipped without ${c.label}`} noun={["check", "checks"]} />
+        </span>
+      ) : null}
+      {c.message && (
+        <span className="truncate" title={c.message}>
+          {/* Only the platform's own answers are quoted as the platform's; a scanner's error is Keelson's or the scanner's. */}
+          {fix.kind === "credential" ? `${info.label} said: ` : ""}
+          {c.message}
+        </span>
+      )}
+      {fix.kind === "credential" && (
+        <Link variant="plain" href={"/accounts"}>
+          Replace the {info.credential} on the Accounts page
+        </Link>
+      )}
+      {tool && !(install === "docker" && tool.inImage) && (
+        <span>
+          <Link href={tool.installUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1">
+            How to install {tool.name} <ArrowSquareOutIcon />
+          </Link>
+          , then run a scan again.
+        </span>
+      )}
+      {fix.kind === "network" && <span>Check that this server can reach the internet over HTTPS.</span>}
+    </div>
   );
 }

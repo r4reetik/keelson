@@ -5,6 +5,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { InstallKind } from "./shared/api.ts";
 
 /** `KEELSON_<name>`. Empty counts as unset. */
 export function env(name: string, vars: NodeJS.ProcessEnv = process.env): string | undefined {
@@ -12,6 +13,9 @@ export function env(name: string, vars: NodeJS.ProcessEnv = process.env): string
 }
 
 const inDocker = (vars: NodeJS.ProcessEnv) => env("INSTALL", vars) === "docker";
+
+/** The Docker image sets KEELSON_INSTALL=docker; anything else runs from a clone. */
+export const installKind = (vars: NodeJS.ProcessEnv = process.env): InstallKind => (inDocker(vars) ? "docker" : "source");
 
 /** KEELSON_HOST; in the Docker image every interface, else loopback only. */
 export function defaultHost(vars: NodeJS.ProcessEnv = process.env): string {

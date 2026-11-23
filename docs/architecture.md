@@ -104,8 +104,8 @@ installation token request is the one other POST (it creates a token that can on
 ## Dependencies: a software bill of materials per repository
 
 GitHub, GitLab and Gitea scans also keep an SBOM of each repository (`src/core/sbom/`, shared: each platform gives it a `CodeHost` that lists a branch's files and fetches one by its SHA), with Anchore's open-source
-tools when they're installed where Keelson runs (`src/core/anchore.ts`: `KEELSON_SYFT`, `KEELSON_GRYPE` and
-`KEELSON_GRANT`, or each on the PATH):
+tools, which the Docker image includes and a clone needs installed (`src/core/anchore.ts`: `KEELSON_SYFT`,
+`KEELSON_GRYPE` and `KEELSON_GRANT`, or each on the PATH):
 
 1. **File list.** One request per repository reads the default branch's file list (`git/trees`, recursive; folder
    by folder when GitHub cuts it short). `manifests.ts` picks the files that describe dependencies: package

@@ -41,6 +41,7 @@ import {
   type Severity,
   type TriageStatus,
   type WorkloadRow,
+  coverageNeed,
 } from "../lib.ts";
 import { useScopedApi, useShell } from "../shell.tsx";
 import { ListCard, NoRows, Page, PageState, ProviderIcon, Row, SeverityBadge, Stat } from "../components/ui.tsx";
@@ -226,7 +227,7 @@ function fullLists(scope: string, filterQuery: string) {
 type Lists = ReturnType<typeof fullLists>;
 
 export function ImagesPage() {
-  const { view, multi, status } = useShell();
+  const { view, multi, status, session } = useShell();
   // Images a scan had no time for are read in the background while Keelson keeps running; after a restart they wait for the next scan.
   const inBackground = !!status?.background?.inScope;
   const { params } = useLocation();
@@ -267,7 +268,7 @@ export function ImagesPage() {
         emptyText={
           data?.scan
             ? gaps.length
-              ? `${gaps[0].label}: ${gaps[0].message ?? `needs ${gaps[0].permission}`}`
+              ? `${gaps[0].label}: ${gaps[0].message ?? `needs ${coverageNeed(gaps[0], session.install)}`}`
               : "No container registry or workload that runs images is in this view's latest scans. They are read from AWS, Alibaba Cloud and GitHub accounts on the next scan."
             : undefined
         }
@@ -583,8 +584,8 @@ export function ImagesPage() {
             <ul className="list-disc space-y-1 pl-5">
               {gaps.map((c) => (
                 <li key={`${c.provider}${c.key}`}>
-                  {c.label}: {c.message ?? `needs ${c.permission}.`}
-                  {c.message && c.permission && <span className="text-kumo-subtle"> Needs: {c.permission}.</span>}
+                  {c.label}: {c.message ?? `needs ${coverageNeed(c, session.install)}.`}
+                  {c.message && c.permission && <span className="text-kumo-subtle"> Needs: {coverageNeed(c, session.install)}.</span>}
                 </li>
               ))}
             </ul>

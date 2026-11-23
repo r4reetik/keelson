@@ -4,6 +4,7 @@ export * from "../../src/shared/api.ts";
 export * from "../../src/shared/severity.ts";
 export * from "../../src/shared/triage.ts";
 export * from "../../src/shared/filters.ts";
+export * from "../../src/shared/tools.ts";
 export { displayName, scopeKey as scopeKeyFor, splitScopeKey, withProvider } from "../../src/shared/scope.ts";
 export * from "../../src/shared/providers.ts";
 export * from "../../src/shared/github.ts";

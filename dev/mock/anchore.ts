@@ -9,6 +9,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { anchore } from "../../src/core/anchore.ts";
+import { env } from "../../src/env.ts";
 
 interface MockOptions {
   /** Pretend none of the tools is installed. */
@@ -215,7 +216,8 @@ function mockGrant(sbomFile: string): string {
 /** Replaces the tools until the returned function is called. */
 export function installMockAnchore(o: MockOptions = {}): () => void {
   const real = { ...anchore };
-  anchore.path = (tool) => (o.missing?.includes(tool) ? null : `/mock/${tool}`);
+  // KEELSON_<TOOL>=off turns one off as it does for the real tool, so the mock can show a missing scanner's coverage gap.
+  anchore.path = (tool) => (o.missing?.includes(tool) || env(tool.toUpperCase()) === "off" ? null : `/mock/${tool}`);
   anchore.version = async (tool) => `0.0.0-mock-${tool}`;
   anchore.syft = async (_bin, dir) => {
     o.onSyft?.(files(dir).map((f) => relative(dir, f).split("\\").join("/")));

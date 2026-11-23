@@ -4,6 +4,7 @@
 // probe for the Add accounts flow.
 
 import { ALIBABA_ACTIONS } from "../../shared/alibaba.ts";
+import { toolNeed } from "../../shared/tools.ts";
 import type { AlibabaClient } from "./client.ts";
 
 export interface AlibabaSource {
@@ -109,8 +110,7 @@ const LABELS: Record<Key, { label: string; probe?: AlibabaSource["probe"]; regio
   },
   trivy: {
     label: "Packages, vulnerabilities and stored credentials in container images (Aqua Trivy)",
-    permission:
-      "Trivy installed where Keelson runs: on the PATH, or its path in KEELSON_TRIVY (not in the Docker image yet). Its database, about 1.6 GB, is downloaded into the data folder",
+    permission: toolNeed("trivy"),
   },
   kev: {
     label: "CISA's catalog of known exploited vulnerabilities",
