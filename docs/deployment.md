@@ -137,6 +137,11 @@ All of them are readable by the owning user only. Back up the whole directory; a
 is stopped is complete. Treat it like the tokens themselves. Scans older than the retention period (Settings →
 Scans) are pruned automatically, along with the triage of findings no scan reports any more.
 
+`tools/` holds the scanners' own data: Grype's vulnerability database (`tools/grype`) and Trivy's (`tools/trivy`,
+with what it found in each image layer). Scans keep both databases current; **Settings → Scanners** shows when
+each was built and has an **Update now** button for admins, which downloads the newest one in the background.
+Deleting `tools/` is safe: the next scan downloads them again.
+
 Upgrading is pulling the new image and recreating the container; Keelson copies the database to `backups/` before
 migrating it. Release lines, automatic updates and rolling back are covered in [upgrading.md](upgrading.md).
 

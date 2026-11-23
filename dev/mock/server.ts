@@ -19,6 +19,7 @@ import { installMockGitlab } from "./gitlab.ts";
 import { installMockInternet } from "./internet.ts";
 import { installMockNetworks, seedNetworks } from "./networks.ts";
 import { MOCK_DIGEST, mockTrivy } from "./trivy.ts";
+import { mockDatabases } from "./anchore.ts";
 import { trivyLimits } from "../../src/core/trivy.ts";
 import { seedAccount, seedAlibaba, seedAws, seedGitea, seedGithub, seedGitlab, seedInternet, seedTriageHistory, seedVercel } from "./accounts.ts";
 import { providerList } from "../../src/shared/providers.ts";
@@ -96,6 +97,8 @@ seedTriageHistory(repo, MOCK_ACCOUNT);
 mockAws.oldBuildPulled = true;
 trivyLimits.totalSeconds = -1;
 mockTrivy.beforeImage = (ref) => (ref.includes(MOCK_DIGEST.webOld) ? new Promise((done) => setTimeout(done, 25_000)) : undefined);
+// Updating a scanner's database from Settings takes long enough to watch it say "Updating".
+mockDatabases.updateMs = 4000;
 console.log(`\n  Keelson (mock ${providerList()} data)\n\n  Open:  ${running.url}`);
 if (signup && running.auth.setupCode && !isLoopback(host)) console.log(`  Setup code, for creating the admin from another machine: ${running.auth.setupCode}`);
 console.log(

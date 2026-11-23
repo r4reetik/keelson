@@ -12,6 +12,7 @@
 // again, which pulls nothing.
 
 import { eol } from "../../src/core/eol.ts";
+import { mockDatabaseUpdate } from "./anchore.ts";
 import { kev } from "../../src/core/kev.ts";
 import { trivy, TrivyError, trivyFailure, type RegistryLogin } from "../../src/core/trivy.ts";
 
@@ -420,7 +421,8 @@ export function installMockTrivy(o: MockTrivyOptions = {}): () => void {
     const real = { ...trivy };
     const realKev = kev.load;
     trivy.path = () => (current.missing ? null : "/mock/trivy");
-    trivy.updateDb = async () => {};
+    // Scans call it before reading images too, so mockDatabases.updateMs slows those as well.
+    trivy.updateDb = () => mockDatabaseUpdate();
     // The database is published every six hours.
     trivy.version = async () => ({
       version: "0.0.0-mock",

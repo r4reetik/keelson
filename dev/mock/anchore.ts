@@ -213,12 +213,32 @@ function mockGrant(sbomFile: string): string {
   return JSON.stringify({ tool: "grant", version: "0.0.0-mock", run: { argv: ["grant", "list"], targets: [{ evaluation: { findings: { packages } } }] } });
 }
 
+/**
+ * Databases Settings can update in the mock: how long an update takes (the mock dev server makes it long enough to
+ * watch), whether it fails, and how many were asked for. Grype's database is built daily.
+ */
+export const mockDatabases = { updateMs: 0, fail: false, updates: 0 };
+const dailyBuild = () => new Date(Math.floor(Date.now() / 86_400_000) * 86_400_000).toISOString();
+let grypeBuilt: string | null = null;
+
+/** One update of a mock database: waits, then fails or succeeds as mockDatabases says. */
+export async function mockDatabaseUpdate(): Promise<void> {
+  mockDatabases.updates++;
+  if (mockDatabases.updateMs) await new Promise((r) => setTimeout(r, mockDatabases.updateMs));
+  if (mockDatabases.fail) throw new Error("Grype failed: unable to download database: connection refused");
+}
+
 /** Replaces the tools until the returned function is called. */
 export function installMockAnchore(o: MockOptions = {}): () => void {
   const real = { ...anchore };
   // KEELSON_<TOOL>=off turns one off as it does for the real tool, so the mock can show a missing scanner's coverage gap.
   anchore.path = (tool) => (o.missing?.includes(tool) || env(tool.toUpperCase()) === "off" ? null : `/mock/${tool}`);
   anchore.version = async (tool) => `0.0.0-mock-${tool}`;
+  anchore.grypeDbBuilt = async () => grypeBuilt ?? dailyBuild();
+  anchore.updateGrypeDb = async () => {
+    await mockDatabaseUpdate();
+    grypeBuilt = new Date().toISOString();
+  };
   anchore.syft = async (_bin, dir) => {
     o.onSyft?.(files(dir).map((f) => relative(dir, f).split("\\").join("/")));
     return mockSyft(dir);

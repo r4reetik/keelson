@@ -208,6 +208,28 @@ export async function grypeDbDir(toolDir: string | null): Promise<string> {
 }
 
 /**
+ * One Grype command on its database at a time, in the order asked for: a scan's match and an update asked for from
+ * Settings would otherwise both replace the database files.
+ */
+let grypeTurn: Promise<unknown> = Promise.resolve();
+function grypeInTurn<T>(work: () => Promise<T>): Promise<T> {
+  const mine = grypeTurn.then(work, work);
+  grypeTurn = mine.catch(() => {});
+  return mine;
+}
+
+/** When Grype's database was built (`grype db status`, its JSON in schema 5 and 6 alike), or null when there is none. */
+export function grypeBuilt(out: string): string | null {
+  try {
+    const status = JSON.parse(out);
+    const built = status?.built ?? status?.Built;
+    return typeof built === "string" && !Number.isNaN(Date.parse(built)) ? new Date(built).toISOString() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * How scans find and run the tools. The mock replaces it, so tests and the mock dev server never run the real
  * ones; each takes and returns the tools' own JSON documents.
  */
@@ -218,11 +240,23 @@ export const anchore = {
   syft: (bin: string, dir: string): Promise<string> =>
     runTool("syft", bin, ["scan", `dir:${dir}`, "-o", "syft-json", "-q", "--base-path", dir], { seconds: anchoreLimits.syftSeconds }),
   /** Grype over a Syft document on disk: its JSON report. */
-  grype: async (bin: string, sbomFile: string, toolDir: string | null): Promise<string> =>
-    runTool("grype", bin, [`sbom:${sbomFile}`, "-o", "json", "-q"], {
-      seconds: anchoreLimits.grypeSeconds,
-      extraEnv: { GRYPE_DB_CACHE_DIR: await grypeDbDir(toolDir) },
-    }),
+  grype: async (bin: string, sbomFile: string, toolDir: string | null): Promise<string> => {
+    const dir = await grypeDbDir(toolDir);
+    return grypeInTurn(() =>
+      runTool("grype", bin, [`sbom:${sbomFile}`, "-o", "json", "-q"], { seconds: anchoreLimits.grypeSeconds, extraEnv: { GRYPE_DB_CACHE_DIR: dir } }),
+    );
+  },
+  /** When the database Grype matches against was built; null when it has none yet (it is downloaded on the first match). */
+  grypeDbBuilt: async (bin: string, toolDir: string | null): Promise<string | null> => {
+    const dir = await grypeDbDir(toolDir);
+    // Without a database it answers 1, with the same JSON.
+    return grypeBuilt(await runTool("grype", bin, ["db", "status", "-o", "json"], { seconds: 30, extraEnv: { GRYPE_DB_CACHE_DIR: dir }, okCodes: [0, 1] }));
+  },
+  /** Downloads Grype's database from Anchore, or the newer one when it was published; nothing else is sent. */
+  updateGrypeDb: async (bin: string, toolDir: string | null): Promise<void> => {
+    const dir = await grypeDbDir(toolDir);
+    await grypeInTurn(() => runTool("grype", bin, ["db", "update"], { seconds: anchoreLimits.grypeSeconds, extraEnv: { GRYPE_DB_CACHE_DIR: dir } }));
+  },
   /** A Syft document on disk in another SBOM format ("cyclonedx-json", "spdx-json"). */
   convert: (bin: string, sbomFile: string, format: string): Promise<string> => runTool("syft", bin, ["convert", sbomFile, "-o", format, "-q"], { seconds: 60 }),
   /** Grant's license list for a Syft document on disk: its JSON report. */

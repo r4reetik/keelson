@@ -7,6 +7,7 @@ import type { ScopeKind } from "./scope.ts";
 import type { ProviderId } from "./providers.ts";
 import type { Role } from "./roles.ts";
 import type { ImageBuildLink, ImagesSnapshot, WorkloadLink } from "./images.ts";
+import type { ScannerToolKey } from "./tools.ts";
 
 export type Confidence = "confirmed" | "likely";
 export type FindingSource = "custom" | "security_center";
@@ -624,6 +625,35 @@ export interface ScanRequest {
   scope: string;
   /** Scan every account in every entity instead, including entities kept out of "All accounts". */
   every?: boolean;
+}
+
+/** A scanner Keelson runs, as Settings shows it. */
+export interface ScannerRow {
+  key: ScannerToolKey;
+  name: string;
+  purpose: string;
+  /** Found on the PATH or at its KEELSON_* path (and not turned off). */
+  installed: boolean;
+  version: string | null;
+  /** The vulnerability database it matches against; null for a scanner without one. */
+  database: ScannerDatabase | null;
+}
+
+export interface ScannerDatabase {
+  from: string;
+  size: string;
+  /** When its publisher built the copy in the data folder; null when there is none yet. */
+  builtAt: string | null;
+  /** An update asked for from Settings is running. */
+  updating: boolean;
+  /** When the last update asked for from Settings finished, and why it failed if it did. */
+  updatedAt: string | null;
+  error: string | null;
+}
+
+export interface ScannersResponse {
+  install: InstallKind;
+  scanners: ScannerRow[];
 }
 
 export interface ScanStatus {

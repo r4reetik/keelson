@@ -20,6 +20,7 @@ import { NO_RELATED, type Related } from "./core/types.ts";
 import { LINK_KEYS, LINK_PROVIDER, type LinkKey, type ScanSnapshot } from "./shared/api.ts";
 import { through, type Route } from "./core/net.ts";
 import { checkRoute, originFor, routeFor } from "./networks.ts";
+import { ScannerTools } from "./scanner-tools.ts";
 
 export interface ScanState {
   running: boolean;
@@ -71,6 +72,8 @@ export class Scanner {
   readonly #vault: TokenVault;
   readonly #log: (msg: string) => void;
   readonly #toolDir: string | null;
+  /** The scanners scans run, and their databases (Settings). */
+  readonly tools: ScannerTools;
   #jobs: Job[] = [];
   #current: Job | null = null;
   /** What scans left to read, by account, in the order they finished. */
@@ -83,6 +86,7 @@ export class Scanner {
     this.#vault = vault;
     this.#log = log;
     this.#toolDir = opts.toolDir ?? null;
+    this.tools = new ScannerTools(this.#toolDir, log);
   }
 
   #perEntity(accountId: string): boolean {

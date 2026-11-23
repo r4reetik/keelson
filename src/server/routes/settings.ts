@@ -7,13 +7,15 @@ import { CHECKS, CHECK_BY_ID } from "../../providers/catalog.ts";
 import { PROVIDERS } from "../../shared/providers.ts";
 import { checkStats, latestScans, scanMeta } from "../scope.ts";
 import { fingerprints, mergeSettings, param, requireJson, severityOrNull, triagePatch } from "../validate.ts";
-import { notFound } from "../errors.ts";
-import type { CheckRow, ChecksResponse, OwnersResponse, Settings, UpdateStatus } from "../../shared/api.ts";
+import { HttpError, notFound } from "../errors.ts";
+import type { CheckRow, ChecksResponse, OwnersResponse, ScannersResponse, Settings, UpdateStatus } from "../../shared/api.ts";
+import { SCANNER_TOOLS } from "../../shared/tools.ts";
+import { isDatabaseTool } from "../../scanner-tools.ts";
 import { UpdateChecker } from "../../updates.ts";
 import { requirePermission } from "../middleware.ts";
 import { reaches, viewOf } from "../access.ts";
 
-export function settingsRoutes(r: Routes, { repo, version, updates }: AppContext) {
+export function settingsRoutes(r: Routes, { repo, version, updates, scanner }: AppContext) {
   const admin = r.with(requirePermission("settings"));
   const manage = r.with(requirePermission("checks"));
   const triage = r.with(requirePermission("triage"));
@@ -29,6 +31,16 @@ export function settingsRoutes(r: Routes, { repo, version, updates }: AppContext
     // Turning checks on shouldn't mean waiting a day for the first one.
     if (next.updates.check && !before.updates.check) void checker.check();
     return c.json(next satisfies Settings);
+  });
+
+  // The scanners Keelson runs and their databases. Updating one reaches every entity's scans, so it is an admin's.
+  r.get("/api/scanners", async (c) => c.json((await scanner.tools.status()) satisfies ScannersResponse));
+  admin.post("/api/scanners/:tool/database", async (c) => {
+    const key = param(c, "tool");
+    if (!isDatabaseTool(key)) throw notFound("No such scanner database");
+    if (scanner.tools.update(key) === "missing")
+      throw new HttpError(409, `${SCANNER_TOOLS[key].name} isn't installed where Keelson runs, so there is no database to update.`);
+    return c.json((await scanner.tools.status()) satisfies ScannersResponse);
   });
 
   r.get("/api/updates", (c) => c.json(checker.status() satisfies UpdateStatus));

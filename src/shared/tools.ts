@@ -18,32 +18,61 @@ export interface ScannerTool {
   installUrl: string;
   /** What else it needs, said after where it comes from. */
   note?: string;
+  /** What Keelson runs it for, in a few words (Settings). */
+  purpose: string;
+  /** The database it matches against, which Settings can update: where it comes from and how large it is. */
+  database?: { from: string; size: string };
 }
 
 const DEFS = {
-  syft: { name: "Syft", variable: "KEELSON_SYFT", inImage: true, installUrl: "https://github.com/anchore/syft#installation" },
+  syft: {
+    name: "Syft",
+    variable: "KEELSON_SYFT",
+    inImage: true,
+    installUrl: "https://github.com/anchore/syft#installation",
+    purpose: "Software bill of materials for each repository",
+  },
   grype: {
     name: "Grype",
     variable: "KEELSON_GRYPE",
     inImage: true,
     installUrl: "https://github.com/anchore/grype#installation",
     note: "Its database, about 3 GB, is downloaded from Anchore into the data folder",
+    purpose: "Known vulnerabilities in dependencies",
+    database: { from: "Anchore (grype.anchore.io)", size: "about 3 GB" },
   },
-  grant: { name: "Grant", variable: "KEELSON_GRANT", inImage: true, installUrl: "https://github.com/anchore/grant#installation" },
+  grant: {
+    name: "Grant",
+    variable: "KEELSON_GRANT",
+    inImage: true,
+    installUrl: "https://github.com/anchore/grant#installation",
+    purpose: "Dependencies' licenses",
+  },
   trivy: {
     name: "Trivy",
     variable: "KEELSON_TRIVY",
     inImage: true,
     installUrl: "https://trivy.dev/latest/getting-started/installation/",
     note: "Its database, about 1.6 GB, is downloaded into the data folder",
+    purpose: "Packages, vulnerabilities and credentials in container images",
+    database: { from: "Aqua's public registries (mirror.gcr.io, ghcr.io)", size: "about 1.6 GB" },
   },
-  amass: { name: "Amass 5", variable: "KEELSON_AMASS", inImage: true, installUrl: "https://github.com/owasp-amass/amass#installation" },
+  amass: {
+    name: "Amass 5",
+    variable: "KEELSON_AMASS",
+    inImage: true,
+    installUrl: "https://github.com/owasp-amass/amass#installation",
+    purpose: "Sonar's subdomain discovery",
+  },
 } satisfies Record<string, ScannerTool>;
 
 export type ScannerToolKey = keyof typeof DEFS;
 export const SCANNER_TOOLS: Record<ScannerToolKey, ScannerTool> = DEFS;
 
 /** The data source key is a scanner's own (every provider names it the same: `syft`, `grype`, `trivy`…). */
+/** The scanners with a database Settings can update. */
+export const DATABASE_TOOLS = (Object.keys(DEFS) as ScannerToolKey[]).filter((k) => SCANNER_TOOLS[k].database);
+
 export const isScannerTool = (key: string | undefined): key is ScannerToolKey => !!key && Object.hasOwn(DEFS, key);
 
 /**

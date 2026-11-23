@@ -1,15 +1,29 @@
 // Instance-wide settings. Every control saves as soon as it changes, like the
 // switches on the Accounts and Checks pages; text fields save when they lose focus.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Banner, Button, Input, Link, Select, Switch, useKumoToastManager } from "@cloudflare/kumo";
-import { ArrowCircleUpIcon, CheckCircleIcon, InfoIcon, WarningIcon } from "@phosphor-icons/react";
-import { ago, api, link, ROLE_INFO, SCORED_SEVERITIES, SEVERITY_LABEL, useApi, type Settings, type UpdateStatus } from "../lib.ts";
+import { ArrowCircleUpIcon, ArrowSquareOutIcon, CheckCircleIcon, InfoIcon, WarningIcon } from "@phosphor-icons/react";
+import {
+  ago,
+  api,
+  link,
+  ROLE_INFO,
+  SCANNER_TOOLS,
+  SCORED_SEVERITIES,
+  SEVERITY_LABEL,
+  toolNeed,
+  useApi,
+  type ScannerRow,
+  type ScannersResponse,
+  type Settings,
+  type UpdateStatus,
+} from "../lib.ts";
 import { Card, FormGrid, Page, PageState, SettingRow, SettingRows } from "../components/ui.tsx";
 import { useShell } from "../shell.tsx";
 
 const TITLE = "Settings";
-const DESCRIPTION = "Scan schedule, history, how findings are tracked, and updates. These apply to every account.";
+const DESCRIPTION = "Scan schedule, history, how findings are tracked, updates, and the scanners Keelson runs. These apply to every account.";
 const UPGRADING_DOCS = "https://github.com/r4reetik/keelson/blob/main/docs/upgrading.md";
 const HOURS = Object.fromEntries(Array.from({ length: 24 }, (_, h) => [String(h), `${String(h).padStart(2, "0")}:00 UTC`]));
 type Save = (patch: Record<string, unknown>, label: string) => Promise<boolean>;
@@ -50,6 +64,7 @@ export function SettingsPage() {
         <LinksCard s={data} save={save} />
         <UpdatesCard s={data} save={save} locked={!editable} />
       </fieldset>
+      <ScannersCard editable={editable} />
     </Page>
   );
 }
@@ -360,5 +375,101 @@ function UpdatesCard({ s, save, locked }: { s: Settings; save: Save; locked: boo
         </SettingRows>
       </Card>
     </div>
+  );
+}
+
+/**
+ * The scanners Keelson runs, and the two vulnerability databases they match against. Scans keep those current on their
+ * own; Update now is for using the newest advisories at once. Only admins see the button.
+ */
+function ScannersCard({ editable }: { editable: boolean }) {
+  const { data, error, reload, setData } = useApi<ScannersResponse>("/api/scanners");
+  const toasts = useKumoToastManager();
+  const updating = !!data?.scanners.some((r) => r.database?.updating);
+  // While a database downloads, ask how it is going every few seconds; nothing is asked otherwise.
+  useEffect(() => {
+    if (!updating) return;
+    const timer = setInterval(() => void reload(), 3000);
+    return () => clearInterval(timer);
+  }, [updating, reload]);
+
+  const update = async (r: ScannerRow) => {
+    try {
+      setData(await api<ScannersResponse>(`/api/scanners/${r.key}/database`, { method: "POST", body: {} }));
+    } catch (e) {
+      toasts.add({ title: `Couldn't update ${r.name}'s database`, description: (e as Error).message, variant: "error" });
+    }
+  };
+
+  return (
+    <div id="scanners" className="scroll-mt-6">
+      <Card
+        title="Scanners"
+        description="The tools Keelson runs for dependencies, container images and Sonar. Scans keep Grype's and Trivy's vulnerability databases current on their own; update one here to match against the newest advisories on the next scan."
+      >
+        {error ? (
+          <p className="text-sm text-kumo-danger">Couldn't read the scanners: {error.message}</p>
+        ) : !data ? (
+          <p className="text-sm text-kumo-subtle">Reading the scanners…</p>
+        ) : (
+          <SettingRows>
+            {data.scanners.map((r) => (
+              <SettingRow
+                key={r.key}
+                end
+                title={r.name}
+                description={
+                  <span className="flex flex-col gap-1">
+                    <span>{r.purpose}</span>
+                    {r.installed ? (
+                      r.database && <DatabaseLine r={r} />
+                    ) : (
+                      <span>
+                        Needs {toolNeed(r.key, data.install)}.{" "}
+                        {data.install === "source" && (
+                          <Link href={SCANNER_TOOLS[r.key].installUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1">
+                            How to install {r.name} <ArrowSquareOutIcon />
+                          </Link>
+                        )}
+                      </span>
+                    )}
+                  </span>
+                }
+              >
+                <div className="flex items-center gap-3">
+                  <span className={r.installed ? "text-sm tabular-nums text-kumo-default" : "text-sm text-kumo-subtle"}>
+                    {r.installed ? (r.version ?? "Installed") : "Not installed"}
+                  </span>
+                  {editable && r.installed && r.database && (
+                    <Button size="sm" variant="secondary" loading={r.database.updating} onClick={() => update(r)}>
+                      {r.database.updating ? "Updating" : "Update now"}
+                    </Button>
+                  )}
+                </div>
+              </SettingRow>
+            ))}
+          </SettingRows>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/** When a scanner's database was built, where it comes from, and how the last update asked for here went. */
+function DatabaseLine({ r }: { r: ScannerRow }) {
+  const d = r.database!;
+  return (
+    <>
+      <span>
+        {d.builtAt ? `Database built ${ago(d.builtAt)}` : "No database yet: the first scan that needs it downloads it"}. It comes from {d.from}, {d.size}.
+      </span>
+      {d.updating ? (
+        <span>Downloading the newest database. Scans that need it wait until it is in place.</span>
+      ) : d.error ? (
+        <span className="text-kumo-danger">The update failed: {d.error}</span>
+      ) : d.updatedAt ? (
+        <span>Updated {ago(d.updatedAt)}.</span>
+      ) : null}
+    </>
   );
 }
