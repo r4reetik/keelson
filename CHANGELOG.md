@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.18.1
+
 - **The Docker image includes Anchore's Syft, Grype and Grant.** GitHub, GitLab and Gitea repositories get their software bill of materials, vulnerable and malicious packages and license findings without installing anything: pull the new image and scan again. Grype still downloads its vulnerability database (about 3 GB) into the data folder on the first scan. The image is larger for it, about 255 MB more.
 - **Data coverage says what a missing scanner needs where Keelson runs.** A source that comes from Syft, Grype, Grant, Trivy or Amass no longer says the platform reported it, or tells you to replace the platform's credential. In the Docker image it says whether the image includes the scanner; run from a clone, it says to install it on that machine and links to its install steps. The Overview's banner no longer blames the account's credential for a scanner that isn't installed, and a credential row names the platform's own credential (access key, GitHub App…) instead of "token".
 
