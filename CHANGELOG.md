@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.18.2
+
 - **Settings → Scanners shows the tools Keelson runs and updates their databases on request.** Each scanner (Syft, Grype, Grant, Trivy, Amass) is listed with its version, or what it needs when it isn't installed, and Grype's and Trivy's vulnerability databases with when they were built. Admins can update either with **Update now**: it downloads the newest database in the background, and a scan that needs it waits until it is in place. Scans still keep both current on their own.
 - **The Docker image includes Trivy and Amass too**, so every scanner Keelson runs comes with it: container images in your registries are scanned, and Sonar runs OWASP Amass on the entity's domains, without installing anything. Pull the new image and scan again. Trivy downloads its vulnerability database (about 1.6 GB) into the data folder on the first scan with images to read. The image is larger for it, about 265 MB more.
 - **The Dependencies page says what a missing scanner needs, too.** When a view has no SBOM because Syft, Grype or Grant couldn't run, the page said the scanner wasn't in the Docker image and told you to replace the credential; it now says the same as Data coverage: in the Docker image, that the image includes it, and from a clone, to install it on that machine. Other pages that show nothing for a source they couldn't read name the platform's own credential instead of "the credential".
